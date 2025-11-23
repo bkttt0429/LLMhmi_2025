@@ -4,9 +4,12 @@ import time
 import subprocess
 import serial
 from serial.tools import list_ports
+from PySide6.QtCore import QThread, QTimer # 為了處理非同步的 Port 重試
+import re
 import config  # 匯入設定檔
 
 class SerialManager:
+    """負責管理 Serial 連線、斷線、讀取與 Boot 訊號"""
     def __init__(self):
         self.ser = None
 
@@ -35,13 +38,16 @@ class SerialManager:
             self.ser = None
 
     def read_line(self):
-        """讀取一行資料 (Non-blocking)"""
-        if self.ser and self.ser.is_open and self.ser.in_waiting:
-            try:
-                return self.ser.readline().decode(errors="ignore").strip()
-            except:
-                pass
-        return None
+        """安全讀取一行資料 (處理 SerialException)"""
+        if not self.ser or not self.ser.is_open or not self.ser.in_waiting:
+            return None
+        try:
+            return self.ser.readline().decode(errors="ignore").strip()
+        except serial.SerialException as e:
+            # 處理 Port 被搶佔或斷線的錯誤
+            return f"SERIAL_ERROR:{e}"
+        except Exception:
+            return None
 
     def send_boot_signal(self, port):
         """發送強制 Boot 訊號"""
@@ -59,6 +65,7 @@ class SerialManager:
 
 # === 燒錄相關獨立函式 ===
 def prepare_sketch():
+    """準備 Arduino 檔案以供編譯"""
     if not os.path.exists(config.SOURCE_INO):
         return False, f"❌ 找不到 {config.SOURCE_INO}"
     if not os.path.exists(config.SKETCH_DIR):
@@ -68,11 +75,7 @@ def prepare_sketch():
     return True, "✅ Sketch 準備完成"
 
 def compile_and_upload(port, log_callback):
-    """
-    執行編譯與上傳
-    log_callback: 一個函式，用來接收並顯示 Log
-    """
-    # 1. 檢查 Core
+    """執行編譯與上傳"""
     log_callback("🔍 檢查 ESP32 核心...")
     check = subprocess.run(["arduino-cli", "core", "list"], capture_output=True, text=True, encoding="utf-8", errors="ignore")
     if "esp32:esp32" not in check.stdout:
@@ -80,14 +83,12 @@ def compile_and_upload(port, log_callback):
         subprocess.run(["arduino-cli", "core", "update-index", "--additional-urls", config.ESP32_URL])
         subprocess.run(["arduino-cli", "core", "install", "esp32:esp32", "--additional-urls", config.ESP32_URL])
 
-    # 2. 編譯
     log_callback("=== Compile (編譯中)... ===")
     comp = subprocess.run(["arduino-cli", "compile", "--fqbn", config.FQBN, config.SKETCH_DIR, "--additional-urls", config.ESP32_URL], capture_output=True, text=True, encoding="utf-8", errors="ignore")
     if comp.returncode != 0:
         log_callback("❌ compile 失敗:\n" + comp.stderr)
         return False
 
-    # 3. 上傳
     log_callback(f"=== Upload (上傳至 {port})... ===")
     upl = subprocess.run(
         ["arduino-cli", "upload", "-p", port, "--fqbn", config.FQBN, 
