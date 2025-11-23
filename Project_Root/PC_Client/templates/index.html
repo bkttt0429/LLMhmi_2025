@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TACTICAL COMMAND v14.0 RESPONSIVE</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'cyber-green': '#00ff9d',
+                        'cyber-black': '#050505',
+                        'cyber-dark': '#0a1010',
+                    },
+                    fontFamily: {
+                        'mono': ['"Share Tech Mono"', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+        
+        body {
+            background-color: #050505;
+            color: #00ff9d;
+            font-family: 'Share Tech Mono', monospace;
+            overflow-x: hidden; /* 防止水平捲動 */
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* --- Cyberpunk Visuals --- */
+        .cyber-border {
+            border: 1px solid #333;
+            box-shadow: 0 0 10px rgba(0, 255, 157, 0.1);
+            background: rgba(10, 20, 20, 0.85);
+            backdrop-filter: blur(4px);
+        }
+
+        .scan-line {
+            width: 100%; height: 100%;
+            background: linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.3) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+            position: absolute;
+            z-index: 10;
+        }
+
+        /* --- Buttons (Responsive Text) --- */
+        .btn-cy {
+            border: 1px solid #00ff9d;
+            color: #00ff9d;
+            background: rgba(0, 20, 10, 0.6);
+            transition: all 0.1s;
+            display: flex; justify-content: center; align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+        .btn-cy:hover { background: #00ff9d; color: #000; box-shadow: 0 0 15px #00ff9d; }
+        .btn-cy:active { transform: scale(0.95); }
+        .btn-active { background: #00ff9d; color: #000; box-shadow: 0 0 15px #00ff9d; }
+
+        .btn-ai { border-color: #d946ef; color: #d946ef; }
+        .btn-ai:hover { background: #d946ef; color: #000; box-shadow: 0 0 15px #d946ef; }
+        .btn-ai-active { background: #d946ef; color: #000; box-shadow: 0 0 20px #d946ef; border-color: #fff; }
+
+        /* --- Radar Animation --- */
+        @keyframes radar-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .radar-sweep {
+            background: conic-gradient(from 0deg, transparent 0deg, rgba(0, 255, 157, 0.5) 360deg);
+            animation: radar-spin 2s linear infinite;
+        }
+        
+        .blip {
+            position: absolute;
+            width: 8px; height: 8px;
+            background: #ef4444;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #ef4444;
+            animation: fadeOut 1.5s forwards;
+        }
+        @keyframes fadeOut { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(2); } }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col p-2 md:p-4 gap-4 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
+
+    <!-- Header -->
+    <header class="flex flex-col md:flex-row justify-between items-center md:items-end border-b border-green-500/30 pb-2 shrink-0 gap-2">
+        <div class="text-center md:text-left">
+            <h1 class="text-2xl md:text-4xl font-bold tracking-widest text-green-400 drop-shadow-[0_0_5px_rgba(0,255,157,0.8)]">
+                SHIM INTERFACE <span class="text-xs text-gray-500 block md:inline">v14.0</span>
+            </h1>
+            <div class="text-[10px] md:text-xs text-gray-400 tracking-wider hidden md:block">SECURE LINK ESTABLISHED // PYTHON BACKEND ACTIVE</div>
+        </div>
+        <div id="clock" class="text-lg md:text-2xl text-green-600 font-mono">00:00:00</div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <!-- Mobile: Flex Col | Desktop: Grid 12 Cols -->
+    <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0">
+        
+        <!-- Left: Video Feed -->
+        <!-- Mobile: Full width | Desktop: 8 cols -->
+        <div class="col-span-1 lg:col-span-8 flex flex-col gap-2 relative cyber-border rounded p-1 h-[50vh] lg:h-auto">
+            <!-- Status Bar -->
+            <div class="flex justify-between px-2 text-[10px] md:text-xs text-gray-500 font-bold items-center">
+                <div class="flex gap-2 items-center flex-wrap">
+                    <span class="hidden sm:inline">TARGET IP:</span>
+                    <input type="text" id="ip-input" class="bg-black text-green-400 border border-green-900 px-1 w-24 md:w-32 focus:outline-none focus:border-green-500 text-xs" placeholder="Waiting...">
+                    <button onclick="setManualIP()" class="text-[10px] border border-green-700 px-2 hover:bg-green-900">SET</button>
+                </div>
+                <div class="flex gap-2 md:gap-4 text-[10px] md:text-xs">
+                    <span>AI: <span id="ai-status-text" class="text-gray-600">OFF</span></span>
+                    <span>FEED: <span class="text-green-400 animate-pulse">LIVE</span></span>
+                </div>
+            </div>
+            
+            <!-- Video Area -->
+            <div class="flex-1 bg-black relative overflow-hidden flex items-center justify-center border border-gray-800 group">
+                <div class="scan-line"></div>
+                <img src="/video_feed" class="w-full h-full object-contain" onerror="this.style.display='none'; document.getElementById('no-sig').style.display='flex'">
+                
+                <div id="no-sig" class="hidden absolute inset-0 flex-col items-center justify-center bg-black/80 z-20 p-4 text-center">
+                    <div class="text-2xl md:text-4xl text-red-500 font-bold border-4 border-red-500 p-4 md:p-6 animate-pulse">NO SIGNAL</div>
+                    <div class="text-red-400 mt-2 text-xs md:text-sm">CHECK CONNECTION OR SERIAL PORT</div>
+                </div>
+                
+                <!-- Crosshair Overlay -->
+                <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
+                    <div class="w-10 h-10 md:w-[40px] md:h-[40px] border border-green-500 rounded-full absolute"></div>
+                    <div class="w-full md:w-[200px] h-[1px] bg-green-500"></div>
+                    <div class="h-full md:h-[200px] w-[1px] bg-green-500 absolute"></div>
+                </div>
+            </div>
+
+            <!-- Log Console (Desktop Only or Collapsible) -->
+            <div id="log-box" class="hidden md:block h-24 md:h-32 bg-black border-t border-gray-700 p-2 font-mono text-[10px] md:text-xs overflow-y-auto text-gray-400 leading-tight">
+                <div class="text-green-700">> Initializing Neural Net...</div>
+            </div>
+        </div>
+
+        <!-- Right: Controls Dashboard -->
+        <!-- Mobile: Stacked below video | Desktop: 4 cols -->
+        <div class="col-span-1 lg:col-span-4 flex flex-col gap-4 pb-4 lg:pb-0">
+            
+            <!-- 1. AI Control (Always Visible) -->
+            <div class="cyber-border p-2 flex flex-col gap-2 md:col-span-1 order-1">
+                <div class="flex justify-between items-center px-2">
+                    <div class="text-[10px] text-purple-400 tracking-widest">AI OPTICS</div>
+                    <div class="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
+                </div>
+                <button id="btn-ai" class="btn-cy btn-ai w-full py-3 md:py-2 rounded text-sm md:text-base tracking-widest font-bold" onclick="toggleAI()">
+                    ACTIVATE HUD
+                </button>
+            </div>
+
+            <!-- Control Grid for Mobile (Auto-layout) -->
+            <div class="grid grid-cols-2 lg:grid-cols-1 gap-4 order-2">
+                
+                <!-- 2. Radar Panel -->
+                <div class="cyber-border p-2 md:p-4 flex flex-col items-center justify-center relative aspect-square lg:aspect-auto">
+                    <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">SONAR</div>
+                    
+                    <!-- Responsive Radar Size -->
+                    <div class="w-32 h-32 md:w-40 md:h-40 lg:w-48 lg:h-48 rounded-full border border-green-900 relative overflow-hidden bg-black/80 shadow-[inset_0_0_20px_rgba(0,50,0,0.5)]">
+                        <div class="absolute inset-0 rounded-full border border-green-500/20 scale-33"></div>
+                        <div class="absolute inset-0 rounded-full border border-green-500/20 scale-66"></div>
+                        <div class="absolute w-full h-[1px] top-1/2 bg-green-500/20"></div>
+                        <div class="absolute h-full w-[1px] left-1/2 bg-green-500/20"></div>
+                        <div class="absolute inset-0 rounded-full radar-sweep origin-center"></div>
+                        <div id="radar-dots" class="absolute inset-0"></div>
+                    </div>
+                    
+                    <div id="dist-val" class="text-xl md:text-2xl font-bold mt-2 text-green-400">--.-- CM</div>
+                </div>
+
+                <!-- 3. Manual Controls -->
+                <div class="cyber-border p-4 flex flex-col justify-center gap-4 relative aspect-square lg:aspect-auto">
+                    <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">MANUAL</div>
+
+                    <!-- WASD Grid -->
+                    <div class="grid grid-cols-3 gap-2 w-full max-w-[180px] md:max-w-[200px] mx-auto mt-2">
+                        <div></div>
+                        <button class="btn-cy h-10 md:h-12 rounded text-sm md:text-base" onmousedown="send('F')" onmouseup="send('S')" ontouchstart="send('F')" ontouchend="send('S')" id="btn-w">W</button>
+                        <div></div>
+                        
+                        <button class="btn-cy h-10 md:h-12 rounded text-sm md:text-base" onmousedown="send('L')" onmouseup="send('S')" ontouchstart="send('L')" ontouchend="send('S')" id="btn-a">A</button>
+                        <button class="btn-cy h-10 md:h-12 rounded text-sm md:text-base" onmousedown="send('S')" ontouchstart="send('S')" id="btn-s">S</button>
+                        <button class="btn-cy h-10 md:h-12 rounded text-sm md:text-base" onmousedown="send('R')" onmouseup="send('S')" ontouchstart="send('R')" ontouchend="send('S')" id="btn-d">D</button>
+                        
+                        <div></div>
+                        <button class="btn-cy h-10 md:h-12 rounded text-sm md:text-base" onmousedown="send('B')" onmouseup="send('S')" ontouchstart="send('B')" ontouchend="send('S')" id="btn-x">X</button>
+                        <div></div>
+                    </div>
+
+                    <button class="btn-cy w-full py-2 rounded tracking-widest text-xs md:text-sm mt-auto" onclick="toggleLight()">LIGHTS</button>
+                </div>
+            </div>
+
+            <!-- 4. Status Footer (Order 3) -->
+            <div class="cyber-border p-2 md:p-3 text-[10px] md:text-xs flex flex-col gap-1 order-3">
+                <div class="flex justify-between">
+                    <span class="text-gray-500">SERIAL PORT:</span>
+                    <span id="port-val" class="text-yellow-500 font-bold truncate max-w-[100px]">SEARCHING...</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-500">LINK STATUS:</span>
+                    <span class="text-green-500 font-bold animate-pulse">ONLINE</span>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // === Core Logic ===
+        function log(msg) {
+            const box = document.getElementById('log-box');
+            // Mobile optimization: don't log if hidden
+            if(box.offsetParent === null) return; 
+            
+            const time = new Date().toLocaleTimeString('en-GB');
+            const d = document.createElement('div');
+            d.innerHTML = `<span class="text-gray-600">[${time}]</span> ${msg}`;
+            box.appendChild(d);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        async function send(cmd) {
+            // Prevent default touch actions (zooming/scrolling)
+            if(event && event.cancelable) event.preventDefault();
+            
+            try {
+                await fetch('/api/control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cmd: cmd })
+                });
+                highlightKey(cmd);
+            } catch(e) { console.error(e); }
+        }
+
+        function setManualIP() {
+            const ip = document.getElementById('ip-input').value;
+            if(ip) {
+                fetch('/api/set_ip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: ip })
+                });
+                log(`Manual IP Set: ${ip}`);
+                setTimeout(() => {
+                    const img = document.querySelector('img');
+                    const src = img.src;
+                    img.src = '';
+                    img.src = '/video_feed?' + new Date().getTime();
+                }, 1000);
+            }
+        }
+
+        // === AI Toggle ===
+        async function toggleAI() {
+            const btn = document.getElementById('btn-ai');
+            const statusText = document.getElementById('ai-status-text');
+            
+            btn.innerText = "INITIALIZING...";
+            btn.disabled = true;
+            
+            try {
+                const res = await fetch('/api/toggle_ai', { method: 'POST' });
+                const data = await res.json();
+                
+                btn.disabled = false;
+                if(data.status === 'error') {
+                    log(`AI Error: ${data.msg}`);
+                    btn.innerText = "ACTIVATE HUD";
+                    return;
+                }
+
+                if(data.ai_enabled) {
+                    btn.classList.add('btn-ai-active');
+                    btn.innerText = "DEACTIVATE HUD";
+                    statusText.innerText = "ACTIVE";
+                    statusText.className = "text-purple-400 font-bold animate-pulse";
+                    log("Visual Recognition System: ONLINE");
+                } else {
+                    btn.classList.remove('btn-ai-active');
+                    btn.innerText = "ACTIVATE HUD";
+                    statusText.innerText = "OFFLINE";
+                    statusText.className = "text-gray-600";
+                    log("Visual Recognition System: STANDBY");
+                }
+            } catch(e) {
+                log("Failed to toggle AI");
+                btn.innerText = "ACTIVATE HUD";
+                btn.disabled = false;
+            }
+        }
+
+        let lightState = false;
+        function toggleLight() {
+            lightState = !lightState;
+            send(lightState ? 'W' : 'w');
+            log(`LIGHTS: ${lightState ? 'ON' : 'OFF'}`);
+        }
+
+        // === Polling Loop ===
+        setInterval(async () => {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                
+                if(data.ip && document.getElementById('ip-input').value === "" || document.getElementById('ip-input').value === "Waiting...") {
+                    document.getElementById('ip-input').value = data.ip;
+                }
+                
+                const portEl = document.getElementById('port-val');
+                portEl.innerText = data.port || "DISCONNECTED";
+                portEl.className = data.port ? "text-green-500 font-bold truncate max-w-[100px]" : "text-red-500 font-bold truncate max-w-[100px]";
+
+                const dist = parseFloat(data.dist);
+                if (!isNaN(dist)) {
+                    document.getElementById('dist-val').innerText = dist.toFixed(1) + " CM";
+                    if(dist > 0 && dist < 50) addRadarBlip(dist);
+                }
+                
+            } catch(e) {}
+        }, 500);
+
+        // === Visual Effects ===
+        function addRadarBlip(dist) {
+            const container = document.getElementById('radar-dots');
+            const blip = document.createElement('div');
+            const r = (dist / 50) * 45; 
+            const angle = (Math.random() * 90 + 225) * (Math.PI / 180); 
+            const x = 50 + r * Math.cos(angle);
+            const y = 50 + r * Math.sin(angle);
+            blip.className = 'blip';
+            blip.style.left = x + '%';
+            blip.style.top = y + '%';
+            container.appendChild(blip);
+            setTimeout(() => blip.remove(), 1500);
+        }
+
+        function highlightKey(cmd) {
+            const map = {'F':'btn-w', 'L':'btn-a', 'S':'btn-s', 'R':'btn-d', 'B':'btn-x'};
+            const id = map[cmd];
+            if(id) {
+                const btn = document.getElementById(id);
+                btn.classList.add('btn-active');
+                setTimeout(() => btn.classList.remove('btn-active'), 150);
+            }
+        }
+
+        // === Keyboard Controls ===
+        document.addEventListener('keydown', (e) => {
+            if(e.repeat) return;
+            const k = e.key.toUpperCase();
+            const map = {'W':'F', 'A':'L', 'S':'S', 'D':'R', 'X':'B', ' ':'S'};
+            if(map[k]) send(map[k]);
+        });
+
+        document.addEventListener('keyup', (e) => {
+            const k = e.key.toUpperCase();
+            if(['W','A','D','X'].includes(k)) send('S');
+        });
+
+        setInterval(() => {
+            document.getElementById('clock').innerText = new Date().toLocaleTimeString();
+        }, 1000);
+    </script>
+</body>
+</html>
