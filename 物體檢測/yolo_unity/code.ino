@@ -117,11 +117,15 @@ bool init_camera() {
   config.pixel_format = PIXFORMAT_JPEG;
 
   // PSRAM 設定
+// PSRAM 設定 (N16R8 專屬優化)
   if (psramFound()) {
-    config.frame_size   = FRAMESIZE_VGA;          // 640x480
-    config.jpeg_quality = 12;                     // 0 ~ 63（小=好）
-    config.fb_count     = 2;                      // 雙 buffer
-    config.fb_location  = CAMERA_FB_IN_PSRAM;     // 放 PSRAM
+    config.frame_size   = FRAMESIZE_VGA;    // 6handle_stream()40x480
+    config.jpeg_quality = 14;               // [優化] 改為 14-20 (原本12)，數字越大檔案越小，FPS越高
+    config.fb_count     = 3;                // [優化] 改為 3 或 4 (原本2)，利用 8MB PSRAM 做三倍緩衝
+    config.fb_location  = CAMERA_FB_IN_PSRAM;
+    
+    // [優化] 嘗試提升 XCLK 到 24MHz (若畫面出現條紋或不穩，請改回 20000000)
+    config.xclk_freq_hz = 24000000;
   } else {
     config.frame_size   = FRAMESIZE_QQVGA;        // 160x120，保險一點
     config.jpeg_quality = 15;
@@ -212,17 +216,23 @@ void handle_capture() {
 void handle_stream() {
   WiFiClient client = server.client();
 
+  // [優化] 啟用 TCP NoDelay，減少網路延遲
+  client.setNoDelay(true);
+
   String response =
     "HTTP/1.1 200 OK\r\n"
     "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
-    "Cache-Control: no-cache\r\n"
-    "Pragma: no-cache\r\n"
+    "Access-Control-Allow-Origin: *\r\n"  // 允許跨域，方便瀏覽器測試
     "Connection: close\r\n"
     "\r\n";
   client.print(response);
 
   isStreaming = true;
-  Serial.println("[INFO] 開始 MJPEG 串流...");
+  Serial.println("[INFO] 開始高速 MJPEG 串流...");
+
+  // 用來計算 FPS
+  long lastTime = millis();
+  int frameCount = 0;
 
   while (client.connected()) {
     camera_fb_t * fb = esp_camera_fb_get();
@@ -231,21 +241,38 @@ void handle_stream() {
       break;
     }
 
+    // 傳送標頭
     client.print("--frame\r\n");
     client.print("Content-Type: image/jpeg\r\n");
     client.print("Content-Length: " + String(fb->len) + "\r\n\r\n");
+    
+    // 傳送影像數據
+    // ESP32-S3 的 WiFi stack 處理大封包能力不錯，直接 write 即可
     client.write(fb->buf, fb->len);
+    
+    // 傳送結尾
     client.print("\r\n");
 
+    // 釋放 buffer 給下一幀使用
     esp_camera_fb_return(fb);
 
-    delay(30);  // 控制串流速度
+    // [優化] 移除 delay(30); 讓它全速跑！
+    // 只有在過熱或需要限制頻寬時才加 delay
+    
+    // --- 簡易 FPS 計算 (每秒印出一次) ---
+    frameCount++;
+    long now = millis();
+    if (now - lastTime > 1000) {
+      float fps = frameCount * 1000.0 / (now - lastTime);
+      Serial.printf("[Stream] FPS: %.2f / Size: %u bytes\n", fps, fb->len);
+      lastTime = now;
+      frameCount = 0;
+    }
   }
 
   isStreaming = false;
   Serial.println("[INFO] 串流結束。");
 }
-
 // ============= Not Found =============
 void handle_not_found() {
   String message = "錯誤: 找不到此路徑\n\n";

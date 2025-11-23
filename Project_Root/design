@@ -1,0 +1,15 @@
+Project_Root/
+│
+├── Firmware/ (ESP32 Arduino 代碼)
+│   ├── esp32_main.ino         # 主程式 (setup, loop)
+│   ├── camera_config.h        # 相機腳位定義與初始化設定
+│   ├── network.h              # WiFi 與 WebServer 處理
+│   └── ultrasonic.h           # [未來加入] 超聲波測距邏輯
+│
+└── PC_Client/ (Python 電腦端代碼)
+    ├── main.py                # 程式入口 (啟動 GUI)
+    ├── gui.py                 # 介面佈局 (按鈕、視窗設定)
+    ├── video_thread.py        # 負責抓取串流影像 (QThread)
+    ├── serial_worker.py       # 負責 Serial 通訊
+    ├── ai_detector.py         # [未來加入] YOLO/物體檢測邏輯
+    └── config.py              # 全域參數 (解析度、URL、Port)
