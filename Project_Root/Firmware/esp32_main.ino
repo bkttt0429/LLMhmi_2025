@@ -1,6 +1,9 @@
 #include "camera_config.h"
 #include "network.h"
-#include "ultrasonic.h" // 匯入超聲波模組
+#include "ultrasonic.h"
+
+unsigned long lastDistanceReport = 0;
+const unsigned long REPORT_INTERVAL = 500; // 每 500ms 回報一次距離
 
 void setup() {
   Serial.begin(115200);
@@ -8,21 +11,41 @@ void setup() {
   // 初始化各模組
   init_camera();
   init_wifi();
-  init_ultrasonic(); // 初始化超聲波腳位
+  init_ultrasonic();
   
   start_web_server();
+  
+  Serial.println("=== SYSTEM READY ===");
+  Serial.println("Ultrasonic sensor initialized on GPIO 21");
 }
 
 void loop() {
   server.handleClient();
   
-  // 讀取超聲波距離
-  float dist = get_distance();
+  unsigned long now = millis();
   
-  // 如果距離過近，可以做些什麼 (例如閃燈)
-  if (dist > 0 && dist < 10) {
-    Serial.printf("警告：障礙物過近 %.1f cm\n", dist);
+  // 定期回報距離數據
+  if (now - lastDistanceReport >= REPORT_INTERVAL) {
+    lastDistanceReport = now;
+    
+    float dist = get_distance();
+    
+    if (dist > 0) {
+      // 發送標準格式給 Python 後端
+      Serial.printf("DIST:%.1f\n", dist);
+      
+      // 警告訊息
+      if (dist < 10) {
+        Serial.printf("WARNING: Obstacle too close! %.1f cm\n", dist);
+      } else if (dist < 20) {
+        Serial.printf("CAUTION: Object detected at %.1f cm\n", dist);
+      }
+    } else {
+      // 感測器讀取失敗
+      Serial.println("DIST:-1.0");
+      Serial.println("ERROR: Ultrasonic sensor timeout");
+    }
   }
   
   delay(1);
-}
+} 

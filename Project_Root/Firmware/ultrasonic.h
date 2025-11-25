@@ -1,25 +1,38 @@
 #ifndef ULTRASONIC_H
 #define ULTRASONIC_H
 
-#define TRIG_PIN 14  // 假設接在 GPIO 14
-#define ECHO_PIN 13  // 假設接在 GPIO 13
+#include <Arduino.h>
+
+// --- 修改這裡 ---
+// 改用 GPIO 21，避開 ESP32-S3-CAM 的相機腳位 (IO13 是 PCLK)
+#define SIG_PIN 21 
 
 void init_ultrasonic() {
-    pinMode(TRIG_PIN, OUTPUT);
-    pinMode(ECHO_PIN, INPUT);
+    pinMode(SIG_PIN, INPUT);
 }
 
 float get_distance() {
-    digitalWrite(TRIG_PIN, LOW);
+    long duration;
+    float distance;
+
+    // 1. 發送 Trigger
+    pinMode(SIG_PIN, OUTPUT);
+    digitalWrite(SIG_PIN, LOW);
     delayMicroseconds(2);
-    digitalWrite(TRIG_PIN, HIGH);
+    digitalWrite(SIG_PIN, HIGH);
     delayMicroseconds(10);
-    digitalWrite(TRIG_PIN, LOW);
+    digitalWrite(SIG_PIN, LOW);
 
-    long duration = pulseIn(ECHO_PIN, HIGH, 30000); // 30ms timeout
-    if (duration == 0) return -1; // 超時
+    // 2. 接收 Echo
+    pinMode(SIG_PIN, INPUT);
+    duration = pulseIn(SIG_PIN, HIGH, 30000); // 30ms timeout
 
-    return duration * 0.034 / 2;
+    if (duration == 0) {
+        return -1.0; 
+    }
+
+    distance = duration * 0.034 / 2;
+    return distance;
 }
 
-#endif
+#endif  
