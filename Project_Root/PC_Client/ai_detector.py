@@ -3,6 +3,12 @@ import time
 import numpy as np
 import torch
 
+# === CUDA 效能優化 ===
+if torch.cuda.is_available():
+    torch.backends.cudnn.benchmark = True  # 自動尋找最佳卷積演算法
+    torch.backends.cudnn.deterministic = False  # 允許非確定性演算法以提升速度
+    print("✅ CUDA cuDNN 加速已啟用")
+
 # 嘗試匯入 YOLO
 try:
     from ultralytics import YOLO
@@ -12,7 +18,7 @@ except ImportError:
     YOLO_AVAILABLE = False
 
 class ObjectDetector:
-    def __init__(self, model_path='./yolov13x.pt'):
+    def __init__(self, model_path='./yolov8n.pt'):
         self.model = None
         self.enabled = False
         self.frame_count = 0
@@ -42,15 +48,26 @@ class ObjectDetector:
             device = 'cuda'
             gpu_name = torch.cuda.get_device_name(0)
             gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            compute_capability = torch.cuda.get_device_capability(0)
+            
             print(f"🚀 AI Device: NVIDIA CUDA")
             print(f"   └─ GPU: {gpu_name}")
             print(f"   └─ VRAM: {gpu_memory:.1f} GB")
             print(f"   └─ CUDA Version: {torch.version.cuda}")
+            print(f"   └─ Compute Capability: {compute_capability[0]}.{compute_capability[1]}")
+            print(f"   └─ cuDNN Benchmark: {'Enabled' if torch.backends.cudnn.benchmark else 'Disabled'}")
             
             # 根據 VRAM 調整批次大小建議
             if gpu_memory < 4:
                 print("   └─ ⚠️ 低 VRAM 檢測，建議使用 yolov8n.pt")
                 self.input_size = 320
+            elif gpu_memory >= 8:
+                print("   └─ ✅ 充足 VRAM，可使用更大模型")
+                self.input_size = 640
+            
+            # 清空 GPU 快取
+            torch.cuda.empty_cache()
+            print("   └─ GPU 快取已清空")
             
         elif torch.backends.mps.is_available():
             device = 'mps'
@@ -282,9 +299,41 @@ class ObjectDetector:
             return {"fps": 0, "frames": 0}
         
         avg_fps = self.frame_count / self.total_inference_time if self.total_inference_time > 0 else 0
-        return {
+        
+        stats = {
             "fps": avg_fps,
             "frames": self.frame_count,
             "device": self.device,
             "model": str(self.model.model_name) if hasattr(self.model, 'model_name') else "unknown"
         }
+        
+        # GPU 專屬資訊
+        if self.device == 'cuda' and torch.cuda.is_available():
+            stats.update({
+                "gpu_name": torch.cuda.get_device_name(0),
+                "gpu_memory_allocated": f"{torch.cuda.memory_allocated(0) / 1024**2:.1f} MB",
+                "gpu_memory_reserved": f"{torch.cuda.memory_reserved(0) / 1024**2:.1f} MB",
+                "cudnn_benchmark": torch.backends.cudnn.benchmark
+            })
+        
+        return stats
+    
+    def optimize_for_speed(self):
+        """極速模式優化"""
+        print("[AI] 🚀 啟用極速模式...")
+        self.conf_th = 0.5  # 提高閾值減少誤檢
+        self.input_size = 320  # 降低輸入解析度
+        self.process_every_n = 1  # 不跳幀
+        
+        if self.device == 'cuda':
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cudnn.deterministic = False
+            print("[AI] ✅ CUDA 加速優化完成")
+    
+    def optimize_for_accuracy(self):
+        """精確模式優化"""
+        print("[AI] 🎯 啟用精確模式...")
+        self.conf_th = 0.3  # 降低閾值提高召回率
+        self.input_size = 640  # 提高輸入解析度
+        self.process_every_n = 1  # 不跳幀
+        print("[AI] ✅ 精確模式設定完成")
