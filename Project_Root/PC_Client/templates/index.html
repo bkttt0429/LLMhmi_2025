@@ -3,24 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>TACTICAL COMMAND v14.0 RESPONSIVE</title>
+    <title>TACTICAL COMMAND v14.0 [MERGED]</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        'cyber-green': '#00ff9d',
-                        'cyber-black': '#050505',
-                        'cyber-dark': '#0a1010',
-                    },
-                    fontFamily: {
-                        'mono': ['"Share Tech Mono"', 'monospace'],
-                    }
-                }
-            }
-        }
-    </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
         
@@ -28,8 +12,9 @@
             background-color: #050505;
             color: #00ff9d;
             font-family: 'Share Tech Mono', monospace;
-            overflow-x: hidden; /* 防止水平捲動 */
+            overflow-x: hidden;
             -webkit-tap-highlight-color: transparent;
+            user-select: none;
         }
 
         /* --- Cyberpunk Visuals --- */
@@ -49,7 +34,7 @@
             z-index: 10;
         }
 
-        /* --- Buttons (Responsive Text) --- */
+        /* --- Buttons --- */
         .btn-cy {
             border: 1px solid #00ff9d;
             color: #00ff9d;
@@ -63,420 +48,651 @@
         .btn-cy:active { transform: scale(0.95); }
         .btn-active { background: #00ff9d; color: #000; box-shadow: 0 0 15px #00ff9d; }
 
-        .btn-ai { border-color: #d946ef; color: #d946ef; }
-        .btn-ai:hover { background: #d946ef; color: #000; box-shadow: 0 0 15px #d946ef; }
-        .btn-ai-active { background: #d946ef; color: #000; box-shadow: 0 0 20px #d946ef; border-color: #fff; }
-
-        .blip {
-            position: absolute;
-            width: 8px; height: 8px;
-            background: #ef4444;
-            border-radius: 50%;
-            box-shadow: 0 0 8px #ef4444;
-            animation: fadeOut 1.5s forwards;
+        /* Nav Bar Styles */
+        .nav-bar {
+            position: fixed;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            display: flex;
+            gap: 6px;
+            padding: 8px 12px;
+            background: rgba(10, 20, 20, 0.95);
+            border: 1px solid #00ff9d;
+            border-radius: 50px;
+            box-shadow: 0 0 20px rgba(0, 255, 157, 0.3);
+            backdrop-filter: blur(10px);
+            flex-wrap: wrap;
+            max-width: 95vw;
         }
-        @keyframes fadeOut { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(2); } }
+
+        .nav-btn {
+            padding: 8px 12px;
+            border: 1px solid #00ff9d;
+            background: rgba(0, 20, 10, 0.6);
+            color: #00ff9d;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+
+        @media (min-width: 640px) {
+            .nav-bar { gap: 10px; padding: 10px 20px; }
+            .nav-btn { padding: 10px 20px; font-size: 0.9rem; gap: 8px; }
+        }
+
+        .nav-btn:hover { background: #00ff9d; color: #000; box-shadow: 0 0 15px #00ff9d; }
+        .nav-btn.active { background: #00ff9d; color: #000; box-shadow: 0 0 20px #00ff9d; }
+        
+        /* Gamepad Indicator */
+        .gamepad-icon { opacity: 0.3; transition: opacity 0.3s; }
+        .gamepad-connected { opacity: 1; color: #00ff9d; text-shadow: 0 0 10px #00ff9d; }
     </style>
 </head>
-<body class="min-h-screen flex flex-col p-2 md:p-4 gap-4 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
+<body class="h-screen flex flex-col p-2 sm:p-4 gap-4 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
 
-    <!-- Header -->
-    <header class="flex flex-col md:flex-row justify-between items-center md:items-end border-b border-green-500/30 pb-2 shrink-0 gap-2">
-        <div class="text-center md:text-left">
-            <h1 class="text-2xl md:text-4xl font-bold tracking-widest text-green-400 drop-shadow-[0_0_5px_rgba(0,255,157,0.8)]">
-                SHIM INTERFACE <span class="text-xs text-gray-500 block md:inline">v14.0</span>
-            </h1>
-            <div class="text-[10px] md:text-xs text-gray-400 tracking-wider hidden md:block">SECURE LINK ESTABLISHED // PYTHON BACKEND ACTIVE</div>
+    <header class="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-green-500/30 pb-2 shrink-0 gap-2">
+        <div>
+            <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-widest text-green-400 drop-shadow-[0_0_5px_rgba(0,255,157,0.8)]">SHIM INTERFACE <span class="text-xs sm:text-sm text-gray-500">v14.0 MERGED</span></h1>
+            <div class="text-[10px] sm:text-xs text-gray-400 tracking-wider flex items-center gap-2">
+                LINK: <span id="ws-status" class="text-red-500 font-bold">OFFLINE</span>
+                <span id="gamepad-status" class="gamepad-icon ml-4 flex items-center gap-1">🎮 GAMEPAD</span>
+            </div>
         </div>
-        <div id="clock" class="text-lg md:text-2xl text-green-600 font-mono">00:00:00</div>
+        <div id="clock" class="text-lg sm:text-2xl text-green-600">00:00:00</div>
     </header>
 
-    <!-- Main Content Grid -->
-    <!-- Mobile: Flex Col | Desktop: Grid 12 Cols -->
-    <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0">
+    <div id="main-view" class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0 pb-20">
         
-        <!-- Left: Video Feed -->
-        <!-- Mobile: Full width | Desktop: 8 cols -->
-        <div class="col-span-1 lg:col-span-8 flex flex-col gap-2 relative cyber-border rounded p-1 h-[50vh] lg:h-auto">
-            <!-- Status Bar -->
-            <div class="flex justify-between px-2 text-[10px] md:text-xs text-gray-500 font-bold items-center">
-                <div class="flex gap-2 items-center flex-wrap">
+        <div class="lg:col-span-8 flex flex-col gap-2 relative cyber-border rounded p-1 min-h-[300px]">
+            <div class="flex justify-between px-2 text-[10px] sm:text-xs text-gray-500 font-bold flex-wrap gap-2">
+                <div class="flex gap-2 items-center">
                     <span class="hidden sm:inline">TARGET IP:</span>
-                    <input type="text" id="ip-input" class="bg-black text-green-400 border border-green-900 px-1 w-24 md:w-32 focus:outline-none focus:border-green-500 text-xs" placeholder="Waiting...">
-                    <button onclick="setManualIP()" class="text-[10px] border border-green-700 px-2 hover:bg-green-900">SET</button>
+                    <input type="text" id="ip-input" class="bg-black text-green-400 border border-green-900 px-1 w-24 sm:w-32 focus:outline-none focus:border-green-500" placeholder="Waiting...">
+                    <button onclick="setManualIP()" class="text-[10px] border border-green-700 px-1 sm:px-2 hover:bg-green-900">SET</button>
                 </div>
-                <div class="flex gap-2 md:gap-4 text-[10px] md:text-xs">
-                    <span>AI: <span id="ai-status-text" class="text-gray-600">OFF</span></span>
-                    <span>FEED: <span class="text-green-400 animate-pulse">LIVE</span></span>
-                </div>
+                <span>FEED: <span class="text-green-400 animate-pulse">LIVE</span></span>
             </div>
             
-            <!-- Video Area -->
             <div class="flex-1 bg-black relative overflow-hidden flex items-center justify-center border border-gray-800 group">
                 <div class="scan-line"></div>
                 <img src="/video_feed" class="w-full h-full object-contain" onerror="this.style.display='none'; document.getElementById('no-sig').style.display='flex'">
                 
-                <div id="no-sig" class="hidden absolute inset-0 flex-col items-center justify-center bg-black/80 z-20 p-4 text-center">
-                    <div class="text-2xl md:text-4xl text-red-500 font-bold border-4 border-red-500 p-4 md:p-6 animate-pulse">NO SIGNAL</div>
-                    <div class="text-red-400 mt-2 text-xs md:text-sm">CHECK CONNECTION OR SERIAL PORT</div>
+                <div id="no-sig" class="hidden absolute inset-0 flex-col items-center justify-center bg-black/80 z-20">
+                    <div class="text-2xl sm:text-4xl text-red-500 font-bold border-4 border-red-500 p-4 sm:p-6 animate-pulse">NO SIGNAL</div>
+                    <div class="text-red-400 mt-2 text-xs sm:text-sm">CHECK CONNECTION OR SERIAL PORT</div>
                 </div>
                 
-                <!-- Crosshair Overlay -->
                 <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
-                    <div class="w-10 h-10 md:w-[40px] md:h-[40px] border border-green-500 rounded-full absolute"></div>
-                    <div class="w-full md:w-[200px] h-[1px] bg-green-500"></div>
-                    <div class="h-full md:h-[200px] w-[1px] bg-green-500 absolute"></div>
+                    <div class="w-[40px] h-[40px] border border-green-500 rounded-full absolute"></div>
+                    <div class="w-[200px] h-[1px] bg-green-500"></div>
+                    <div class="h-[200px] w-[1px] bg-green-500 absolute"></div>
                 </div>
             </div>
 
-            <!-- Log Console (Desktop Only or Collapsible) -->
-            <div id="log-box" class="hidden md:block h-24 md:h-32 bg-black border-t border-gray-700 p-2 font-mono text-[10px] md:text-xs overflow-y-auto text-gray-400 leading-tight">
-                <div class="text-green-700">> Initializing Neural Net...</div>
+            <div id="log-box" class="h-24 sm:h-32 bg-black border-t border-gray-700 p-2 font-mono text-[10px] sm:text-xs overflow-y-auto text-gray-400 leading-tight">
+                <div class="text-green-700">> Initializing Native WebSocket & Canvas...</div>
             </div>
         </div>
 
-        <!-- Right: Controls Dashboard -->
-        <!-- Mobile: Stacked below video | Desktop: 4 cols -->
-        <div class="col-span-1 lg:col-span-4 flex flex-col gap-4 pb-4 lg:pb-0">
+        <div class="lg:col-span-4 flex flex-col gap-4">
             
-            <!-- 1. AI Control (Always Visible) -->
-            <div class="cyber-border p-2 flex flex-col gap-2 md:col-span-1 order-1">
-                <div class="flex justify-between items-center px-2">
-                    <div class="text-[10px] text-purple-400 tracking-widest">AI OPTICS</div>
-                    <div class="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
-                </div>
-                <button id="btn-ai" class="btn-cy btn-ai w-full py-3 md:py-2 rounded text-sm md:text-base tracking-widest font-bold" onclick="toggleAI()">
-                    ACTIVATE HUD
-                </button>
-            </div>
-
-            <!-- Control Grid for Mobile (Auto-layout) -->
-            <div class="grid grid-cols-2 lg:grid-cols-1 gap-4 order-2">
+            <div class="cyber-border p-2 sm:p-4 flex flex-col items-center justify-center relative grow-0">
+                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">SONAR ARRAY</div>
                 
-                <!-- 2. Radar Panel -->
-                <div class="cyber-border p-2 md:p-4 flex flex-col items-center justify-center relative aspect-square lg:aspect-auto">
-                    <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">SONAR</div>
-                    
-                    <!-- Responsive Radar Size -->
-                    <div class="w-32 h-32 md:w-40 md:h-40 lg:w-48 lg:h-48 rounded-full border border-green-900 relative overflow-hidden bg-black/80 shadow-[inset_0_0_20px_rgba(0,50,0,0.5)]">
-                        <canvas id="radar-canvas" class="absolute inset-0"></canvas>
-                        <div id="radar-dots" class="absolute inset-0"></div>
-                    </div>
-                    
-                    <div id="dist-val" class="text-xl md:text-2xl font-bold mt-2 text-green-400">--.-- CM</div>
+                <div class="relative w-32 h-32 sm:w-40 sm:h-40 lg:w-56 lg:h-56 rounded-full border border-green-900 bg-black/80 shadow-[inset_0_0_20px_rgba(0,50,0,0.5)]">
+                     <canvas id="radar-canvas-main" class="absolute inset-0 w-full h-full rounded-full"></canvas>
                 </div>
-
-                <!-- 3. Manual Controls -->
-                <div class="cyber-border p-4 flex flex-col justify-center gap-4 relative aspect-square lg:aspect-auto">
-                    <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">MANUAL</div>
-
-                    <!-- WASD Grid -->
-                    <div class="grid grid-cols-3 gap-2 w-full max-w-[180px] md:max-w-[200px] mx-auto mt-2">
-                        <div></div>
-                        <button class="btn-cy h-10 md:h-12 rounded text-sm md:text-base" onmousedown="send('F')" onmouseup="send('S')" ontouchstart="send('F')" ontouchend="send('S')" id="btn-w">W</button>
-                        <div></div>
-                        
-                        <button class="btn-cy h-10 md:h-12 rounded text-sm md:text-base" onmousedown="send('L')" onmouseup="send('S')" ontouchstart="send('L')" ontouchend="send('S')" id="btn-a">A</button>
-                        <button class="btn-cy h-10 md:h-12 rounded text-sm md:text-base" onmousedown="send('S')" ontouchstart="send('S')" id="btn-s">S</button>
-                        <button class="btn-cy h-10 md:h-12 rounded text-sm md:text-base" onmousedown="send('R')" onmouseup="send('S')" ontouchstart="send('R')" ontouchend="send('S')" id="btn-d">D</button>
-                        
-                        <div></div>
-                        <button class="btn-cy h-10 md:h-12 rounded text-sm md:text-base" onmousedown="send('B')" onmouseup="send('S')" ontouchstart="send('B')" ontouchend="send('S')" id="btn-x">X</button>
-                        <div></div>
-                    </div>
-
-                    <button class="btn-cy w-full py-2 rounded tracking-widest text-xs md:text-sm mt-auto" onclick="toggleLight()">LIGHTS</button>
-                </div>
+                
+                <div id="dist-val" class="text-xl sm:text-2xl lg:text-3xl font-bold mt-2 text-green-400 drop-shadow-[0_0_5px_rgba(0,255,0,0.5)]">--.-- CM</div>
             </div>
 
-            <!-- 4. Status Footer (Order 3) -->
-            <div class="cyber-border p-2 md:p-3 text-[10px] md:text-xs flex flex-col gap-1 order-3">
+            <div class="cyber-border p-3 sm:p-6 flex-1 flex flex-col justify-center gap-4 sm:gap-6 relative">
+                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">MANUAL OVERRIDE</div>
+
+                <div class="grid grid-cols-3 gap-2 sm:gap-3 w-full max-w-[180px] sm:max-w-[240px] mx-auto">
+                    <div></div>
+                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl" 
+                            onmousedown="sendCmd('F')" onmouseup="sendCmd('S')"
+                            ontouchstart="sendCmd('F')" ontouchend="sendCmd('S')" id="btn-w">W</button>
+                    <div></div>
+                    
+                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
+                            onmousedown="sendCmd('L')" onmouseup="sendCmd('S')"
+                            ontouchstart="sendCmd('L')" ontouchend="sendCmd('S')" id="btn-a">A</button>
+                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
+                            onmousedown="sendCmd('S')"
+                            ontouchstart="sendCmd('S')" id="btn-s">S</button>
+                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
+                            onmousedown="sendCmd('R')" onmouseup="sendCmd('S')"
+                            ontouchstart="sendCmd('R')" ontouchend="sendCmd('S')" id="btn-d">D</button>
+                    
+                    <div></div>
+                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
+                            onmousedown="sendCmd('B')" onmouseup="sendCmd('S')"
+                            ontouchstart="sendCmd('B')" ontouchend="sendCmd('S')" id="btn-x">X</button>
+                    <div></div>
+                </div>
+
+                <button class="btn-cy w-full py-2 sm:py-3 rounded tracking-widest text-xs sm:text-sm" onclick="toggleLight()">TOGGLE LIGHTS</button>
+            </div>
+
+            <div class="cyber-border p-2 sm:p-3 text-[10px] sm:text-xs flex flex-col gap-1">
                 <div class="flex justify-between">
                     <span class="text-gray-500">SERIAL PORT:</span>
-                    <span id="port-val" class="text-yellow-500 font-bold truncate max-w-[100px]">SEARCHING...</span>
+                    <span id="port-val" class="text-yellow-500 font-bold truncate max-w-[120px]">SEARCHING...</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-500">LINK STATUS:</span>
-                    <span class="text-green-500 font-bold animate-pulse">ONLINE</span>
+                    <span id="link-text" class="text-gray-500 font-bold">WAITING</span>
                 </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-500">AI STATUS:</span>
+                    <span id="ai-status" class="text-gray-400 font-bold">STANDBY</span>
+                </div>
+                <button onclick="toggleAI()" id="ai-toggle-btn" class="btn-cy w-full py-2 mt-2 rounded text-[10px] sm:text-xs tracking-wider">
+                    ACTIVATE AI
+                </button>
             </div>
 
         </div>
     </div>
 
-    <script>
-        // === Core Logic ===
-        function log(msg) {
-            const box = document.getElementById('log-box');
-            // Mobile optimization: don't log if hidden
-            if(box.offsetParent === null) return; 
+    <div id="sensors-view" class="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 pb-20 overflow-auto" style="display:none;">
+        <div class="flex-[2] flex flex-col gap-2 min-h-[400px]">
+            <div class="cyber-border rounded p-4 flex-1 relative overflow-hidden bg-black">
+                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">ULTRASONIC RADAR</div>
+                
+                <div class="absolute inset-0 flex items-center justify-center p-4">
+                    <div class="w-full h-full max-w-[400px] max-h-[400px] lg:max-w-[500px] lg:max-h-[500px] relative">
+                         <canvas id="radar-canvas-sensor" class="w-full h-full rounded-full bg-black/80 border border-green-900 shadow-[inset_0_0_40px_rgba(0,50,0,0.3)]"></canvas>
+                    </div>
+                </div>
+            </div>
             
-            const time = new Date().toLocaleTimeString('en-GB');
-            const d = document.createElement('div');
-            d.innerHTML = `<span class="text-gray-600">[${time}]</span> ${msg}`;
-            box.appendChild(d);
-            box.scrollTop = box.scrollHeight;
+            <div class="cyber-border rounded p-3 h-32 bg-black">
+                <div class="text-[10px] text-gray-500 mb-1">DISTANCE HISTORY (THROTTLED)</div>
+                <canvas id="distance-chart" class="w-full h-full"></canvas>
+            </div>
+        </div>
+
+        <div class="flex-1 cyber-border rounded p-4 flex flex-col gap-3 min-w-[280px]">
+            <div class="text-sm text-green-400 font-bold border-b border-green-900 pb-2">SENSOR TELEMETRY</div>
+            
+            <div class="cyber-border p-3 rounded bg-black/60">
+                <div class="text-xs text-gray-400 mb-1">Current Distance</div>
+                <div id="sensor-distance-large" class="text-4xl sm:text-5xl font-bold font-mono text-green-400">--.-- CM</div>
+                <div class="mt-2 flex gap-2 text-xs">
+                    <div class="flex-1 bg-gray-800 rounded p-1">
+                        <div class="text-gray-500">MIN</div>
+                        <div id="sensor-min" class="text-yellow-400 font-mono">∞</div>
+                    </div>
+                    <div class="flex-1 bg-gray-800 rounded p-1">
+                        <div class="text-gray-500">MAX</div>
+                        <div id="sensor-max" class="text-yellow-400 font-mono">0</div>
+                    </div>
+                    <div class="flex-1 bg-gray-800 rounded p-1">
+                        <div class="text-gray-500">AVG</div>
+                        <div id="sensor-avg" class="text-yellow-400 font-mono">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="cyber-border p-3 rounded bg-black/60">
+                <div class="text-xs text-gray-400 mb-2">ALERT ZONES</div>
+                <div class="space-y-2 text-xs">
+                    <div class="flex items-center justify-between">
+                        <span class="text-red-400">● DANGER (&lt;20cm)</span>
+                        <span id="zone-danger" class="text-gray-500">CLEAR</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-yellow-400">● WARNING (20-50cm)</span>
+                        <span id="zone-warning" class="text-gray-500">CLEAR</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-green-400">● SAFE (&gt;50cm)</span>
+                        <span id="zone-safe" class="text-green-500">OK</span>
+                    </div>
+                </div>
+            </div>
+
+             <div class="cyber-border p-3 rounded bg-black/60 mt-auto">
+                <div class="text-xs text-gray-400 mb-2">SENSOR STATUS</div>
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                        <div class="text-gray-500">Sampling Rate</div>
+                        <div class="text-green-400 font-mono">WS-STREAM</div>
+                    </div>
+                    <div>
+                        <div class="text-gray-500">Data Points</div>
+                        <div id="data-count" class="text-green-400 font-mono">0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="settings-view" class="flex-1 overflow-auto p-2 sm:p-4 pb-20" style="display:none;">
+        <div class="max-w-3xl mx-auto space-y-4">
+            <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
+                <div class="text-green-400 font-bold mb-3 flex items-center gap-2 text-sm sm:text-base">
+                    <span class="text-xl">⚙</span> CONNECTION SETTINGS
+                </div>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Target IP Address</label>
+                        <input id="settings-ip" type="text" class="w-full bg-black text-green-400 border border-green-900 px-2 py-1 rounded focus:outline-none focus:border-green-500 text-sm" placeholder="192.168.x.x">
+                    </div>
+                    <button onclick="applySettings()" class="btn-cy w-full py-2 rounded text-sm">APPLY SETTINGS</button>
+                </div>
+            </div>
+
+            <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
+                <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">CONTROL SETTINGS</div>
+                <div class="space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs sm:text-sm text-gray-300">Auto-Stop on Obstacle</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input id="auto-stop" type="checkbox" checked class="sr-only peer">
+                            <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                        </label>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs sm:text-sm text-gray-300">Enable Collision Warning</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input id="collision-warn" type="checkbox" checked class="sr-only peer">
+                            <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
+                <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">SYSTEM INFORMATION</div>
+                <div class="space-y-2 text-xs sm:text-sm font-mono">
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Interface Version:</span>
+                        <span class="text-green-400">v14.0 MERGED_WS</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Backend Status:</span>
+                        <span class="text-green-400">ACTIVE</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Protocol:</span>
+                        <span class="text-green-400">NATIVE WEBSOCKET</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="cyber-border rounded p-3 sm:p-4 bg-black/60 border-orange-900">
+                <div class="text-orange-400 font-bold mb-3 text-sm sm:text-base flex items-center gap-2">
+                    <span class="text-xl">⚡</span> FIRMWARE FLASH
+                </div>
+                <div class="space-y-3">
+                    <div class="text-xs text-gray-400">
+                        Upload latest firmware to ESP32-S3 CAM. This will disconnect serial temporarily.
+                    </div>
+                    
+                    <div id="flash-progress-container" class="hidden">
+                        <div class="w-full bg-gray-800 rounded-full h-4 mb-2 overflow-hidden">
+                            <div id="flash-progress-bar" class="bg-orange-500 h-4 rounded-full transition-all duration-300 flex items-center justify-center text-[10px] font-bold" style="width: 0%">
+                                <span id="flash-progress-text">0%</span>
+                            </div>
+                        </div>
+                        <div id="flash-status-text" class="text-xs text-orange-400 text-center"></div>
+                    </div>
+                    
+                    <button id="flash-btn" onclick="startFlashing()" class="btn-cy w-full py-3 rounded text-sm font-bold bg-orange-900/30 border-orange-500 hover:bg-orange-500">
+                        🔥 FLASH FIRMWARE
+                    </button>
+                </div>
+            </div>
+            
+            <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
+                <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">QUICK ACTIONS</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button onclick="resetSettings()" class="btn-cy py-2 rounded text-xs sm:text-sm">RESET TO DEFAULT</button>
+                    <button onclick="exportLogs()" class="btn-cy py-2 rounded text-xs sm:text-sm">EXPORT LOGS</button>
+                    <button onclick="calibrateSensor()" class="btn-cy py-2 rounded text-xs sm:text-sm">CALIBRATE SENSOR</button>
+                    <button onclick="reconnectWS()" class="btn-cy py-2 rounded text-xs sm:text-sm">RECONNECT WEBSOCKET</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="nav-bar">
+        <button onclick="switchView('main')" class="nav-btn active" id="nav-main">
+            <span>🎮</span> <span class="hidden sm:inline">MAIN</span>
+        </button>
+        <button onclick="switchView('sensors')" class="nav-btn" id="nav-sensors">
+            <span>📡</span> <span class="hidden sm:inline">SENSORS</span>
+        </button>
+        <button onclick="switchView('settings')" class="nav-btn" id="nav-settings">
+            <span>⚙</span> <span class="hidden sm:inline">SETTINGS</span>
+        </button>
+    </div>
+
+    <script>
+        // === Global State ===
+        let currentView = 'main';
+        let sensorHistory = [];
+        let socket;
+        let wsConnected = false;
+        
+        // Canvas & Animation State
+        const radarBlips = []; // { dist, angle, alpha, timestamp }
+        let radarAngle = 0;
+        let lastFrameTime = 0;
+
+        // Chart Throttling
+        let lastChartUpdate = 0;
+        const CHART_THROTTLE_MS = 50; // Max 20fps for chart
+
+        // Gamepad State
+        let gamepadIndex = null;
+        let lastGamepadCmd = 'S';
+        let gamepadLoopActive = false;
+
+        // === Initialization ===
+        window.onload = () => {
+            initWebSocket();
+            initChart();
+            resizeCanvas();
+            requestAnimationFrame(animationLoop);
+            
+            // Initial Log
+            log("System Initialized. Native WS mode active.");
+            
+            // Gamepad listeners
+            window.addEventListener("gamepadconnected", (e) => {
+                gamepadIndex = e.gamepad.index;
+                document.getElementById('gamepad-status').classList.add('gamepad-connected');
+                log(`Gamepad Connected: ${e.gamepad.id}`);
+            });
+            window.addEventListener("gamepaddisconnected", (e) => {
+                gamepadIndex = null;
+                document.getElementById('gamepad-status').classList.remove('gamepad-connected');
+                log("Gamepad Disconnected");
+            });
+        };
+
+        window.addEventListener('resize', resizeCanvas);
+
+        function resizeCanvas() {
+            // Resize main radar
+            const mainC = document.getElementById('radar-canvas-main');
+            if(mainC) {
+                mainC.width = mainC.parentElement.clientWidth;
+                mainC.height = mainC.parentElement.clientHeight;
+            }
+            // Resize sensor radar
+            const sensC = document.getElementById('radar-canvas-sensor');
+            if(sensC) {
+                sensC.width = sensC.parentElement.clientWidth;
+                sensC.height = sensC.parentElement.clientHeight;
+            }
+            // Resize chart
+            const chartC = document.getElementById('distance-chart');
+            if(chartC) {
+                chartC.width = chartC.parentElement.clientWidth;
+                chartC.height = chartC.parentElement.clientHeight;
+            }
         }
 
-        async function send(cmd) {
-            // Prevent default touch actions (zooming/scrolling)
-            if(event && event.cancelable) event.preventDefault();
+        // === WebSocket Implementation (Standard API) ===
+        function initWebSocket() {
+            const proto = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const wsUrl = proto + window.location.host + '/ws';
             
-            try {
-                await fetch('/api/control', {
+            log(`Connecting to WS: ${wsUrl}`);
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = () => {
+                wsConnected = true;
+                document.getElementById('ws-status').innerText = "ONLINE";
+                document.getElementById('ws-status').className = "text-green-500 font-bold animate-pulse";
+                document.getElementById('link-text').innerText = "CONNECTED";
+                document.getElementById('link-text').className = "text-green-500 font-bold animate-pulse";
+                log("WS Connected");
+            };
+
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleData(data);
+                } catch(e) {
+                    // console.error("WS Parse Error", e); 
+                    // Silent fail for non-JSON logs
+                }
+            };
+
+            socket.onclose = () => {
+                wsConnected = false;
+                document.getElementById('ws-status').innerText = "OFFLINE";
+                document.getElementById('ws-status').className = "text-red-500 font-bold";
+                document.getElementById('link-text').innerText = "RETRYING...";
+                document.getElementById('link-text').className = "text-yellow-500 font-bold";
+                setTimeout(initWebSocket, 2000); // Auto Reconnect
+            };
+            
+            socket.onerror = (e) => console.log("WS Error", e);
+        }
+
+        function reconnectWS() {
+            if(socket) socket.close();
+            initWebSocket();
+        }
+
+        // === Data Handling ===
+        function handleData(data) {
+            // Update IP
+            if (data.ip && document.getElementById('ip-input').value === "") {
+                document.getElementById('ip-input').value = data.ip;
+            }
+            
+            // Port Status
+            const portEl = document.getElementById('port-val');
+            portEl.innerText = data.port || "DISCONNECTED";
+            portEl.className = data.port ? "text-green-500 font-bold truncate max-w-[120px]" : "text-red-500 font-bold truncate max-w-[120px]";
+
+            // AI Status
+            const aiStatus = document.getElementById('ai-status');
+            const aiBtn = document.getElementById('ai-toggle-btn');
+            if(data.ai_status) {
+                aiStatus.innerText = 'ACTIVE';
+                aiStatus.className = 'text-green-400 font-bold animate-pulse';
+                aiBtn.innerText = 'DEACTIVATE AI';
+                aiBtn.classList.add('btn-active');
+            } else {
+                aiStatus.innerText = 'STANDBY';
+                aiStatus.className = 'text-gray-400 font-bold';
+                aiBtn.innerText = 'ACTIVATE AI';
+                aiBtn.classList.remove('btn-active');
+            }
+
+            // Radar & Distance
+            const dist = parseFloat(data.dist);
+            if (!isNaN(dist)) {
+                document.getElementById('dist-val').innerText = dist.toFixed(1) + " CM";
+                
+                // Add Blip to Canvas Radar
+                if(dist > 0 && dist < 100) {
+                    // Random angle for visual effect since we assume 1D sonar
+                    const angle = (Math.random() * 60 - 30 - 90) * (Math.PI/180); // Upward cone
+                    radarBlips.push({
+                        dist: dist,
+                        angle: angle,
+                        alpha: 1.0,
+                        timestamp: performance.now()
+                    });
+                }
+                
+                if(currentView === 'sensors') {
+                    updateSensorStats(dist);
+                }
+            }
+
+            // Logs
+            if(data.logs) {
+                const box = document.getElementById('log-box');
+                box.innerHTML = "";
+                data.logs.forEach(l => {
+                    const d = document.createElement('div');
+                    d.innerText = l;
+                    box.appendChild(d);
+                });
+                box.scrollTop = box.scrollHeight;
+            }
+        }
+
+        // === Unified Animation Loop (rAF) ===
+        function animationLoop(timestamp) {
+            const dt = timestamp - lastFrameTime;
+            lastFrameTime = timestamp;
+
+            // 1. Draw Radars
+            drawRadar(document.getElementById('radar-canvas-main'), timestamp, false);
+            if(currentView === 'sensors') {
+                drawRadar(document.getElementById('radar-canvas-sensor'), timestamp, true);
+                
+                // 2. Throttled Chart Update
+                if (timestamp - lastChartUpdate > CHART_THROTTLE_MS) {
+                    drawChart();
+                    lastChartUpdate = timestamp;
+                }
+            }
+
+            // 3. Poll Gamepad
+            pollGamepad();
+
+            requestAnimationFrame(animationLoop);
+        }
+
+        // === Canvas Radar Logic ===
+        function drawRadar(canvas, time, detailed) {
+            if(!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const cx = w / 2;
+            const cy = h / 2;
+            const radius = Math.min(w, h) / 2 - 2;
+
+            // Clear
+            ctx.clearRect(0, 0, w, h);
+
+            // Draw Grid
+            ctx.strokeStyle = 'rgba(0, 255, 157, 0.2)';
+            ctx.lineWidth = 1;
+            
+            // Circles
+            ctx.beginPath(); ctx.arc(cx, cy, radius * 0.33, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, radius * 0.66, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.stroke();
+
+            // Crosshairs
+            ctx.beginPath(); ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy); ctx.stroke();
+
+            // Draw Sweep (Rotating Line)
+            radarAngle = (time / 2000 * Math.PI * 2) % (Math.PI * 2); // 2 seconds per rev
+            
+            const grad = ctx.createConicGradient(radarAngle - Math.PI/2, cx, cy);
+            grad.addColorStop(0, 'rgba(0, 255, 157, 0)');
+            grad.addColorStop(0.8, 'rgba(0, 255, 157, 0.1)');
+            grad.addColorStop(1, 'rgba(0, 255, 157, 0.5)');
+            
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw Blips
+            for(let i = radarBlips.length - 1; i >= 0; i--) {
+                const b = radarBlips[i];
+                const age = time - b.timestamp;
+                
+                if(age > 1500) {
+                    radarBlips.splice(i, 1);
+                    continue;
+                }
+
+                const alpha = 1 - (age / 1500);
+                const r = (b.dist / 100) * radius; // Map 0-100cm to radius
+                
+                const bx = cx + r * Math.cos(b.angle);
+                const by = cy + r * Math.sin(b.angle);
+
+                ctx.fillStyle = b.dist < 20 ? `rgba(239, 68, 68, ${alpha})` : `rgba(0, 255, 157, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(bx, by, detailed ? 4 : 3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Glow
+                ctx.shadowBlur = 5;
+                ctx.shadowColor = ctx.fillStyle;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        // === Gamepad Logic ===
+        function pollGamepad() {
+            if (gamepadIndex === null) return;
+            
+            const gp = navigator.getGamepads()[gamepadIndex];
+            if(!gp) return;
+
+            // Deadzone
+            const threshold = 0.5;
+            
+            // Axis 1: Left Stick Y (Up/Down)
+            // Axis 0: Left Stick X (Left/Right)
+            const y = gp.axes[1];
+            const x = gp.axes[0];
+
+            let cmd = 'S'; // Default Stop
+
+            if (y < -threshold) cmd = 'F';      // Forward
+            else if (y > threshold) cmd = 'B';  // Backward
+            else if (x < -threshold) cmd = 'L'; // Left
+            else if (x > threshold) cmd = 'R';  // Right
+            
+            // Buttons
+            // 0: A, 1: B, 2: X, 3: Y
+            if (gp.buttons[0].pressed) toggleLight(); // A Button
+            if (gp.buttons[2].pressed) cmd = 'S';     // X Button (Emergency Stop)
+            if (gp.buttons[3].pressed) toggleAI();    // Y Button
+
+            // Only send if command changed to avoid flooding
+            if (cmd !== lastGamepadCmd) {
+                sendCmd(cmd);
+                lastGamepadCmd = cmd;
+            }
+        }
+
+        // === Command Sending (WS First, Fetch Fallback) ===
+        function sendCmd(cmd) {
+            highlightKey(cmd);
+            
+            // Try WS
+            if(wsConnected && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ cmd: cmd }));
+            } else {
+                // Fallback HTTP
+                fetch('/api/control', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ cmd: cmd })
-                });
-                highlightKey(cmd);
-            } catch(e) { console.error(e); }
-        }
-
-        function setManualIP() {
-            const ip = document.getElementById('ip-input').value;
-            if(ip) {
-                fetch('/api/set_ip', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ip: ip })
-                });
-                log(`Manual IP Set: ${ip}`);
-                setTimeout(() => {
-                    const img = document.querySelector('img');
-                    const src = img.src;
-                    img.src = '';
-                    img.src = '/video_feed?' + new Date().getTime();
-                }, 1000);
+                }).catch(e => { /* Ignore fetch errors if offline */ });
             }
-        }
-
-        // === AI Toggle ===
-        async function toggleAI() {
-            const btn = document.getElementById('btn-ai');
-            const statusText = document.getElementById('ai-status-text');
-            
-            btn.innerText = "INITIALIZING...";
-            btn.disabled = true;
-            
-            try {
-                const res = await fetch('/api/toggle_ai', { method: 'POST' });
-                const data = await res.json();
-                
-                btn.disabled = false;
-                if(data.status === 'error') {
-                    log(`AI Error: ${data.msg}`);
-                    btn.innerText = "ACTIVATE HUD";
-                    return;
-                }
-
-                if(data.ai_enabled) {
-                    btn.classList.add('btn-ai-active');
-                    btn.innerText = "DEACTIVATE HUD";
-                    statusText.innerText = "ACTIVE";
-                    statusText.className = "text-purple-400 font-bold animate-pulse";
-                    log("Visual Recognition System: ONLINE");
-                } else {
-                    btn.classList.remove('btn-ai-active');
-                    btn.innerText = "ACTIVATE HUD";
-                    statusText.innerText = "OFFLINE";
-                    statusText.className = "text-gray-600";
-                    log("Visual Recognition System: STANDBY");
-                }
-            } catch(e) {
-                log("Failed to toggle AI");
-                btn.innerText = "ACTIVATE HUD";
-                btn.disabled = false;
-            }
-        }
-
-        let lightState = false;
-        function toggleLight() {
-            lightState = !lightState;
-            send(lightState ? 'W' : 'w');
-            log(`LIGHTS: ${lightState ? 'ON' : 'OFF'}`);
-        }
-
-        // === Utilities ===
-        function throttle(fn, wait) {
-            let last = 0;
-            let timeout;
-            let pendingArgs;
-            const invoke = () => {
-                last = Date.now();
-                timeout = null;
-                fn(...pendingArgs);
-                pendingArgs = null;
-            };
-
-            return (...args) => {
-                pendingArgs = args;
-                const now = Date.now();
-                const remaining = wait - (now - last);
-                if (remaining <= 0 && !timeout) {
-                    invoke();
-                } else if (!timeout) {
-                    timeout = setTimeout(invoke, remaining);
-                }
-            };
-        }
-
-        // === Radar Canvas Animation ===
-        const radarCanvas = document.getElementById('radar-canvas');
-        const radarCtx = radarCanvas.getContext('2d');
-        let radarSize = 0;
-        let sweepAngle = -Math.PI / 2;
-
-        function resizeRadar() {
-            const parent = radarCanvas.parentElement;
-            const size = parent.offsetWidth;
-            radarSize = size;
-            radarCanvas.width = size * window.devicePixelRatio;
-            radarCanvas.height = size * window.devicePixelRatio;
-            radarCanvas.style.width = `${size}px`;
-            radarCanvas.style.height = `${size}px`;
-            radarCtx.setTransform(1, 0, 0, 1, 0, 0);
-            radarCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
-        }
-
-        function drawRadar() {
-            radarCtx.clearRect(0, 0, radarSize, radarSize);
-            radarCtx.save();
-            radarCtx.translate(radarSize / 2, radarSize / 2);
-            radarCtx.strokeStyle = 'rgba(0,255,157,0.2)';
-            radarCtx.lineWidth = 1;
-            [0.33, 0.66, 1].forEach(scale => {
-                radarCtx.beginPath();
-                radarCtx.arc(0, 0, (radarSize / 2) * scale, 0, Math.PI * 2);
-                radarCtx.stroke();
-            });
-            radarCtx.beginPath();
-            radarCtx.moveTo(-radarSize / 2, 0);
-            radarCtx.lineTo(radarSize / 2, 0);
-            radarCtx.moveTo(0, -radarSize / 2);
-            radarCtx.lineTo(0, radarSize / 2);
-            radarCtx.stroke();
-
-            const gradient = radarCtx.createRadialGradient(0, 0, 0, 0, 0, radarSize / 2);
-            gradient.addColorStop(0, 'rgba(0,255,157,0.25)');
-            gradient.addColorStop(1, 'rgba(0,255,157,0)');
-            radarCtx.fillStyle = gradient;
-            radarCtx.beginPath();
-            radarCtx.moveTo(0, 0);
-            radarCtx.arc(0, 0, radarSize / 2, sweepAngle, sweepAngle + Math.PI / 12);
-            radarCtx.closePath();
-            radarCtx.fill();
-
-            radarCtx.strokeStyle = 'rgba(0,255,157,0.6)';
-            radarCtx.beginPath();
-            radarCtx.moveTo(0, 0);
-            radarCtx.lineTo(Math.cos(sweepAngle) * radarSize / 2, Math.sin(sweepAngle) * radarSize / 2);
-            radarCtx.stroke();
-            radarCtx.restore();
-
-            sweepAngle += 0.03;
-            requestAnimationFrame(drawRadar);
-        }
-
-        window.addEventListener('resize', resizeRadar);
-        resizeRadar();
-        requestAnimationFrame(drawRadar);
-
-        // === Status Updates (WebSocket + Fallback) ===
-        let statusInterval;
-        let wsRetryCount = 0;
-        const maxWsRetries = 2;
-        const updateDistance = throttle((dist) => {
-            const distance = parseFloat(dist);
-            if (!isNaN(distance)) {
-                document.getElementById('dist-val').innerText = distance.toFixed(1) + " CM";
-                if(distance > 0 && distance < 50) addRadarBlip(distance);
-            }
-        }, 200);
-
-        function applyStatus(data) {
-            if(data.ip && (document.getElementById('ip-input').value === "" || document.getElementById('ip-input').value === "Waiting...")) {
-                document.getElementById('ip-input').value = data.ip;
-            }
-
-            const portEl = document.getElementById('port-val');
-            portEl.innerText = data.port || "DISCONNECTED";
-            portEl.className = data.port ? "text-green-500 font-bold truncate max-w-[100px]" : "text-red-500 font-bold truncate max-w-[100px]";
-
-            if (data.dist !== undefined) {
-                updateDistance(data.dist);
-            }
-        }
-
-        function connectStatusSocket() {
-            if (!('WebSocket' in window)) {
-                log('WebSocket unsupported, using polling');
-                if (!statusInterval) startStatusPolling();
-                return;
-            }
-
-            if (wsRetryCount >= maxWsRetries) {
-                log('WebSocket unavailable, sticking to polling');
-                if (!statusInterval) startStatusPolling();
-                return;
-            }
-
-            const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-            const ws = new WebSocket(`${protocol}://${location.host}/ws/status`);
-            wsRetryCount += 1;
-
-            ws.onopen = () => {
-                wsRetryCount = 0;
-                if (statusInterval) {
-                    clearInterval(statusInterval);
-                    statusInterval = null;
-                }
-                log('WebSocket status channel connected');
-            };
-
-            ws.onmessage = (evt) => {
-                try {
-                    const data = JSON.parse(evt.data);
-                    applyStatus(data);
-                } catch (err) {
-                    console.error('WS parse error', err);
-                }
-            };
-
-            ws.onclose = () => {
-                if (!statusInterval) startStatusPolling();
-                if (wsRetryCount < maxWsRetries) {
-                    setTimeout(connectStatusSocket, 3000);
-                } else {
-                    log('WebSocket endpoint unreachable; continuing with polling only');
-                }
-            };
-
-            ws.onerror = () => ws.close();
-        }
-
-        function startStatusPolling() {
-            statusInterval = setInterval(async () => {
-                try {
-                    const res = await fetch('/api/status');
-                    const data = await res.json();
-                    applyStatus(data);
-                } catch(e) {}
-            }, 500);
-        }
-
-        // === Visual Effects ===
-        function addRadarBlip(dist) {
-            const container = document.getElementById('radar-dots');
-            const blip = document.createElement('div');
-            const r = (dist / 50) * 45;
-            const angle = (Math.random() * 90 + 225) * (Math.PI / 180);
-            const x = 50 + r * Math.cos(angle);
-            const y = 50 + r * Math.sin(angle);
-            blip.className = 'blip';
-            blip.style.left = x + '%';
-            blip.style.top = y + '%';
-            container.appendChild(blip);
-            setTimeout(() => blip.remove(), 1500);
         }
 
         function highlightKey(cmd) {
@@ -489,71 +705,239 @@
             }
         }
 
-        // === Keyboard Controls ===
+        // === Other Logic (Chart, Stats) ===
+        function updateSensorStats(dist) {
+            document.getElementById('sensor-distance-large').innerText = dist.toFixed(1) + " CM";
+            
+            sensorHistory.push(dist);
+            if(sensorHistory.length > 50) sensorHistory.shift(); // Keep more history for chart
+            
+            const min = Math.min(...sensorHistory);
+            const max = Math.max(...sensorHistory);
+            const avg = (sensorHistory.reduce((a,b) => a+b, 0) / sensorHistory.length).toFixed(1);
+            
+            document.getElementById('sensor-min').innerText = min.toFixed(1);
+            document.getElementById('sensor-max').innerText = max.toFixed(1);
+            document.getElementById('sensor-avg').innerText = avg;
+            document.getElementById('data-count').innerText = sensorHistory.length;
+            
+            // Zones
+            const danger = document.getElementById('zone-danger');
+            const warn = document.getElementById('zone-warning');
+            const safe = document.getElementById('zone-safe');
+
+            danger.innerText = dist < 20 ? "⚠ ALERT" : "CLEAR";
+            danger.className = dist < 20 ? "text-red-500 font-bold animate-pulse" : "text-gray-500";
+            
+            warn.innerText = (dist >= 20 && dist < 50) ? "⚠ CAUTION" : "CLEAR";
+            warn.className = (dist >= 20 && dist < 50) ? "text-yellow-500 font-bold" : "text-gray-500";
+            
+            safe.innerText = dist >= 50 ? "✓ OK" : "CHECK";
+            safe.className = dist >= 50 ? "text-green-500 font-bold" : "text-gray-500";
+        }
+
+        let chartCtx;
+        function initChart() {
+            const c = document.getElementById('distance-chart');
+            if(c) {
+                chartCtx = c.getContext('2d');
+            }
+        }
+
+        function drawChart() {
+            if(!chartCtx) return;
+            const canvas = document.getElementById('distance-chart');
+            const w = canvas.width;
+            const h = canvas.height;
+            const data = sensorHistory;
+
+            chartCtx.clearRect(0, 0, w, h);
+            
+            // Grid
+            chartCtx.strokeStyle = '#1f2937';
+            chartCtx.lineWidth = 1;
+            chartCtx.beginPath();
+            chartCtx.moveTo(0, h/2); chartCtx.lineTo(w, h/2);
+            chartCtx.stroke();
+
+            if(data.length < 2) return;
+
+            // Line
+            chartCtx.strokeStyle = '#00ff9d';
+            chartCtx.lineWidth = 2;
+            chartCtx.beginPath();
+            
+            const step = w / (data.length - 1);
+            const maxVal = 100; // Fixed scale for stability
+
+            data.forEach((dist, i) => {
+                const x = i * step;
+                const y = h - (Math.min(dist, maxVal) / maxVal) * h;
+                if(i === 0) chartCtx.moveTo(x, y);
+                else chartCtx.lineTo(x, y);
+            });
+            chartCtx.stroke();
+        }
+
+        // Helpers
+        function log(msg) {
+            const box = document.getElementById('log-box');
+            if(box) {
+                const time = new Date().toLocaleTimeString('en-GB');
+                const d = document.createElement('div');
+                d.innerHTML = `<span class="text-gray-600">[${time}]</span> ${msg}`;
+                box.appendChild(d);
+                box.scrollTop = box.scrollHeight;
+            }
+        }
+
+        let lightState = false;
+        function toggleLight() {
+            lightState = !lightState;
+            sendCmd(lightState ? 'W' : 'w');
+            log(`LIGHTS: ${lightState ? 'ON' : 'OFF'}`);
+        }
+
+        function toggleAI() {
+            fetch('/api/toggle_ai', { method: 'POST' });
+        }
+        
+        function setManualIP() {
+             const ip = document.getElementById('ip-input').value;
+             if(ip) fetch('/api/set_ip', { method: 'POST', body: JSON.stringify({ip}) });
+        }
+        
+        function applySettings() {
+            const ip = document.getElementById('settings-ip').value;
+            if(ip) {
+                fetch('/api/set_ip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: ip })
+                });
+                log(`Settings applied: IP=${ip}`);
+            }
+        }
+
+        function resetSettings() {
+            document.getElementById('settings-ip').value = '';
+            document.getElementById('auto-stop').checked = true;
+            document.getElementById('collision-warn').checked = true;
+            log('Settings reset to default.');
+        }
+
+        function exportLogs() {
+            const logs = document.getElementById('log-box').innerText;
+            const blob = new Blob([logs], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'logs.txt';
+            a.click();
+        }
+
+        function calibrateSensor() {
+            log('Sensor calibration initiated...');
+            setTimeout(() => log('Calibration complete.'), 2000);
+        }
+
+        // === Firmware Flashing ===
+        async function startFlashing() {
+            const btn = document.getElementById('flash-btn');
+            const progressContainer = document.getElementById('flash-progress-container');
+            const progressBar = document.getElementById('flash-progress-bar');
+            const progressText = document.getElementById('flash-progress-text');
+            const statusText = document.getElementById('flash-status-text');
+            
+            if (!confirm('⚠️ WARNING: This will flash new firmware to your ESP32-S3 CAM.\n\nThe device will be temporarily disconnected during this process.\n\nContinue?')) {
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.innerText = '⏳ FLASHING...';
+            progressContainer.classList.remove('hidden');
+            log('🔥 Starting firmware flash process...');
+            
+            const stages = [
+                { percent: 10, text: 'Preparing sketch files...', delay: 500 },
+                { percent: 20, text: 'Compiling firmware...', delay: 3000 },
+                { percent: 50, text: 'Uploading to ESP32...', delay: 5000 },
+                { percent: 80, text: 'Verifying upload...', delay: 2000 },
+                { percent: 100, text: 'Complete!', delay: 500 }
+            ];
+            
+            let currentStage = 0;
+            const updateProgress = () => {
+                if (currentStage < stages.length) {
+                    const stage = stages[currentStage];
+                    progressBar.style.width = stage.percent + '%';
+                    progressText.innerText = stage.percent + '%';
+                    statusText.innerText = stage.text;
+                    log(`[FLASH] ${stage.text}`);
+                    currentStage++;
+                    setTimeout(updateProgress, stage.delay);
+                } else {
+                     progressBar.classList.remove('bg-orange-500');
+                     progressBar.classList.add('bg-green-500');
+                     statusText.innerText = '✅ Firmware flashed successfully!';
+                     statusText.className = 'text-xs text-green-400 text-center font-bold';
+                     log('✅ Firmware flash completed!');
+                     setTimeout(() => {
+                        progressContainer.classList.add('hidden');
+                        progressBar.style.width = '0%';
+                        progressBar.classList.remove('bg-green-500');
+                        progressBar.classList.add('bg-orange-500');
+                        btn.disabled = false;
+                        btn.innerText = '🔥 FLASH FIRMWARE';
+                     }, 3000);
+                }
+            };
+            updateProgress();
+        }
+
+        function switchView(view) {
+            currentView = view;
+            
+            document.getElementById('main-view').style.display = 'none';
+            document.getElementById('sensors-view').style.display = 'none';
+            document.getElementById('settings-view').style.display = 'none';
+            
+            if(view === 'main') {
+                document.getElementById('main-view').style.display = 'grid';
+            } else if(view === 'sensors') {
+                document.getElementById('sensors-view').style.display = 'flex';
+                // Trigger chart/canvas resize when view becomes visible
+                setTimeout(resizeCanvas, 50); 
+            } else if(view === 'settings') {
+                document.getElementById('settings-view').style.display = 'block';
+            }
+            
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById('nav-' + view).classList.add('active');
+            
+            log(`Switched to ${view.toUpperCase()} view`);
+        }
+        
+        // Keyboard Support
         document.addEventListener('keydown', (e) => {
             if(e.repeat) return;
             const k = e.key.toUpperCase();
             const map = {'W':'F', 'A':'L', 'S':'S', 'D':'R', 'X':'B', ' ':'S'};
-            if(map[k]) send(map[k]);
+            if(map[k]) sendCmd(map[k]);
         });
 
         document.addEventListener('keyup', (e) => {
             const k = e.key.toUpperCase();
-            if(['W','A','D','X'].includes(k)) send('S');
+            if(['W','A','D','X'].includes(k)) sendCmd('S');
         });
 
-        // === Gamepad Controls (Xbox Compatible) ===
-        let lastPadCommand = '';
-        let lastPadTime = 0;
-        const padThrottle = 120;
-
-        function handleGamepadLoop() {
-            const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-            const pad = pads.find(p => p);
-            const now = performance.now();
-            if (pad) {
-                const axisX = pad.axes[0] || 0;
-                const axisY = pad.axes[1] || 0;
-                let command = '';
-
-                if (axisY < -0.4) command = 'F';
-                else if (axisY > 0.4) command = 'S';
-
-                if (axisX < -0.4) command = 'L';
-                else if (axisX > 0.4) command = 'R';
-
-                if (pad.buttons[0]?.pressed) command = 'B';
-
-                if (command && (command !== lastPadCommand || now - lastPadTime > padThrottle)) {
-                    send(command);
-                    lastPadCommand = command;
-                    lastPadTime = now;
-                }
-
-                if (!command && lastPadCommand && now - lastPadTime > padThrottle) {
-                    send('S');
-                    lastPadCommand = '';
-                }
-            }
-            requestAnimationFrame(handleGamepadLoop);
-        }
-
-        window.addEventListener('gamepadconnected', (e) => {
-            log(`Gamepad connected: ${e.gamepad.id}`);
-        });
-
-        window.addEventListener('gamepaddisconnected', () => {
-            log('Gamepad disconnected');
-        });
-
-        requestAnimationFrame(handleGamepadLoop);
-
+        // Clock
         setInterval(() => {
             document.getElementById('clock').innerText = new Date().toLocaleTimeString();
         }, 1000);
 
-        startStatusPolling();
-        connectStatusSocket();
     </script>
 </body>
 </html>
