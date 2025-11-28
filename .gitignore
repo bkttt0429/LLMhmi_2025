@@ -1,2 +1,22 @@
+# 壓縮檔
 *.zip
+
+# PyTorch / 模型檔
 *.pt
+
+# 任何 wheel 檔（避免 100MB 的悲劇）
+*.whl
+Project_Root/PC_Client/*.whl
+
+# Python 環境與暫存
+.venv/
+__pycache__/
+*.pyc
+
+# Log 檔
+*.log
+
+# Node / 前端產物（如果有）
+node_modules/
+dist/
+build/
