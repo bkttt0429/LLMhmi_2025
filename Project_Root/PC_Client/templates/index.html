@@ -67,13 +67,6 @@
         .btn-ai:hover { background: #d946ef; color: #000; box-shadow: 0 0 15px #d946ef; }
         .btn-ai-active { background: #d946ef; color: #000; box-shadow: 0 0 20px #d946ef; border-color: #fff; }
 
-        /* --- Radar Animation --- */
-        @keyframes radar-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        .radar-sweep {
-            background: conic-gradient(from 0deg, transparent 0deg, rgba(0, 255, 157, 0.5) 360deg);
-            animation: radar-spin 2s linear infinite;
-        }
-        
         .blip {
             position: absolute;
             width: 8px; height: 8px;
@@ -166,11 +159,7 @@
                     
                     <!-- Responsive Radar Size -->
                     <div class="w-32 h-32 md:w-40 md:h-40 lg:w-48 lg:h-48 rounded-full border border-green-900 relative overflow-hidden bg-black/80 shadow-[inset_0_0_20px_rgba(0,50,0,0.5)]">
-                        <div class="absolute inset-0 rounded-full border border-green-500/20 scale-33"></div>
-                        <div class="absolute inset-0 rounded-full border border-green-500/20 scale-66"></div>
-                        <div class="absolute w-full h-[1px] top-1/2 bg-green-500/20"></div>
-                        <div class="absolute h-full w-[1px] left-1/2 bg-green-500/20"></div>
-                        <div class="absolute inset-0 rounded-full radar-sweep origin-center"></div>
+                        <canvas id="radar-canvas" class="absolute inset-0"></canvas>
                         <div id="radar-dots" class="absolute inset-0"></div>
                     </div>
                     
@@ -307,35 +296,161 @@
             log(`LIGHTS: ${lightState ? 'ON' : 'OFF'}`);
         }
 
-        // === Polling Loop ===
-        setInterval(async () => {
-            try {
-                const res = await fetch('/api/status');
-                const data = await res.json();
-                
-                if(data.ip && document.getElementById('ip-input').value === "" || document.getElementById('ip-input').value === "Waiting...") {
-                    document.getElementById('ip-input').value = data.ip;
-                }
-                
-                const portEl = document.getElementById('port-val');
-                portEl.innerText = data.port || "DISCONNECTED";
-                portEl.className = data.port ? "text-green-500 font-bold truncate max-w-[100px]" : "text-red-500 font-bold truncate max-w-[100px]";
+        // === Utilities ===
+        function throttle(fn, wait) {
+            let last = 0;
+            let timeout;
+            let pendingArgs;
+            const invoke = () => {
+                last = Date.now();
+                timeout = null;
+                fn(...pendingArgs);
+                pendingArgs = null;
+            };
 
-                const dist = parseFloat(data.dist);
-                if (!isNaN(dist)) {
-                    document.getElementById('dist-val').innerText = dist.toFixed(1) + " CM";
-                    if(dist > 0 && dist < 50) addRadarBlip(dist);
+            return (...args) => {
+                pendingArgs = args;
+                const now = Date.now();
+                const remaining = wait - (now - last);
+                if (remaining <= 0 && !timeout) {
+                    invoke();
+                } else if (!timeout) {
+                    timeout = setTimeout(invoke, remaining);
                 }
-                
-            } catch(e) {}
-        }, 500);
+            };
+        }
+
+        // === Radar Canvas Animation ===
+        const radarCanvas = document.getElementById('radar-canvas');
+        const radarCtx = radarCanvas.getContext('2d');
+        let radarSize = 0;
+        let sweepAngle = -Math.PI / 2;
+
+        function resizeRadar() {
+            const parent = radarCanvas.parentElement;
+            const size = parent.offsetWidth;
+            radarSize = size;
+            radarCanvas.width = size * window.devicePixelRatio;
+            radarCanvas.height = size * window.devicePixelRatio;
+            radarCanvas.style.width = `${size}px`;
+            radarCanvas.style.height = `${size}px`;
+            radarCtx.setTransform(1, 0, 0, 1, 0, 0);
+            radarCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        }
+
+        function drawRadar() {
+            radarCtx.clearRect(0, 0, radarSize, radarSize);
+            radarCtx.save();
+            radarCtx.translate(radarSize / 2, radarSize / 2);
+            radarCtx.strokeStyle = 'rgba(0,255,157,0.2)';
+            radarCtx.lineWidth = 1;
+            [0.33, 0.66, 1].forEach(scale => {
+                radarCtx.beginPath();
+                radarCtx.arc(0, 0, (radarSize / 2) * scale, 0, Math.PI * 2);
+                radarCtx.stroke();
+            });
+            radarCtx.beginPath();
+            radarCtx.moveTo(-radarSize / 2, 0);
+            radarCtx.lineTo(radarSize / 2, 0);
+            radarCtx.moveTo(0, -radarSize / 2);
+            radarCtx.lineTo(0, radarSize / 2);
+            radarCtx.stroke();
+
+            const gradient = radarCtx.createRadialGradient(0, 0, 0, 0, 0, radarSize / 2);
+            gradient.addColorStop(0, 'rgba(0,255,157,0.25)');
+            gradient.addColorStop(1, 'rgba(0,255,157,0)');
+            radarCtx.fillStyle = gradient;
+            radarCtx.beginPath();
+            radarCtx.moveTo(0, 0);
+            radarCtx.arc(0, 0, radarSize / 2, sweepAngle, sweepAngle + Math.PI / 12);
+            radarCtx.closePath();
+            radarCtx.fill();
+
+            radarCtx.strokeStyle = 'rgba(0,255,157,0.6)';
+            radarCtx.beginPath();
+            radarCtx.moveTo(0, 0);
+            radarCtx.lineTo(Math.cos(sweepAngle) * radarSize / 2, Math.sin(sweepAngle) * radarSize / 2);
+            radarCtx.stroke();
+            radarCtx.restore();
+
+            sweepAngle += 0.03;
+            requestAnimationFrame(drawRadar);
+        }
+
+        window.addEventListener('resize', resizeRadar);
+        resizeRadar();
+        requestAnimationFrame(drawRadar);
+
+        // === Status Updates (WebSocket + Fallback) ===
+        let statusInterval;
+        const updateDistance = throttle((dist) => {
+            const distance = parseFloat(dist);
+            if (!isNaN(distance)) {
+                document.getElementById('dist-val').innerText = distance.toFixed(1) + " CM";
+                if(distance > 0 && distance < 50) addRadarBlip(distance);
+            }
+        }, 200);
+
+        function applyStatus(data) {
+            if(data.ip && (document.getElementById('ip-input').value === "" || document.getElementById('ip-input').value === "Waiting...")) {
+                document.getElementById('ip-input').value = data.ip;
+            }
+
+            const portEl = document.getElementById('port-val');
+            portEl.innerText = data.port || "DISCONNECTED";
+            portEl.className = data.port ? "text-green-500 font-bold truncate max-w-[100px]" : "text-red-500 font-bold truncate max-w-[100px]";
+
+            if (data.dist !== undefined) {
+                updateDistance(data.dist);
+            }
+        }
+
+        function connectStatusSocket() {
+            const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+            const ws = new WebSocket(`${protocol}://${location.host}/ws/status`);
+
+            ws.onopen = () => {
+                if (statusInterval) {
+                    clearInterval(statusInterval);
+                    statusInterval = null;
+                }
+                log('WebSocket status channel connected');
+            };
+
+            ws.onmessage = (evt) => {
+                try {
+                    const data = JSON.parse(evt.data);
+                    applyStatus(data);
+                } catch (err) {
+                    console.error('WS parse error', err);
+                }
+            };
+
+            ws.onclose = () => {
+                log('WebSocket disconnected, falling back to polling...');
+                if (!statusInterval) startStatusPolling();
+                setTimeout(connectStatusSocket, 3000);
+            };
+
+            ws.onerror = () => ws.close();
+        }
+
+        function startStatusPolling() {
+            statusInterval = setInterval(async () => {
+                try {
+                    const res = await fetch('/api/status');
+                    const data = await res.json();
+                    applyStatus(data);
+                } catch(e) {}
+            }, 500);
+        }
 
         // === Visual Effects ===
         function addRadarBlip(dist) {
             const container = document.getElementById('radar-dots');
             const blip = document.createElement('div');
-            const r = (dist / 50) * 45; 
-            const angle = (Math.random() * 90 + 225) * (Math.PI / 180); 
+            const r = (dist / 50) * 45;
+            const angle = (Math.random() * 90 + 225) * (Math.PI / 180);
             const x = 50 + r * Math.cos(angle);
             const y = 50 + r * Math.sin(angle);
             blip.className = 'blip';
@@ -368,9 +483,58 @@
             if(['W','A','D','X'].includes(k)) send('S');
         });
 
+        // === Gamepad Controls (Xbox Compatible) ===
+        let lastPadCommand = '';
+        let lastPadTime = 0;
+        const padThrottle = 120;
+
+        function handleGamepadLoop() {
+            const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+            const pad = pads.find(p => p);
+            const now = performance.now();
+            if (pad) {
+                const axisX = pad.axes[0] || 0;
+                const axisY = pad.axes[1] || 0;
+                let command = '';
+
+                if (axisY < -0.4) command = 'F';
+                else if (axisY > 0.4) command = 'S';
+
+                if (axisX < -0.4) command = 'L';
+                else if (axisX > 0.4) command = 'R';
+
+                if (pad.buttons[0]?.pressed) command = 'B';
+
+                if (command && (command !== lastPadCommand || now - lastPadTime > padThrottle)) {
+                    send(command);
+                    lastPadCommand = command;
+                    lastPadTime = now;
+                }
+
+                if (!command && lastPadCommand && now - lastPadTime > padThrottle) {
+                    send('S');
+                    lastPadCommand = '';
+                }
+            }
+            requestAnimationFrame(handleGamepadLoop);
+        }
+
+        window.addEventListener('gamepadconnected', (e) => {
+            log(`Gamepad connected: ${e.gamepad.id}`);
+        });
+
+        window.addEventListener('gamepaddisconnected', () => {
+            log('Gamepad disconnected');
+        });
+
+        requestAnimationFrame(handleGamepadLoop);
+
         setInterval(() => {
             document.getElementById('clock').innerText = new Date().toLocaleTimeString();
         }, 1000);
+
+        connectStatusSocket();
+        startStatusPolling();
     </script>
 </body>
 </html>
