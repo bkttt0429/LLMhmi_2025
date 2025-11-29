@@ -193,13 +193,17 @@
             <div class="cyber-border p-3 sm:p-6 flex-1 flex flex-col justify-center gap-4 sm:gap-6 relative">
                 <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">MANUAL OVERRIDE</div>
 
-                <div class="grid grid-cols-3 gap-2 sm:gap-3 w-full max-w-[180px] sm:max-w-[240px] mx-auto">
-                    <div></div>
-                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl" 
+                <div class="grid grid-cols-3 gap-2 sm:gap-3 w-full max-w-[220px] sm:max-w-[260px] mx-auto">
+                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
+                            onmousedown="sendCmd('Q')" onmouseup="sendCmd('S')"
+                            ontouchstart="sendCmd('Q')" ontouchend="sendCmd('S')" id="btn-q">Q</button>
+                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
                             onmousedown="sendCmd('F')" onmouseup="sendCmd('S')"
                             ontouchstart="sendCmd('F')" ontouchend="sendCmd('S')" id="btn-w">W</button>
-                    <div></div>
-                    
+                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
+                            onmousedown="sendCmd('E')" onmouseup="sendCmd('S')"
+                            ontouchstart="sendCmd('E')" ontouchend="sendCmd('S')" id="btn-e">E</button>
+
                     <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
                             onmousedown="sendCmd('L')" onmouseup="sendCmd('S')"
                             ontouchstart="sendCmd('L')" ontouchend="sendCmd('S')" id="btn-a">A</button>
@@ -209,7 +213,7 @@
                     <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
                             onmousedown="sendCmd('R')" onmouseup="sendCmd('S')"
                             ontouchstart="sendCmd('R')" ontouchend="sendCmd('S')" id="btn-d">D</button>
-                    
+
                     <div></div>
                     <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
                             onmousedown="sendCmd('B')" onmouseup="sendCmd('S')"
@@ -467,7 +471,7 @@
         }
 
         function highlightKey(cmd) {
-            const map = {'F':'btn-w', 'L':'btn-a', 'S':'btn-s', 'R':'btn-d', 'B':'btn-x'};
+            const map = {'F':'btn-w', 'L':'btn-a', 'S':'btn-s', 'R':'btn-d', 'B':'btn-x', 'Q':'btn-q', 'E':'btn-e'};
             const id = map[cmd];
             if(id) {
                 const btn = document.getElementById(id);
@@ -530,11 +534,11 @@
         document.addEventListener('keydown', (e) => {
             if(e.repeat) return;
             const k = e.key.toUpperCase();
-            const map = {'W':'F', 'A':'L', 'S':'S', 'D':'R', 'X':'B', ' ':'S'};
+            const map = {'W':'F', 'A':'L', 'S':'S', 'D':'R', 'X':'B', ' ':'S', 'Q':'Q', 'E':'E'};
             if(map[k]) sendCmd(map[k]);
         });
         document.addEventListener('keyup', (e) => {
-            if(['W','A','D','X'].includes(e.key.toUpperCase())) sendCmd('S');
+            if(['W','A','D','X','Q','E'].includes(e.key.toUpperCase())) sendCmd('S');
         });
 
         setInterval(() => {

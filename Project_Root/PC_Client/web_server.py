@@ -170,10 +170,19 @@ def _build_cmd_from_state(controller_state: dict) -> str:
     x = controller_state.get("left_stick_x", 0)
     y = controller_state.get("left_stick_y", 0)
     COMMAND_THRESHOLD = 0.4
+    ARC_THRESHOLD = 0.25
+
     if abs(x) < COMMAND_THRESHOLD and abs(y) < COMMAND_THRESHOLD:
         return "S"
-    if abs(y) >= abs(x):
-        return "F" if y > 0 else "B"
+
+    if y > COMMAND_THRESHOLD:
+        if abs(x) >= ARC_THRESHOLD:
+            return "E" if x > 0 else "Q"
+        return "F"
+
+    if y < -COMMAND_THRESHOLD:
+        return "B"
+
     return "R" if x > 0 else "L"
 
 def _build_ws_url(host: str | None = None):
