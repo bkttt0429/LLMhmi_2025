@@ -214,11 +214,15 @@
                             onmousedown="sendCmd('R')" onmouseup="sendCmd('S')"
                             ontouchstart="sendCmd('R')" ontouchend="sendCmd('S')" id="btn-d">D</button>
 
-                    <div></div>
+                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
+                            onmousedown="sendCmd('Z')" onmouseup="sendCmd('S')"
+                            ontouchstart="sendCmd('Z')" ontouchend="sendCmd('S')" id="btn-z">Z</button>
                     <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
                             onmousedown="sendCmd('B')" onmouseup="sendCmd('S')"
                             ontouchstart="sendCmd('B')" ontouchend="sendCmd('S')" id="btn-x">X</button>
-                    <div></div>
+                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
+                            onmousedown="sendCmd('C')" onmouseup="sendCmd('S')"
+                            ontouchstart="sendCmd('C')" ontouchend="sendCmd('S')" id="btn-c">C</button>
                 </div>
 
                 <button class="btn-cy w-full py-2 sm:py-3 rounded tracking-widest text-xs sm:text-sm" onclick="toggleLight()">TOGGLE LIGHTS (ESP32 CAM)</button>
@@ -229,9 +233,10 @@
                 <div class="flex items-center gap-4">
                     <div class="relative xbox-stick" id="xbox-stick"></div>
                     <div class="space-y-1 text-xs sm:text-sm text-gray-300">
-                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">LS</span>：移動控制</div>
+                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">LS</span>：360° 八向移動</div>
                         <div class="flex items-center gap-2"><span class="text-green-400 font-mono">X</span>：緊急煞車</div>
                         <div class="flex items-center gap-2"><span class="text-green-400 font-mono">A</span>：補光燈 (CAM)</div>
+                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">↙ / ↘</span>：後退弧線轉彎 (Z / C)</div>
                     </div>
                 </div>
                 <div class="flex items-center justify-between text-[10px] sm:text-xs text-gray-400">
@@ -471,7 +476,10 @@
         }
 
         function highlightKey(cmd) {
-            const map = {'F':'btn-w', 'L':'btn-a', 'S':'btn-s', 'R':'btn-d', 'B':'btn-x', 'Q':'btn-q', 'E':'btn-e'};
+            const map = {
+                'F':'btn-w', 'L':'btn-a', 'S':'btn-s', 'R':'btn-d', 'B':'btn-x',
+                'Q':'btn-q', 'E':'btn-e', 'Z':'btn-z', 'C':'btn-c'
+            };
             const id = map[cmd];
             if(id) {
                 const btn = document.getElementById(id);

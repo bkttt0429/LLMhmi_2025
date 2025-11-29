@@ -165,25 +165,60 @@ def add_log(msg):
 state.add_log = add_log
 
 def _build_cmd_from_state(controller_state: dict) -> str:
+    """
+    平滑搖桿控制 - 支援 360° 方向
+    """
     if controller_state.get("stick_pressed") or controller_state.get("button_x"):
         return "S"
+    
     x = controller_state.get("left_stick_x", 0)
     y = controller_state.get("left_stick_y", 0)
-    COMMAND_THRESHOLD = 0.4
-    ARC_THRESHOLD = 0.25
-
-    if abs(x) < COMMAND_THRESHOLD and abs(y) < COMMAND_THRESHOLD:
+    
+    # 計算搖桿角度和強度
+    import math
+    magnitude = math.sqrt(x**2 + y**2)
+    
+    # 死區判斷
+    if magnitude < 0.25:
         return "S"
-
-    if y > COMMAND_THRESHOLD:
-        if abs(x) >= ARC_THRESHOLD:
-            return "E" if x > 0 else "Q"
+    
+    # 計算角度 (0° = 正上方, 順時針)
+    angle = math.degrees(math.atan2(x, y))  # atan2(x, y) 讓上方是 0°
+    if angle < 0:
+        angle += 360
+    
+    # === 8 方向控制映射 ===
+    # 前進區域 (337.5° ~ 22.5°)
+    if angle >= 337.5 or angle < 22.5:
         return "F"
-
-    if y < -COMMAND_THRESHOLD:
+    
+    # 前進右轉 (22.5° ~ 67.5°)
+    elif 22.5 <= angle < 67.5:
+        return "E"  # W+D
+    
+    # 右轉區域 (67.5° ~ 112.5°)
+    elif 67.5 <= angle < 112.5:
+        return "R"
+    
+    # 後退右轉 (112.5° ~ 157.5°)
+    elif 112.5 <= angle < 157.5:
+        return "C"  # S+D
+    
+    # 後退區域 (157.5° ~ 202.5°)
+    elif 157.5 <= angle < 202.5:
         return "B"
-
-    return "R" if x > 0 else "L"
+    
+    # 後退左轉 (202.5° ~ 247.5°)
+    elif 202.5 <= angle < 247.5:
+        return "Z"  # S+A
+    
+    # 左轉區域 (247.5° ~ 292.5°)
+    elif 247.5 <= angle < 292.5:
+        return "L"
+    
+    # 前進左轉 (292.5° ~ 337.5°)
+    else:  # 292.5 <= angle < 337.5
+        return "Q"  # W+A
 
 def _build_ws_url(host: str | None = None):
     host = host or state.bridge_ip or state.camera_ip or state.current_ip
