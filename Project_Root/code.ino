@@ -1,28 +1,25 @@
 /**
- * ESP32-S3-CAM N16R8 終極整合版 (包含 HTTP 遙控轉發功能)
- * 功能：
- * 1. 影像串流 (Web Server)
- * 2. 超聲波測距 (GPIO 21, 單線模式)
- * 3. [新增] 接收 Serial 指令並透過 WiFi 轉發給 ESP8266 車子
+ * ESP32-S3-CAM N16R8 終極整合版 (非阻塞式轉發)
+ * 修正：使用獨立任務處理 HTTP 轉發，避免阻塞主迴圈
  */
 
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <WebServer.h>
-#include <HTTPClient.h> // [新增] 用於發送 HTTP 請求給車子
+#include <HTTPClient.h>
 
 // ============= WiFi 設定 =============
-const char* ssid     = "Bk";        // 請確認您的 WiFi 名稱
-const char* password = "........."; // 請確認您的 WiFi 密碼
+const char* ssid     = "Bk";
+const char* password = ".........";
 
-// ============= 遙控車設定 [新增] =============
-String carIP = "boebot.local";  // 車子的 IP，預設使用 mDNS 名稱，也可改為 "192.168.x.x"
+// ============= 遙控車設定 =============
+String carIP = "boebot.local";
 const int CAR_PORT = 80;
 
-// ============= 超聲波腳位 (修正為 21) =============
+// ============= 超聲波腳位 =============
 #define SIG_PIN 21
 
-// ============= 相機腳位 (Freenove / 通用 ESP32-S3 N16R8) =============
+// ============= 相機腳位 =============
 #define PWDN_GPIO_NUM     -1
 #define RESET_GPIO_NUM    -1
 #define XCLK_GPIO_NUM     15
@@ -38,45 +35,67 @@ const int CAR_PORT = 80;
 #define Y2_GPIO_NUM       11
 #define VSYNC_GPIO_NUM    6
 #define HREF_GPIO_NUM     7
-#define PCLK_GPIO_NUM     13 
 #define PCLK_GPIO_NUM     13
 
 WebServer server(81);
 bool isStreaming = false;
 
-// ============= [新增] 轉發指令到 ESP8266 車子 =============
-void forwardCommandToCar(char cmd) {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[FORWARD] WiFi not connected!");
-    return;
-  }
+// ============= [新增] 指令佇列 =============
+#define CMD_QUEUE_SIZE 10
+char cmdQueue[CMD_QUEUE_SIZE];
+volatile int cmdQueueHead = 0;
+volatile int cmdQueueTail = 0;
 
-  // 組合 URL: http://boebot.local/cmd?act=F
-  String url = "http://" + carIP + "/cmd?act=" + String(cmd);
-  
-  HTTPClient http;
-  http.setTimeout(500);  // 設定 500ms 超時，避免卡住太久
-  
-  // 開始連線
-  if (http.begin(url)) {
-    int httpCode = http.GET(); // 發送 GET 請求
-    
-    if (httpCode > 0) {
-      Serial.printf("[FORWARD] ✅ Sent '%c' to car (Code: %d)\n", cmd, httpCode);
-    } else {
-      Serial.printf("[FORWARD] ❌ Failed to send '%c' (Error: %s)\n", cmd, http.errorToString(httpCode).c_str());
-    }
-    http.end(); // 結束連線
-  } else {
-    Serial.println("[FORWARD] ❌ Unable to connect to car");
+// 將指令加入佇列（非阻塞）
+void queueCommand(char cmd) {
+  int next = (cmdQueueHead + 1) % CMD_QUEUE_SIZE;
+  if (next != cmdQueueTail) {
+    cmdQueue[cmdQueueHead] = cmd;
+    cmdQueueHead = next;
   }
 }
 
-// ============= 超聲波初始化 (單線模式) =============
+// 從佇列取出指令
+char dequeueCommand() {
+  if (cmdQueueHead == cmdQueueTail) return 0;
+  char cmd = cmdQueue[cmdQueueTail];
+  cmdQueueTail = (cmdQueueTail + 1) % CMD_QUEUE_SIZE;
+  return cmd;
+}
+
+// ============= [修改] 獨立任務處理 HTTP 轉發 =============
+void commandForwardTask(void *parameter) {
+  HTTPClient http;
+  
+  while (true) {
+    char cmd = dequeueCommand();
+    
+    if (cmd != 0) {
+      String url = "http://" + carIP + "/cmd?act=" + String(cmd);
+      
+      http.setTimeout(300); // 縮短超時時間
+      http.begin(url);
+      
+      int httpCode = http.GET();
+      
+      if (httpCode > 0) {
+        Serial.printf("[FWD] ✓ %c\n", cmd);
+      } else {
+        Serial.printf("[FWD] ✗ %c\n", cmd);
+      }
+      
+      http.end();
+    }
+    
+    vTaskDelay(10 / portTICK_PERIOD_MS); // 釋放 CPU
+  }
+}
+
+// ============= 超聲波初始化 =============
 void init_ultrasonic() {
-  pinMode(SIG_PIN, INPUT_PULLDOWN); 
-  digitalWrite(SIG_PIN, LOW);         
-  Serial.println("[OK] 超聲波模組初始化完成");
+  pinMode(SIG_PIN, INPUT_PULLDOWN);
+  digitalWrite(SIG_PIN, LOW);
+  Serial.println("[OK] 超聲波模組初始化完成 (Trig=13, Echo=14)");
 }
 
 // ============= 超聲波測距 =============
@@ -91,7 +110,6 @@ float get_distance() {
   digitalWrite(SIG_PIN, LOW);
 
   pinMode(SIG_PIN, INPUT_PULLUP);
-  
   duration = pulseIn(SIG_PIN, HIGH, 30000);
   
   if (duration == 0) return -1.0;
@@ -134,13 +152,10 @@ bool init_camera() {
     config.fb_count = 1;
   }
 
-  if (esp_camera_init(&config) != ESP_OK) {
-    return false;
-  }
-  return true;
+  return esp_camera_init(&config) == ESP_OK;
 }
 
-// ============= Web Server 處理函數 =============
+// ============= Web Server =============
 void handle_root() {
   String html = R"(<!DOCTYPE html><html><head><meta charset="utf-8"><title>ESP32-S3-CAM</title>
 <style>body{background:#111;color:#0f0;font-family:monospace;text-align:center;padding:20px;}
@@ -149,7 +164,6 @@ img{width:100%;max-width:640px;border:2px solid #0f0;border-radius:8px;}
 </style></head><body><h1>ESP32-S3-CAM 遙控戰車</h1>
 <p>即時影像串流：</p><img src="/stream" id="stream"><br><br>
 <p><a href="/capture" class="btn">📷 拍照</a> <a href="/stream" class="btn">📺 全螢幕串流</a></p>
-<script>document.getElementById('stream').onerror=function(){this.style.display='none';setTimeout(()=>{this.src='/stream?t='+new Date().getTime();this.style.display='block';},1000);};</script>
 </body></html>)";
   server.send(200, "text/html", html);
 }
@@ -169,66 +183,96 @@ void handle_stream() {
   String response = "HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
   client.print(response);
   isStreaming = true;
+  Serial.println("[STREAM] 開始串流...");
+  
   while (client.connected()) {
     camera_fb_t *fb = esp_camera_fb_get();
     if (!fb) { delay(10); continue; }
-    client.print("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + String(fb->len) + "\r\n\r\n");
+    
+    client.print("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ");
+    client.print(fb->len);
+    client.print("\r\n\r\n");
     client.write(fb->buf, fb->len);
     client.print("\r\n");
+    
     esp_camera_fb_return(fb);
-    delay(1);
+    vTaskDelay(1); // 釋放 CPU
   }
+  
   isStreaming = false;
+  Serial.println("[STREAM] 串流結束");
 }
 
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
+  Serial.println("\n=== ESP32-S3-CAM 遙控戰車啟動 ===");
   
   init_ultrasonic();
 
   if (!init_camera()) {
-    Serial.println("❌ 相機初始化失敗！");
+    Serial.println("[ERR] 相機初始化失敗！");
     while (1) delay(1000);
   }
+  Serial.println("[OK] 相機初始化成功");
 
   WiFi.begin(ssid, password);
-  Serial.print("Connecting WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
+  Serial.print("連接 WiFi");
+  
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(500);
     Serial.print(".");
+    attempts++;
   }
   
-  Serial.println("\n[OK] WiFi Connected");
-  Serial.print("Camera IP: http://"); Serial.println(WiFi.localIP());
-  Serial.print("Car Target: http://"); Serial.println(carIP);
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n[OK] WiFi 連線成功");
+    Serial.print("IP 位址: http://");
+    Serial.println(WiFi.localIP());
+    Serial.print("Web Server 啟動：http://");
+    Serial.print(WiFi.localIP());
+    Serial.println(":81");
+    Serial.println("準備就緒！開啟你的賽博龐克介面吧！");
+  } else {
+    Serial.println("\n[ERR] WiFi 連線失敗");
+  }
 
   server.on("/", handle_root);
   server.on("/capture", handle_capture);
   server.on("/stream", handle_stream);
   server.begin();
+  
+  // 啟動獨立的指令轉發任務
+  xTaskCreatePinnedToCore(
+    commandForwardTask,   // 任務函數
+    "CommandForward",     // 任務名稱
+    4096,                 // Stack 大小
+    NULL,                 // 參數
+    1,                    // 優先級
+    NULL,                 // 任務 handle
+    0                     // CPU 核心 (0 或 1)
+  );
 }
 
 void loop() {
   server.handleClient();
 
-  // 1. [新增] 處理來自電腦 Serial 的指令 -> 轉發給車子
-  if (Serial.available() > 0) {
+  // 處理 Serial 指令（非阻塞）
+  while (Serial.available() > 0) {
     char cmd = Serial.read();
     
-    // 忽略換行符號
     if (cmd != '\n' && cmd != '\r') {
-      // 判斷是否為有效指令 (F/B/L/R/S)
-      if (cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S') {
-        forwardCommandToCar(cmd);
+      if (cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' || 
+          cmd == 'W' || cmd == 'w') {
+        queueCommand(cmd); // 加入佇列，由獨立任務處理
       }
-      // 這裡也可以加入邏輯來處理 "CAR_IP:192.168.x.x" 的字串設定
     }
   }
 
-  // 2. 超聲波測距邏輯 (每 100ms)
+  // 超聲波測距（降低頻率）
   static unsigned long lastDistTime = 0;
-  if (millis() - lastDistTime >= 100) {
+  if (millis() - lastDistTime >= 200) { // 改為 200ms
     lastDistTime = millis();
     float dist = get_distance();
     if (dist > 2.0 && dist < 400.0) {
@@ -236,5 +280,5 @@ void loop() {
     }
   }
   
-  delay(1);
+  vTaskDelay(1); // 釋放 CPU 給其他任務
 }

@@ -30,13 +30,19 @@ socketio = SocketIO(app)
 # === 全域狀態 ===
 class SystemState:
     def __init__(self):
-        self.current_ip = ""
+        self.current_ip = getattr(config, "DEFAULT_CAR_IP", "boebot.local")  # 車子控制 IP
+        self.camera_ip = ""   # 相機串流 IP
         self.serial_port = None
         self.preferred_port = None
         self.ser = None
-        self.stream_hosts = self._init_stream_hosts()
-        self.stream_host_index = 0
-        self.video_url = self._build_stream_url(self.stream_hosts[0]) if self.stream_hosts else ""
+        
+        # 初始化影像串流 URL
+        default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
+        if default_stream_ip:
+            self.video_url = f"http://{default_stream_ip}:{config.DEFAULT_STREAM_PORT}/stream"
+        else:
+            self.video_url = ""
+            
         self.radar_dist = 0.0
         self.logs = []
         self.is_running = True
@@ -46,58 +52,16 @@ class SystemState:
         self.flash_lock = threading.Lock()
         self.add_log = None
 
-    def _init_stream_hosts(self):
-        hosts = []
-        default_hosts = getattr(config, "DEFAULT_STREAM_HOSTS", [])
-        default_ip = getattr(config, "DEFAULT_STREAM_IP", "")
-        if default_ip:
-            default_hosts = [default_ip] + default_hosts
-        for host in default_hosts:
-            host = host.strip()
-            if host and host not in hosts:
-                hosts.append(host)
-        return hosts
-
-    def _build_stream_url(self, host):
-        return f"http://{host}:{config.DEFAULT_STREAM_PORT}/stream" if host else ""
-
-    def set_primary_host(self, host):
-        if not host:
-            return
-        if host in self.stream_hosts:
-            self.stream_hosts.remove(host)
-        self.stream_hosts.insert(0, host)
-        self.stream_host_index = 0
-        self.video_url = self._build_stream_url(host)
-
-    def rotate_stream_host(self):
-        if not self.stream_hosts:
-            self.video_url = ""
-            return None
-        self.stream_host_index = (self.stream_host_index + 1) % len(self.stream_hosts)
-        host = self.stream_hosts[self.stream_host_index]
-        self.video_url = self._build_stream_url(host)
-        return host
-
 state = SystemState()
 
 # Xbox 手把按鈕和搖桿的對應編號
 AXIS_LEFT_STICK_X = 0
 AXIS_LEFT_STICK_Y = 1
-AXIS_RIGHT_STICK_X = 2
-AXIS_RIGHT_STICK_Y = 3
-AXIS_LEFT_TRIGGER = 4
-AXIS_RIGHT_TRIGGER = 5
 BUTTON_A = 0
 BUTTON_B = 1
 BUTTON_X = 2
 BUTTON_Y = 3
-BUTTON_LEFT_BUMPER = 4
-BUTTON_RIGHT_BUMPER = 5
-BUTTON_BACK = 6
-BUTTON_START = 7
 BUTTON_LEFT_STICK = 8
-BUTTON_RIGHT_STICK = 9
 JOYSTICK_DEADZONE = 0.15
 
 class XboxController:
@@ -149,55 +113,76 @@ def add_log(msg):
 
 state.add_log = add_log
 
-# === 串口 / 網路寫入輔助 ===
+# === 🔧 修正後的指令發送函數 ===
 def send_serial_command(cmd, source="HTTP"):
     """
-    Primary control channel: USB serial.
-    Fallback: HTTP to the ESP8266 car if we have an IP (e.g., MDNS/manually set).
+    雙通道控制策略：
+    1. 優先透過 WiFi HTTP 直接控制 ESP8266 車子（快速、穩定）
+    2. 備用：透過 Serial 轉發給 ESP32-S3 CAM（需要 CAM 韌體支援）
     """
     if not cmd:
         return False, "Empty command"
 
-    # 1) Serial first
+    # 方法1: 直接透過 WiFi HTTP 控制車子（推薦）
+    target_urls = []
+    
+    # 先試車子的 IP（從 config 或手動設定）
+    if state.current_ip:
+        target_urls.append(f"http://{state.current_ip}/cmd")
+    
+    # 備用：嘗試 DEFAULT_CAR_IP
+    default_car_ip = getattr(config, "DEFAULT_CAR_IP", "")
+    if default_car_ip and f"http://{default_car_ip}/cmd" not in target_urls:
+        target_urls.append(f"http://{default_car_ip}/cmd")
+
+    # 嘗試所有 URL
+    for url in target_urls:
+        try:
+            resp = requests.get(f"{url}?act={cmd}", timeout=0.5)
+            if resp.ok:
+                # add_log(f"[{source}] ✅ WiFi → {cmd}")  # 減少 log 頻率
+                return True, "Sent via WiFi"
+        except requests.exceptions.RequestException:
+            continue
+
+    # 方法2: 透過 Serial 轉發（備用，需要 ESP32-S3 CAM 韌體支援）
     if state.ser and state.ser.is_open:
         try:
             state.ser.write(cmd.encode())
-            return True, "Sent over serial"
+            # add_log(f"[{source}] ⚠️ Serial fallback → {cmd}")
+            return True, "Sent via Serial (fallback)"
         except Exception as e:
-            add_log(f"[{source}] Serial write failed: {e}")
-            return False, str(e)
+            pass
 
-    # 2) Fallback to HTTP if we know the car IP
-    fallback_host = state.stream_hosts[0] if state.stream_hosts else getattr(config, "DEFAULT_STREAM_IP", "")
-    target_ip = state.current_ip or fallback_host
-    if target_ip:
-        url = f"http://{target_ip}/cmd?act={cmd}"
-        try:
-            resp = requests.get(url, timeout=2)
-            if resp.ok:
-                add_log(f"[{source}] HTTP control -> {url} ({resp.status_code})")
-                return True, "Sent over HTTP"
-            add_log(f"[{source}] HTTP control failed ({resp.status_code})")
-            return False, f"HTTP {resp.status_code}"
-        except Exception as e:
-            add_log(f"[{source}] HTTP control error: {e}")
-            return False, str(e)
-
-    add_log(f"[{source}] Serial unavailable and no IP set")
-    return False, "Serial not ready"
+    # 所有方法都失敗（只在第一次失敗時記錄）
+    if not hasattr(send_serial_command, '_last_fail_time') or \
+       time.time() - send_serial_command._last_fail_time > 5:
+        add_log(f"[{source}] ❌ Car unreachable: {cmd}")
+        add_log(f"💡 嘗試的 URL: {', '.join(target_urls)}")
+        add_log("💡 提示：確認車子已連線且網路可達")
+        send_serial_command._last_fail_time = time.time()
+    
+    return False, "Car unreachable"
 
 # === Threads ===
 def serial_worker_thread():
+    """
+    這個 Thread 主要用來：
+    1. 自動偵測並連接 Serial Port (通常是 ESP32-S3 CAM)
+    2. 讀取 Serial 資料 (例如 IP、距離感測器數據)
+    """
     add_log("Serial Worker Started...")
     while state.is_running:
         if state.is_flashing:
             time.sleep(0.5)
             continue
+            
+        # 自動偵測並連接 Serial Port
         if state.ser is None or not state.ser.is_open:
             ports = list_ports.comports()
             target = None
 
-            # 先檢查使用者指定的 Port
+            # 優先使用使用者指定的 Port
             if state.preferred_port:
                 for p in ports:
                     if p.device == state.preferred_port:
@@ -206,12 +191,13 @@ def serial_worker_thread():
                 if not target:
                     add_log(f"Preferred port {state.preferred_port} not found, waiting...")
 
-            # 若沒有指定或找不到，退回自動偵測
+            # 自動偵測
             if not target:
                 for p in ports:
                     if "USB" in p.description or "COM" in p.device or "ttyUSB" in p.device or "ttyACM" in p.device:
                         target = p.device
                         break
+                        
             if target:
                 try:
                     state.ser = serial.Serial(target, config.BAUD_RATE, timeout=0.1)
@@ -224,33 +210,43 @@ def serial_worker_thread():
             else:
                 time.sleep(1)
                 continue
-        if state.is_flashing:
-            continue
-        try:
-            if state.ser and state.ser.in_waiting:
-                line = state.ser.readline().decode(errors='ignore').strip()
-                if not line:
-                    continue
-                if "IP" in line and ("192." in line or "10." in line):
-                    ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', line)
-                    if ip_match:
-                        ip = ip_match.group()
-                        state.current_ip = ip
-                        state.set_primary_host(ip)
-                        add_log(f"Auto-IP: {ip}")
-                if "DIST:" in line:
-                    try:
-                        parts = line.split(":")
-                        state.radar_dist = float(parts[1].strip())
-                    except:
-                        pass
-                elif "DIST" not in line:
-                    add_log(f"[ESP] {line}")
-        except Exception as e:
-            print(f"[SERIAL] Read error: {e}")
-            if state.ser:
-                state.ser.close()
-            state.ser = None
+                
+        # 讀取 Serial 資料
+        if not state.is_flashing:
+            try:
+                if state.ser and state.ser.in_waiting:
+                    line = state.ser.readline().decode(errors='ignore').strip()
+                    if not line:
+                        continue
+                        
+                    # 解析 IP 地址
+                    if "IP" in line and ("192." in line or "10." in line):
+                        ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', line)
+                        if ip_match:
+                            ip = ip_match.group()
+                            state.camera_ip = ip
+                            state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
+                            add_log(f"📹 Camera IP detected: {ip}")
+                            # 如果還沒設定車子 IP，使用相同網段猜測
+                            if not state.current_ip:
+                                add_log(f"💡 提示：請在 Settings 中設定車子的 IP 地址")
+                            
+                    # 解析距離感測器數據
+                    if "DIST:" in line:
+                        try:
+                            parts = line.split(":")
+                            state.radar_dist = float(parts[1].strip())
+                        except:
+                            pass
+                    elif "DIST" not in line:
+                        add_log(f"[ESP] {line}")
+                        
+            except Exception as e:
+                print(f"[SERIAL] Read error: {e}")
+                if state.ser:
+                    state.ser.close()
+                state.ser = None
+                
         time.sleep(0.01)
 
 def xbox_controller_thread():
@@ -259,9 +255,7 @@ def xbox_controller_thread():
     if not controller.joystick:
         add_log("Xbox Controller not found.")
         return
-    last_cmd = None
-    light_on = False
-    last_button_a = 0
+        
     while state.is_running:
         controller_state = controller.get_input()
         if controller_state == "QUIT":
@@ -269,66 +263,24 @@ def xbox_controller_thread():
             break
         if controller_state:
             socketio.emit('controller_data', controller_state)
-
-            cmd = config.CMD_STOP
-            x = controller_state.get("left_stick_x", 0)
-            y = controller_state.get("left_stick_y", 0)
-            dpad_x = controller_state.get("dpad_x", 0)
-            dpad_y = controller_state.get("dpad_y", 0)
-
-            if y < -JOYSTICK_DEADZONE:
-                cmd = config.CMD_FORWARD
-            elif y > JOYSTICK_DEADZONE:
-                cmd = config.CMD_BACKWARD
-            elif x < -JOYSTICK_DEADZONE:
-                cmd = config.CMD_LEFT
-            elif x > JOYSTICK_DEADZONE:
-                cmd = config.CMD_RIGHT
-
-            if dpad_y == 1:
-                cmd = config.CMD_FORWARD
-            elif dpad_y == -1:
-                cmd = config.CMD_BACKWARD
-            elif dpad_x == -1:
-                cmd = config.CMD_LEFT
-            elif dpad_x == 1:
-                cmd = config.CMD_RIGHT
-
-            if cmd != last_cmd:
-                send_serial_command(cmd, source="XBOX")
-                last_cmd = cmd
-
-            button_a = controller_state.get("button_a", 0)
-            if button_a and not last_button_a:
-                light_on = not light_on
-                send_serial_command(
-                    config.CMD_LIGHT_ON if light_on else config.CMD_LIGHT_OFF,
-                    source="XBOX"
-                )
-            last_button_a = button_a
         time.sleep(0.02)
+        
     pygame.quit()
     add_log("Xbox Controller Thread Stopped.")
 
 def generate_frames():
     cap = None
     frame_count = 0
-    connect_failures = 0
     while state.is_running:
         if state.video_url and (cap is None or not cap.isOpened()):
             print(f"[VIDEO] Connecting to {state.video_url}")
             cap = cv2.VideoCapture(state.video_url)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             if not cap.isOpened():
-                connect_failures += 1
-                if connect_failures >= max(1, len(state.stream_hosts)):
-                    next_host = state.rotate_stream_host()
-                    if next_host:
-                        add_log(f"[VIDEO] Switching stream host -> {next_host}")
                 time.sleep(1)
                 continue
-            connect_failures = 0
             print("[VIDEO] Connected!")
+            
         if cap and cap.isOpened():
             success, frame = cap.read()
             if success:
@@ -346,6 +298,7 @@ def generate_frames():
                                 print("[AI] Detector init failed")
                                 state.ai_enabled = False
                                 state.detector = None
+                                
                         if state.detector and state.detector.enabled:
                             if frame_count % 30 == 0:
                                 print(f"[AI] Processing frame {frame_count}...")
@@ -365,6 +318,7 @@ def generate_frames():
                         traceback.print_exc()
                         state.ai_enabled = False
                         state.detector = None
+                        
                 try:
                     ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                     if ret:
@@ -400,7 +354,7 @@ def handle_disconnect():
 @socketio.on('command')
 def handle_command(data):
     cmd = data.get('cmd')
-    send_serial_command(cmd, source="WS")
+    send_serial_command(cmd, source="WebSocket")
 
 @app.route('/api/status')
 def api_status():
@@ -433,30 +387,39 @@ def api_flash():
             return jsonify({"status": "error", "msg": "Flash already in progress"})
         state.is_flashing = True
         add_log("🔒 Locking Serial Port for flashing...")
+        
     try:
         if state.ser and state.ser.is_open:
-            add_log("📌 Closing Serial connection...")
+            add_log("🔌 Closing Serial connection...")
             try:
                 state.ser.close()
             except:
                 pass
             state.ser = None
+            
         add_log("⏳ Waiting for port release (2s)...")
         time.sleep(2)
-        add_log("📁 Preparing sketch files...")
+        
+        add_log("📝 Preparing sketch files...")
         success, msg = prepare_sketch()
         if not success:
             add_log(f"❌ Prepare Error: {msg}")
             return jsonify({"status": "error", "msg": msg})
+            
         add_log("✅ Sketch files prepared")
+        
         if not state.serial_port:
             add_log("❌ No Serial Port detected")
             return jsonify({"status": "error", "msg": "No Port detected. Please connect your ESP32."})
+            
         add_log(f"🔥 Starting firmware flash on {state.serial_port}...")
         add_log("⚠️ Please do not disconnect the device!")
+        
         def flash_log_callback(msg):
             add_log(f"[FLASH] {msg}")
+            
         success = compile_and_upload(state.serial_port, flash_log_callback)
+        
         if success:
             add_log("✅ Firmware flash completed successfully!")
             add_log("⏳ Waiting for device reboot (3s)...")
@@ -465,6 +428,7 @@ def api_flash():
         else:
             add_log("❌ Firmware flash failed")
             return jsonify({"status": "error", "msg": "Compile or upload failed. Check logs."})
+            
     except Exception as e:
         add_log(f"❌ Flash Exception: {str(e)}")
         import traceback
@@ -481,7 +445,9 @@ def toggle_ai():
     if not YOLO_AVAILABLE:
         msg = "AI Library Missing (ultralytics)"
         return jsonify({"status": "error", "msg": msg})
+        
     state.ai_enabled = not state.ai_enabled
+    
     if state.ai_enabled and state.detector is None:
         try:
             state.detector = ObjectDetector()
@@ -493,20 +459,36 @@ def toggle_ai():
             state.ai_enabled = False
             state.detector = None
             return jsonify({"status": "error", "msg": str(e)})
+            
     status_str = "ACTIVATED" if state.ai_enabled else "DEACTIVATED"
     add_log(f"AI HUD {status_str}")
     return jsonify({"status": "ok", "ai_enabled": state.ai_enabled})
 
 @app.route('/api/set_ip', methods=['POST'])
 def api_set_ip():
+    """
+    設定兩種 IP：
+    1. 影像串流 IP (ESP32-S3 CAM)
+    2. 車子控制 IP (ESP8266)
+    """
     data = request.get_json(silent=True) or {}
     ip = data.get('ip') or request.values.get('ip')
-    if ip:
+    ip_type = data.get('type', 'stream')  # 'stream' 或 'car'
+    
+    if not ip:
+        return jsonify({"status": "error", "msg": "Invalid IP"})
+    
+    if ip_type == 'car':
+        # 設定車子的 IP（用於控制）
         state.current_ip = ip
-        state.set_primary_host(ip)
-        add_log(f"Manual IP Set: {ip}")
-        return jsonify({"status": "ok"})
-    return jsonify({"status": "error", "msg": "Invalid IP"})
+        add_log(f"🚗 Car Control IP Set: {ip}")
+    else:
+        # 設定影像串流 IP
+        state.current_ip = ip
+        state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
+        add_log(f"📹 Camera Stream IP Set: {ip}")
+    
+    return jsonify({"status": "ok", "ip": ip, "type": ip_type})
 
 @app.route('/api/ports')
 def api_ports():
@@ -519,6 +501,7 @@ def api_set_port():
     data = request.json or {}
     port = data.get('port')
     ports = [p.device for p in list_ports.comports()]
+    
     if not port or port not in ports:
         return jsonify({"status": "error", "msg": "Port not available"})
 

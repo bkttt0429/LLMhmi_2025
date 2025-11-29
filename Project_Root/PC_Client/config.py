@@ -1,12 +1,29 @@
 import os
 
 # ========= 系統參數 =========
-# ESP32 串流的預設 Port
+# ESP32-S3 CAM 串流的預設 Port
 DEFAULT_STREAM_PORT = 81
-# 若已知 CAM 的 IP，可在此預先填入或透過環境變數 DEFAULT_STREAM_IP 指定，
-# 方便啟動時直接嘗試連線，例如：export DEFAULT_STREAM_IP=192.168.4.1
-# 預設改為 mDNS 名稱，讓未連上 USB 時也能直接嘗試串流
-DEFAULT_STREAM_IP = os.environ.get("DEFAULT_STREAM_IP", "boebot.local")
+
+# ========= 🚗 車子控制設定 (ESP8266) =========
+# 方法 1: 使用 mDNS（推薦，如果網路支援）
+DEFAULT_CAR_IP = "boebot.local"
+
+# 方法 2: 使用實際 IP（如果 mDNS 不可用）
+# 請將下面這行取消註解，並填入 ESP8266 的實際 IP
+# DEFAULT_CAR_IP = "192.168.43.100"  # 替換成您的 ESP8266 IP
+
+# ========= 📹 相機串流設定 (ESP32-S3 CAM) =========
+# 方法 1: 使用 mDNS
+DEFAULT_STREAM_IP = os.environ.get("DEFAULT_STREAM_IP", "")
+
+# 方法 2: 如果已知 CAM 的 IP，可直接填入
+# DEFAULT_STREAM_IP = "10.164.216.133"  # 替換成您的 ESP32-S3 CAM IP
+
+# 多個串流來源（按優先順序）
+DEFAULT_STREAM_HOSTS = [
+    "boebot.local",
+    # 如果需要，可以在這裡加入更多備用 IP
+]
 
 # Arduino CLI 路徑 (燒錄用)
 SKETCH_DIR = "../esp32s3_cam"          
