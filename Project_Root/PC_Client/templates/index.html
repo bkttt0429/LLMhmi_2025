@@ -454,11 +454,7 @@
         let lastChartUpdate = 0;
         const CHART_THROTTLE_MS = 50; // Max 20fps for chart
 
-        // Gamepad State
-        let gamepadIndex = null;
-        let lastGamepadCmd = 'S';
-        let gamepadLoopActive = false;
-        let lastGamepadName = '';
+        let controllerLinked = false;
 
         // === Initialization ===
         window.onload = () => {
@@ -472,18 +468,6 @@
             // Initial Log
             log("System Initialized. Native WS mode active.");
             
-            // Gamepad listeners
-            window.addEventListener("gamepadconnected", (e) => {
-                gamepadIndex = e.gamepad.index;
-                document.getElementById('gamepad-status').classList.add('gamepad-connected');
-                lastGamepadName = e.gamepad.id || '';
-                log(`Gamepad Connected: ${e.gamepad.id}`);
-            });
-            window.addEventListener("gamepaddisconnected", (e) => {
-                gamepadIndex = null;
-                document.getElementById('gamepad-status').classList.remove('gamepad-connected');
-                log("Gamepad Disconnected");
-            });
         };
 
         window.addEventListener('resize', resizeCanvas);
@@ -533,7 +517,12 @@
             });
 
             socket.on('controller_data', (data) => {
-                updateXboxVisual(data.left_stick_x || 0, data.left_stick_y || 0, data.button_b || data.button_a || false);
+                controllerLinked = true;
+                document.getElementById('gamepad-status').classList.add('gamepad-connected');
+                updateXboxVisual(data.left_stick_x || 0, data.left_stick_y || 0, data.stick_pressed || false);
+                if (data.cmd) {
+                    highlightKey(data.cmd);
+                }
             });
         }
 
@@ -545,8 +534,18 @@
         // === Data Handling ===
         function handleData(data) {
             // Update IP
-            if (data.ip && document.getElementById('ip-input').value === "") {
-                document.getElementById('ip-input').value = data.ip;
+            const ipInput = document.getElementById('ip-input');
+            if (ipInput && ipInput.value === "") {
+                if (data.camera_ip) {
+                    ipInput.value = data.camera_ip;
+                } else if (data.ip) {
+                    ipInput.value = data.ip;
+                }
+            }
+
+            const settingsIp = document.getElementById('settings-ip');
+            if (settingsIp && settingsIp.value === "" && data.car_ip) {
+                settingsIp.value = data.car_ip;
             }
             
             // Port Status
@@ -628,9 +627,6 @@
             }
 
             // 3. Poll Gamepad
-            detectGamepad();
-            pollGamepad();
-
             requestAnimationFrame(animationLoop);
         }
 
@@ -699,70 +695,6 @@
                 ctx.shadowColor = ctx.fillStyle;
                 ctx.fill();
                 ctx.shadowBlur = 0;
-            }
-        }
-
-        // === Gamepad Logic ===
-        function detectGamepad() {
-            if (gamepadIndex !== null) {
-                const current = navigator.getGamepads()[gamepadIndex];
-                if (!current) {
-                    gamepadIndex = null;
-                    document.getElementById('gamepad-status').classList.remove('gamepad-connected');
-                    if (lastGamepadName) log(`Gamepad Disconnected: ${lastGamepadName}`);
-                    lastGamepadName = '';
-                }
-                return;
-            }
-
-            const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-            for (let i = 0; i < pads.length; i++) {
-                if (pads[i]) {
-                    gamepadIndex = pads[i].index;
-                    lastGamepadName = pads[i].id || '';
-                    document.getElementById('gamepad-status').classList.add('gamepad-connected');
-                    log(`Gamepad Connected: ${pads[i].id || 'Unknown Controller'}`);
-                    break;
-                }
-            }
-        }
-
-        function pollGamepad() {
-            if (gamepadIndex === null) return;
-
-            const gp = navigator.getGamepads()[gamepadIndex];
-            if(!gp) return;
-
-            // Deadzone
-            const threshold = 0.5;
-            
-            // Axis 1: Left Stick Y (Up/Down)
-            // Axis 0: Left Stick X (Left/Right)
-            const y = gp.axes[1];
-            const x = gp.axes[0];
-            const stickPressed = gp.buttons[10] ? gp.buttons[10].pressed : false;
-
-            let cmd = 'S'; // Default Stop
-
-            if (y < -threshold) cmd = 'F';      // Forward
-            else if (y > threshold) cmd = 'B';  // Backward
-            else if (x < -threshold) cmd = 'L'; // Left
-            else if (x > threshold) cmd = 'R';  // Right
-
-            if (stickPressed) cmd = 'S';        // Brake on stick press
-            
-            // Buttons
-            // 0: A, 1: B, 2: X, 3: Y
-            if (gp.buttons[0].pressed) toggleLight(); // A Button
-            if (gp.buttons[2].pressed) cmd = 'S';     // X Button (Emergency Stop)
-            if (gp.buttons[3].pressed) toggleAI();    // Y Button
-
-            updateXboxVisual(x, -y, stickPressed);
-
-            // Only send if command changed to avoid flooding
-            if (cmd !== lastGamepadCmd) {
-                sendCmd(cmd);
-                lastGamepadCmd = cmd;
             }
         }
 
@@ -903,10 +835,10 @@
         
         function setManualIP() {
              const ip = document.getElementById('ip-input').value;
-             if(ip) fetch('/api/set_ip', { 
-                method: 'POST', 
+             if(ip) fetch('/api/set_ip', {
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ip}) 
+                body: JSON.stringify({ ip, type: 'stream' })
              });
         }
         
@@ -916,9 +848,9 @@
                 fetch('/api/set_ip', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ip: ip })
+                    body: JSON.stringify({ ip, type: 'car' })
                 });
-                log(`Settings applied: IP=${ip}`);
+                log(`Settings applied: CAR IP=${ip}`);
             }
             setPreferredPort();
         }
