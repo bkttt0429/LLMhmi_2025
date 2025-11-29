@@ -391,6 +391,9 @@ def handle_command(data):
 def api_status():
     return jsonify({
         "ip": state.current_ip,
+        "car_ip": state.current_ip,
+        "camera_ip": state.camera_ip,
+        "video_url": state.video_url,
         "port": state.serial_port or "DISCONNECTED",
         "preferred_port": state.preferred_port,
         "dist": state.radar_dist,
@@ -515,7 +518,7 @@ def api_set_ip():
         add_log(f"🚗 Car Control IP Set: {ip}")
     else:
         # 設定影像串流 IP
-        state.current_ip = ip
+        state.camera_ip = ip
         state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
         add_log(f"📹 Camera Stream IP Set: {ip}")
     

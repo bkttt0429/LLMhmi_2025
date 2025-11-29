@@ -534,8 +534,18 @@
         // === Data Handling ===
         function handleData(data) {
             // Update IP
-            if (data.ip && document.getElementById('ip-input').value === "") {
-                document.getElementById('ip-input').value = data.ip;
+            const ipInput = document.getElementById('ip-input');
+            if (ipInput && ipInput.value === "") {
+                if (data.camera_ip) {
+                    ipInput.value = data.camera_ip;
+                } else if (data.ip) {
+                    ipInput.value = data.ip;
+                }
+            }
+
+            const settingsIp = document.getElementById('settings-ip');
+            if (settingsIp && settingsIp.value === "" && data.car_ip) {
+                settingsIp.value = data.car_ip;
             }
             
             // Port Status
@@ -825,10 +835,10 @@
         
         function setManualIP() {
              const ip = document.getElementById('ip-input').value;
-             if(ip) fetch('/api/set_ip', { 
-                method: 'POST', 
+             if(ip) fetch('/api/set_ip', {
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ip}) 
+                body: JSON.stringify({ ip, type: 'stream' })
              });
         }
         
@@ -838,9 +848,9 @@
                 fetch('/api/set_ip', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ip: ip })
+                    body: JSON.stringify({ ip, type: 'car' })
                 });
-                log(`Settings applied: IP=${ip}`);
+                log(`Settings applied: CAR IP=${ip}`);
             }
             setPreferredPort();
         }
