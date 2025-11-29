@@ -231,7 +231,19 @@
                         <div class="flex items-center gap-2"><span class="text-green-400 font-mono">Y</span>：AI 開/關</div>
                     </div>
                 </div>
-                <div class="text-[10px] text-gray-500">左搖桿偏移與按下狀態會即時顯示。</div>
+                <div class="flex items-center justify-between text-[10px] sm:text-xs text-gray-400">
+                    <div>LINK：<span id="xbox-link" class="text-red-500 font-bold">OFFLINE</span></div>
+                    <div>CMD：<span id="xbox-cmd" class="text-yellow-400 font-mono">--</span></div>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-[10px] sm:text-xs text-gray-300">
+                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">A</span><span id="xbox-a" class="text-gray-500">OFF</span></div>
+                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">B</span><span id="xbox-b" class="text-gray-500">OFF</span></div>
+                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">X</span><span id="xbox-x" class="text-gray-500">OFF</span></div>
+                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">Y</span><span id="xbox-y" class="text-gray-500">OFF</span></div>
+                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">LS</span><span id="xbox-ls" class="text-gray-500">OFF</span></div>
+                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">D-PAD</span><span id="xbox-dpad" class="text-gray-500">—</span></div>
+                </div>
+                <div class="text-[10px] text-gray-500">左搖桿偏移與按下狀態、按鍵回饋會即時顯示。</div>
             </div>
 
             <div class="cyber-border p-2 sm:p-3 text-[10px] sm:text-xs flex flex-col gap-1">
@@ -454,11 +466,8 @@
         let lastChartUpdate = 0;
         const CHART_THROTTLE_MS = 50; // Max 20fps for chart
 
-        // Gamepad State
-        let gamepadIndex = null;
-        let lastGamepadCmd = 'S';
-        let gamepadLoopActive = false;
-        let lastGamepadName = '';
+        let controllerLinked = false;
+        let lastXboxUpdate = 0;
 
         // === Initialization ===
         window.onload = () => {
@@ -468,22 +477,11 @@
             requestAnimationFrame(animationLoop);
             fetchPorts();
             startStatusPolling();
-            
+            startXboxHeartbeat();
+
             // Initial Log
             log("System Initialized. Native WS mode active.");
-            
-            // Gamepad listeners
-            window.addEventListener("gamepadconnected", (e) => {
-                gamepadIndex = e.gamepad.index;
-                document.getElementById('gamepad-status').classList.add('gamepad-connected');
-                lastGamepadName = e.gamepad.id || '';
-                log(`Gamepad Connected: ${e.gamepad.id}`);
-            });
-            window.addEventListener("gamepaddisconnected", (e) => {
-                gamepadIndex = null;
-                document.getElementById('gamepad-status').classList.remove('gamepad-connected');
-                log("Gamepad Disconnected");
-            });
+
         };
 
         window.addEventListener('resize', resizeCanvas);
@@ -529,11 +527,27 @@
                 document.getElementById('ws-status').className = "text-red-500 font-bold";
                 document.getElementById('link-text').innerText = "RETRYING...";
                 document.getElementById('link-text').className = "text-yellow-500 font-bold";
+                controllerLinked = false;
+                lastXboxUpdate = 0;
+                setGamepadLink(false);
                 setTimeout(initWebSocket, 2000);
             });
 
             socket.on('controller_data', (data) => {
-                updateXboxVisual(data.left_stick_x || 0, data.left_stick_y || 0, data.button_b || data.button_a || false);
+                controllerLinked = true;
+                lastXboxUpdate = Date.now();
+                setGamepadLink(true);
+                updateXboxVisual(data.left_stick_x || 0, data.left_stick_y || 0, data.stick_pressed || false);
+                if (data.cmd) {
+                    highlightKey(data.cmd);
+                    updateXboxCommand(data.cmd);
+                }
+                updateXboxButtons(data);
+            });
+
+            socket.on('log', (payload) => {
+                const message = payload?.data || '';
+                if (message) log(`[SVR] ${message}`);
             });
         }
 
@@ -545,8 +559,18 @@
         // === Data Handling ===
         function handleData(data) {
             // Update IP
-            if (data.ip && document.getElementById('ip-input').value === "") {
-                document.getElementById('ip-input').value = data.ip;
+            const ipInput = document.getElementById('ip-input');
+            if (ipInput && ipInput.value === "") {
+                if (data.camera_ip) {
+                    ipInput.value = data.camera_ip;
+                } else if (data.ip) {
+                    ipInput.value = data.ip;
+                }
+            }
+
+            const settingsIp = document.getElementById('settings-ip');
+            if (settingsIp && settingsIp.value === "" && data.car_ip) {
+                settingsIp.value = data.car_ip;
             }
             
             // Port Status
@@ -628,9 +652,6 @@
             }
 
             // 3. Poll Gamepad
-            detectGamepad();
-            pollGamepad();
-
             requestAnimationFrame(animationLoop);
         }
 
@@ -702,70 +723,6 @@
             }
         }
 
-        // === Gamepad Logic ===
-        function detectGamepad() {
-            if (gamepadIndex !== null) {
-                const current = navigator.getGamepads()[gamepadIndex];
-                if (!current) {
-                    gamepadIndex = null;
-                    document.getElementById('gamepad-status').classList.remove('gamepad-connected');
-                    if (lastGamepadName) log(`Gamepad Disconnected: ${lastGamepadName}`);
-                    lastGamepadName = '';
-                }
-                return;
-            }
-
-            const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-            for (let i = 0; i < pads.length; i++) {
-                if (pads[i]) {
-                    gamepadIndex = pads[i].index;
-                    lastGamepadName = pads[i].id || '';
-                    document.getElementById('gamepad-status').classList.add('gamepad-connected');
-                    log(`Gamepad Connected: ${pads[i].id || 'Unknown Controller'}`);
-                    break;
-                }
-            }
-        }
-
-        function pollGamepad() {
-            if (gamepadIndex === null) return;
-
-            const gp = navigator.getGamepads()[gamepadIndex];
-            if(!gp) return;
-
-            // Deadzone
-            const threshold = 0.5;
-            
-            // Axis 1: Left Stick Y (Up/Down)
-            // Axis 0: Left Stick X (Left/Right)
-            const y = gp.axes[1];
-            const x = gp.axes[0];
-            const stickPressed = gp.buttons[10] ? gp.buttons[10].pressed : false;
-
-            let cmd = 'S'; // Default Stop
-
-            if (y < -threshold) cmd = 'F';      // Forward
-            else if (y > threshold) cmd = 'B';  // Backward
-            else if (x < -threshold) cmd = 'L'; // Left
-            else if (x > threshold) cmd = 'R';  // Right
-
-            if (stickPressed) cmd = 'S';        // Brake on stick press
-            
-            // Buttons
-            // 0: A, 1: B, 2: X, 3: Y
-            if (gp.buttons[0].pressed) toggleLight(); // A Button
-            if (gp.buttons[2].pressed) cmd = 'S';     // X Button (Emergency Stop)
-            if (gp.buttons[3].pressed) toggleAI();    // Y Button
-
-            updateXboxVisual(x, -y, stickPressed);
-
-            // Only send if command changed to avoid flooding
-            if (cmd !== lastGamepadCmd) {
-                sendCmd(cmd);
-                lastGamepadCmd = cmd;
-            }
-        }
-
         // === Command Sending (WS First, Fetch Fallback) ===
         function sendCmd(cmd) {
             highlightKey(cmd);
@@ -802,6 +759,71 @@
             const dy = -clamp(y) * offset;
             stick.style.transform = `translate(${dx}px, ${dy}px)`;
             stick.classList.toggle('xbox-pulse', !!pressed);
+        }
+
+        function setGamepadLink(isConnected) {
+            const icon = document.getElementById('gamepad-status');
+            if (icon) {
+                icon.classList.toggle('gamepad-connected', isConnected);
+            }
+
+            const linkEl = document.getElementById('xbox-link');
+            if (linkEl) {
+                linkEl.innerText = isConnected ? 'ONLINE' : 'OFFLINE';
+                linkEl.className = isConnected ? 'text-green-400 font-bold' : 'text-red-500 font-bold';
+            }
+
+            if (!isConnected) {
+                updateXboxCommand('--');
+                updateXboxVisual(0, 0, false);
+                updateXboxButtons({});
+            }
+        }
+
+        function updateXboxCommand(cmd) {
+            const cmdEl = document.getElementById('xbox-cmd');
+            if (!cmdEl) return;
+            cmdEl.innerText = cmd || '--';
+            cmdEl.className = cmd ? 'text-yellow-400 font-mono font-bold' : 'text-gray-500';
+        }
+
+        function setButtonState(id, active) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.innerText = active ? 'ON' : 'OFF';
+            el.className = active ? 'text-green-400 font-bold' : 'text-gray-500';
+        }
+
+        function setDpadState(x, y) {
+            const el = document.getElementById('xbox-dpad');
+            if (!el) return;
+            let dir = '—';
+            if (x || y) {
+                const horiz = x > 0 ? '→' : x < 0 ? '←' : '';
+                const vert = y > 0 ? '↑' : y < 0 ? '↓' : '';
+                dir = `${vert}${horiz}` || '—';
+            }
+            el.innerText = dir;
+            el.className = (x || y) ? 'text-green-400 font-bold' : 'text-gray-500';
+        }
+
+        function updateXboxButtons(data) {
+            setButtonState('xbox-a', data.button_a);
+            setButtonState('xbox-b', data.button_b);
+            setButtonState('xbox-x', data.button_x);
+            setButtonState('xbox-y', data.button_y);
+            setButtonState('xbox-ls', data.stick_pressed);
+            setDpadState(data.dpad_x || 0, data.dpad_y || 0);
+        }
+
+        function startXboxHeartbeat() {
+            setInterval(() => {
+                if (lastXboxUpdate && Date.now() - lastXboxUpdate > 2000) {
+                    controllerLinked = false;
+                    lastXboxUpdate = 0;
+                    setGamepadLink(false);
+                }
+            }, 500);
         }
 
         // === Other Logic (Chart, Stats) ===
@@ -903,10 +925,10 @@
         
         function setManualIP() {
              const ip = document.getElementById('ip-input').value;
-             if(ip) fetch('/api/set_ip', { 
-                method: 'POST', 
+             if(ip) fetch('/api/set_ip', {
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ip}) 
+                body: JSON.stringify({ ip, type: 'stream' })
              });
         }
         
@@ -916,9 +938,9 @@
                 fetch('/api/set_ip', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ip: ip })
+                    body: JSON.stringify({ ip, type: 'car' })
                 });
-                log(`Settings applied: IP=${ip}`);
+                log(`Settings applied: CAR IP=${ip}`);
             }
             setPreferredPort();
         }
@@ -1008,51 +1030,64 @@
             const progressBar = document.getElementById('flash-progress-bar');
             const progressText = document.getElementById('flash-progress-text');
             const statusText = document.getElementById('flash-status-text');
-            
+
             if (!confirm('⚠️ WARNING: This will flash new firmware to your ESP32-S3 CAM.\n\nThe device will be temporarily disconnected during this process.\n\nContinue?')) {
                 return;
             }
-            
+
             btn.disabled = true;
             btn.innerText = '⏳ FLASHING...';
             progressContainer.classList.remove('hidden');
-            log('🔥 Starting firmware flash process...');
-            
-            const stages = [
-                { percent: 10, text: 'Preparing sketch files...', delay: 500 },
-                { percent: 20, text: 'Compiling firmware...', delay: 3000 },
-                { percent: 50, text: 'Uploading to ESP32...', delay: 5000 },
-                { percent: 80, text: 'Verifying upload...', delay: 2000 },
-                { percent: 100, text: 'Complete!', delay: 500 }
-            ];
-            
-            let currentStage = 0;
-            const updateProgress = () => {
-                if (currentStage < stages.length) {
-                    const stage = stages[currentStage];
-                    progressBar.style.width = stage.percent + '%';
-                    progressText.innerText = stage.percent + '%';
-                    statusText.innerText = stage.text;
-                    log(`[FLASH] ${stage.text}`);
-                    currentStage++;
-                    setTimeout(updateProgress, stage.delay);
+            progressBar.style.width = '12%';
+            progressText.innerText = '...';
+            statusText.innerText = 'Starting flash (this may take up to a few minutes)...';
+            statusText.className = 'text-xs text-orange-400 text-center';
+            log('🔥 Starting firmware flash process (check logs for progress)...');
+
+            try {
+                const res = await fetch('/api/flash', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await res.json();
+                const ok = data.status === 'ok';
+
+                progressBar.style.width = '100%';
+                progressText.innerText = ok ? '100%' : 'ERR';
+                progressBar.classList.remove('bg-orange-500', 'bg-red-500', 'bg-green-500');
+                progressBar.classList.add(ok ? 'bg-green-500' : 'bg-red-500');
+
+                if (ok) {
+                    statusText.innerText = '✅ Firmware flash completed!';
+                    statusText.className = 'text-xs text-green-400 text-center font-bold';
+                    log('✅ Firmware flash completed!');
                 } else {
-                     progressBar.classList.remove('bg-orange-500');
-                     progressBar.classList.add('bg-green-500');
-                     statusText.innerText = '✅ Firmware flashed successfully!';
-                     statusText.className = 'text-xs text-green-400 text-center font-bold';
-                     log('✅ Firmware flash completed!');
-                     setTimeout(() => {
-                        progressContainer.classList.add('hidden');
-                        progressBar.style.width = '0%';
-                        progressBar.classList.remove('bg-green-500');
-                        progressBar.classList.add('bg-orange-500');
-                        btn.disabled = false;
-                        btn.innerText = '🔥 FLASH FIRMWARE';
-                     }, 3000);
+                    statusText.innerText = data.msg || 'Flash failed. See logs.';
+                    statusText.className = 'text-xs text-red-400 text-center font-bold';
+                    log(`❌ Flash failed: ${data.msg || 'unknown error'}`);
                 }
-            };
-            updateProgress();
+            } catch (err) {
+                progressBar.style.width = '100%';
+                progressText.innerText = 'ERR';
+                progressBar.classList.remove('bg-orange-500');
+                progressBar.classList.add('bg-red-500');
+                statusText.innerText = 'Flash request failed. Please retry.';
+                statusText.className = 'text-xs text-red-400 text-center font-bold';
+                log('❌ Flash request failed.');
+            } finally {
+                setTimeout(() => {
+                    progressContainer.classList.add('hidden');
+                    progressBar.style.width = '0%';
+                    progressBar.classList.remove('bg-green-500', 'bg-red-500');
+                    progressBar.classList.add('bg-orange-500');
+                    progressText.innerText = '0%';
+                    statusText.innerText = '';
+                    statusText.className = '';
+                    btn.disabled = false;
+                    btn.innerText = '🔥 FLASH FIRMWARE';
+                }, 2500);
+            }
         }
 
         function switchView(view) {
