@@ -458,6 +458,7 @@
         let gamepadIndex = null;
         let lastGamepadCmd = 'S';
         let gamepadLoopActive = false;
+        let lastGamepadName = '';
 
         // === Initialization ===
         window.onload = () => {
@@ -475,6 +476,7 @@
             window.addEventListener("gamepadconnected", (e) => {
                 gamepadIndex = e.gamepad.index;
                 document.getElementById('gamepad-status').classList.add('gamepad-connected');
+                lastGamepadName = e.gamepad.id || '';
                 log(`Gamepad Connected: ${e.gamepad.id}`);
             });
             window.addEventListener("gamepaddisconnected", (e) => {
@@ -626,6 +628,7 @@
             }
 
             // 3. Poll Gamepad
+            detectGamepad();
             pollGamepad();
 
             requestAnimationFrame(animationLoop);
@@ -700,9 +703,33 @@
         }
 
         // === Gamepad Logic ===
+        function detectGamepad() {
+            if (gamepadIndex !== null) {
+                const current = navigator.getGamepads()[gamepadIndex];
+                if (!current) {
+                    gamepadIndex = null;
+                    document.getElementById('gamepad-status').classList.remove('gamepad-connected');
+                    if (lastGamepadName) log(`Gamepad Disconnected: ${lastGamepadName}`);
+                    lastGamepadName = '';
+                }
+                return;
+            }
+
+            const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+            for (let i = 0; i < pads.length; i++) {
+                if (pads[i]) {
+                    gamepadIndex = pads[i].index;
+                    lastGamepadName = pads[i].id || '';
+                    document.getElementById('gamepad-status').classList.add('gamepad-connected');
+                    log(`Gamepad Connected: ${pads[i].id || 'Unknown Controller'}`);
+                    break;
+                }
+            }
+        }
+
         function pollGamepad() {
             if (gamepadIndex === null) return;
-            
+
             const gp = navigator.getGamepads()[gamepadIndex];
             if(!gp) return;
 
