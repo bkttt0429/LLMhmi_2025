@@ -4,6 +4,8 @@ import cv2
 import time
 import threading
 import re
+import socket
+from pathlib import Path
 import requests
 import serial
 import pygame
@@ -29,11 +31,33 @@ template_dir = os.path.join(BASE_DIR, 'templates')
 app = Flask(__name__, template_folder=template_dir, static_folder=template_dir)
 socketio = SocketIO(app)
 
+BRIDGE_CACHE_FILE = Path(BASE_DIR) / ".last_bridge_host"
+
+
+def _load_cached_bridge_host():
+    try:
+        content = BRIDGE_CACHE_FILE.read_text(encoding="utf-8").strip()
+        return content or None
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+
+
+def _persist_bridge_host(host: str):
+    if not host:
+        return
+    try:
+        BRIDGE_CACHE_FILE.write_text(host, encoding="utf-8")
+    except Exception:
+        pass
+
 # === 全域狀態 ===
 class SystemState:
     def __init__(self):
+        cached_bridge = _load_cached_bridge_host()
         self.current_ip = getattr(config, "DEFAULT_CAR_IP", "boebot.local")  # 車子控制 IP（相容用）
-        self.bridge_ip = getattr(config, "DEFAULT_STREAM_IP", "") or getattr(config, "DEFAULT_CAR_IP", "")
+        self.bridge_ip = cached_bridge or getattr(config, "DEFAULT_STREAM_IP", "") or getattr(config, "DEFAULT_CAR_IP", "")
         self.camera_ip = ""   # 相機串流 IP
         self.serial_port = None
         self.preferred_port = None
@@ -58,6 +82,7 @@ class SystemState:
 
 state = SystemState()
 ws_outbox: "SimpleQueue[str]" = SimpleQueue()
+browser_controller_state = {"data": None, "timestamp": 0.0}
 
 # Xbox 手把按鈕和搖桿的對應編號
 AXIS_LEFT_STICK_X = 0
@@ -133,20 +158,71 @@ def add_log(msg):
 
 state.add_log = add_log
 
-def _build_ws_url():
-    host = state.bridge_ip or state.camera_ip or state.current_ip
+
+def _build_cmd_from_state(controller_state: dict) -> str:
+    if controller_state.get("stick_pressed") or controller_state.get("button_x"):
+        return "S"
+
+    x = controller_state.get("left_stick_x", 0)
+    y = controller_state.get("left_stick_y", 0)
+    COMMAND_THRESHOLD = 0.4
+
+    if abs(x) < COMMAND_THRESHOLD and abs(y) < COMMAND_THRESHOLD:
+        return "S"
+    if abs(y) >= abs(x):
+        return "F" if y > 0 else "B"
+    return "R" if x > 0 else "L"
+
+def _build_ws_url(host: str | None = None):
+    host = host or state.bridge_ip or state.camera_ip or state.current_ip
     if not host:
         return None
     return f"ws://{host}:82/ws"
 
 
+def _is_host_resolvable(host: str) -> bool:
+    if not host:
+        return False
+    try:
+        socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+        return True
+    except socket.gaierror:
+        return False
+
+
 def websocket_bridge_thread():
     add_log("WebSocket Bridge Thread Started...")
+    backoff = 1.0
+    last_unresolved_log = 0.0
+    default_host = getattr(config, "DEFAULT_CAR_IP", "boebot.local")
     while state.is_running:
-        url = _build_ws_url()
-        if not url:
+        candidates = [state.bridge_ip, state.camera_ip, state.current_ip]
+        host = next((h for h in candidates if h), None)
+        url = _build_ws_url(host)
+        if not host or not url:
             state.ws_connected = False
-            time.sleep(1)
+            time.sleep(min(backoff, 5))
+            backoff = min(backoff * 2, 10)
+            continue
+
+        if not _is_host_resolvable(host):
+            alternative = next((h for h in candidates if h and h != host and _is_host_resolvable(h)), None)
+            if alternative:
+                host = alternative
+                url = _build_ws_url(host)
+            
+        if not _is_host_resolvable(host):
+            now = time.time()
+            if host == default_host:
+                if now - last_unresolved_log > 5:
+                    add_log(f"[WS] Waiting for reachable host (current: {host})")
+                    last_unresolved_log = now
+            else:
+                if now - last_unresolved_log > 5:
+                    add_log(f"[WS] Host unresolved: {host}")
+                    last_unresolved_log = now
+            time.sleep(min(backoff, 5))
+            backoff = min(backoff * 2, 10)
             continue
 
         ws = None
@@ -154,6 +230,8 @@ def websocket_bridge_thread():
             ws = websocket.create_connection(url, timeout=3)
             state.ws_connected = True
             add_log(f"🔗 WebSocket connected: {url}")
+            _persist_bridge_host(host)
+            backoff = 1.0
 
             while state.is_running and state.ws_connected:
                 try:
@@ -169,8 +247,9 @@ def websocket_bridge_thread():
 
         except Exception as e:
             state.ws_connected = False
-            add_log(f"[WS] Reconnect in 1s ({e})")
-            time.sleep(1)
+            add_log(f"[WS] Reconnect in {backoff:.1f}s ({e})")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 10)
         finally:
             if ws:
                 try:
@@ -301,6 +380,7 @@ def serial_worker_thread():
                                 if not state.bridge_ip:
                                     state.bridge_ip = ip
                                     add_log(f"🔗 WebSocket bridge host set: {ip}")
+                                    _persist_bridge_host(ip)
                             # 如果還沒設定車子 IP，使用相同網段猜測
                             if not state.current_ip:
                                 add_log(f"💡 提示：請在 Settings 中設定車子的 IP 地址")
@@ -328,12 +408,12 @@ def xbox_controller_thread():
         add_log("Xbox Controller not found. Waiting for connection...")
 
     last_cmd = None
-    COMMAND_THRESHOLD = 0.4
     last_missing_log = 0
     controller_ready = controller.joystick is not None
-    
+    using_browser_stream = False
+
     # ⭐ 修正：在此處初始化變數
-    paused_for_flash = False 
+    paused_for_flash = False
 
     while state.is_running:
         if state.is_flashing:
@@ -347,39 +427,36 @@ def xbox_controller_thread():
             paused_for_flash = False
 
         controller_state = controller.get_input()
+        source = "hardware"
+
         if controller_state == "QUIT":
             state.is_running = False
             break
 
         if not controller_state:
-            if not controller_ready:
-                # 仍未連上
-                pass
+            recent_browser_input = browser_controller_state["data"]
+            if recent_browser_input and time.time() - browser_controller_state["timestamp"] < 1.0:
+                controller_state = recent_browser_input
+                source = "browser"
+                if not using_browser_stream:
+                    add_log("Browser gamepad stream active.")
+                    using_browser_stream = True
             else:
-                controller_ready = False
-                add_log("Xbox controller disconnected.")
-            if time.time() - last_missing_log > 3:
-                add_log("Waiting for Xbox controller...")
-                last_missing_log = time.time()
-            time.sleep(0.1)
-            continue
+                using_browser_stream = False
+                if controller_ready:
+                    controller_ready = False
+                    add_log("Xbox controller disconnected.")
+                if time.time() - last_missing_log > 3:
+                    add_log("Waiting for Xbox controller...")
+                    last_missing_log = time.time()
+                time.sleep(0.1)
+                continue
 
-        if not controller_ready:
+        if not controller_ready and source == "hardware":
             controller_ready = True
             add_log("Xbox controller connected.")
 
-        # 決定方向指令（優先判斷按鍵）
-        if controller_state.get("stick_pressed") or controller_state.get("button_x"):
-            cmd = "S"
-        else:
-            x = controller_state.get("left_stick_x", 0)
-            y = controller_state.get("left_stick_y", 0)
-            if abs(x) < COMMAND_THRESHOLD and abs(y) < COMMAND_THRESHOLD:
-                cmd = "S"
-            elif abs(y) >= abs(x):
-                cmd = "F" if y > 0 else "B"
-            else:
-                cmd = "R" if x > 0 else "L"
+        cmd = _build_cmd_from_state(controller_state)
 
         if cmd != last_cmd:
             send_serial_command(cmd, source="Xbox")
@@ -387,6 +464,7 @@ def xbox_controller_thread():
 
         controller_state_with_cmd = dict(controller_state)
         controller_state_with_cmd["cmd"] = cmd
+        controller_state_with_cmd["source"] = source
         socketio.emit('controller_data', controller_state_with_cmd)
         time.sleep(0.02)
         
@@ -479,6 +557,12 @@ def handle_disconnect():
 def handle_command(data):
     cmd = data.get('cmd')
     send_serial_command(cmd, source="WebSocket")
+
+
+@socketio.on('browser_controller_state')
+def handle_browser_controller_state(data):
+    browser_controller_state["data"] = data or {}
+    browser_controller_state["timestamp"] = time.time()
 
 @app.route('/api/status')
 def api_status():
@@ -613,6 +697,7 @@ def api_set_ip():
     elif ip_type == 'bridge':
         state.bridge_ip = ip
         add_log(f"🔗 WebSocket Bridge IP Set: {ip}")
+        _persist_bridge_host(ip)
     else:
         state.camera_ip = ip
         state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
@@ -620,6 +705,7 @@ def api_set_ip():
         if not state.bridge_ip:
             state.bridge_ip = ip
             add_log(f"🔗 WebSocket bridge host set: {ip}")
+            _persist_bridge_host(ip)
     
     return jsonify({"status": "ok", "ip": ip, "type": ip_type})
 

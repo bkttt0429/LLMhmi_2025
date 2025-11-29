@@ -649,7 +649,7 @@
             drawRadar(document.getElementById('radar-canvas-main'), timestamp, false);
             if(currentView === 'sensors') {
                 drawRadar(document.getElementById('radar-canvas-sensor'), timestamp, true);
-                
+
                 // 2. Throttled Chart Update
                 if (timestamp - lastChartUpdate > CHART_THROTTLE_MS) {
                     drawChart();
@@ -658,6 +658,7 @@
             }
 
             // 3. Poll Gamepad
+            streamBrowserGamepad();
             requestAnimationFrame(animationLoop);
         }
 
@@ -830,6 +831,41 @@
                     setGamepadLink(false);
                 }
             }, 500);
+        }
+
+        function streamBrowserGamepad() {
+            if (!navigator.getGamepads || !socket || !socket.connected) return;
+            const pads = Array.from(navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean);
+            if (!pads.length) return;
+
+            const preferred = pads.find(p => (p.id || '').toLowerCase().includes('xbox')) || pads[0];
+            const now = performance.now();
+            if (now - lastBrowserGamepadSend < GAMEPAD_SEND_INTERVAL) return;
+            lastBrowserGamepadSend = now;
+
+            const state = normalizeGamepadState(preferred);
+            socket.emit('browser_controller_state', state);
+        }
+
+        function normalizeGamepadState(pad) {
+            const axes = pad.axes || [];
+            const buttons = pad.buttons || [];
+            const btn = (idx) => buttons[idx] ? buttons[idx].pressed : false;
+
+            const dpad_x = (btn(15) ? 1 : 0) + (btn(14) ? -1 : 0);
+            const dpad_y = (btn(12) ? 1 : 0) + (btn(13) ? -1 : 0);
+
+            return {
+                left_stick_x: axes[0] || 0,
+                left_stick_y: -(axes[1] || 0),
+                button_a: btn(0),
+                button_b: btn(1),
+                button_x: btn(2),
+                button_y: btn(3),
+                stick_pressed: btn(8) || btn(9),
+                dpad_x,
+                dpad_y
+            };
         }
 
         // === Other Logic (Chart, Stats) ===
