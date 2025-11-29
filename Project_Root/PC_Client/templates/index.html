@@ -476,8 +476,6 @@
 
         let controllerLinked = false;
         let lastXboxUpdate = 0;
-        let lastBrowserGamepadSend = 0;
-        const GAMEPAD_SEND_INTERVAL = 50; // ms
 
         // === Initialization ===
         window.onload = () => {
@@ -1070,8 +1068,7 @@
             const xboxPad = pads.find(p => (p.id || '').toLowerCase().includes('xbox'));
 
             if (xboxPad) {
-                const streamingHint = (socket && socket.connected) ? '（串流中）' : '';
-                statusEl.innerText = `偵測到：${xboxPad.id}${streamingHint}`;
+                statusEl.innerText = `偵測到：${xboxPad.id}`;
                 statusEl.className = 'text-sm text-green-400';
                 log(`Xbox controller detected: ${xboxPad.id}`);
             } else {
