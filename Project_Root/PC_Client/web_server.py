@@ -56,7 +56,8 @@ def _persist_bridge_host(host: str):
 class SystemState:
     def __init__(self):
         cached_bridge = _load_cached_bridge_host()
-        self.current_ip = getattr(config, "DEFAULT_CAR_IP", "boebot.local")  # 車子控制 IP（相容用）
+        self.car_ip = getattr(config, "DEFAULT_CAR_IP", "boebot.local")  # 車子控制 IP（相容用）
+        self.current_ip = self.car_ip  # 舊版相容欄位
         self.bridge_ip = cached_bridge or getattr(config, "DEFAULT_STREAM_IP", "") or getattr(config, "DEFAULT_CAR_IP", "")
         self.camera_ip = ""   # 相機串流 IP
         self.serial_port = None
@@ -83,6 +84,9 @@ class SystemState:
 state = SystemState()
 ws_outbox: "SimpleQueue[str]" = SimpleQueue()
 browser_controller_state = {"data": None, "timestamp": 0.0}
+UDP_PORT = 4210
+udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+udp_sock.settimeout(0.3)
 
 # Xbox 手把按鈕和搖桿的對應編號
 AXIS_LEFT_STICK_X = 0
@@ -192,7 +196,6 @@ def _is_host_resolvable(host: str) -> bool:
 
 def websocket_bridge_thread():
     add_log("WebSocket Bridge Thread Started...")
-    backoff = 1.0
     last_unresolved_log = 0.0
     default_host = getattr(config, "DEFAULT_CAR_IP", "boebot.local")
     while state.is_running:
@@ -201,8 +204,7 @@ def websocket_bridge_thread():
         url = _build_ws_url(host)
         if not host or not url:
             state.ws_connected = False
-            time.sleep(min(backoff, 5))
-            backoff = min(backoff * 2, 10)
+            time.sleep(0.5)
             continue
 
         if not _is_host_resolvable(host):
@@ -221,8 +223,7 @@ def websocket_bridge_thread():
                 if now - last_unresolved_log > 5:
                     add_log(f"[WS] Host unresolved: {host}")
                     last_unresolved_log = now
-            time.sleep(min(backoff, 5))
-            backoff = min(backoff * 2, 10)
+            time.sleep(0.5)
             continue
 
         ws = None
@@ -231,7 +232,6 @@ def websocket_bridge_thread():
             state.ws_connected = True
             add_log(f"🔗 WebSocket connected: {url}")
             _persist_bridge_host(host)
-            backoff = 1.0
 
             while state.is_running and state.ws_connected:
                 try:
@@ -247,9 +247,8 @@ def websocket_bridge_thread():
 
         except Exception as e:
             state.ws_connected = False
-            add_log(f"[WS] Reconnect in {backoff:.1f}s ({e})")
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 10)
+            add_log(f"[WS] Reconnect in 0.5s ({e})")
+            time.sleep(0.5)
         finally:
             if ws:
                 try:
@@ -262,6 +261,21 @@ def websocket_bridge_thread():
 
 
 # === 🔧 修正後的指令發送函數 ===
+def send_udp_command(cmd: str):
+    if not cmd:
+        return False
+
+    target_ip = state.car_ip or state.current_ip
+    if not target_ip:
+        return False
+
+    try:
+        udp_sock.sendto(cmd.encode(), (target_ip, UDP_PORT))
+        return True
+    except OSError:
+        return False
+
+
 def send_serial_command(cmd, source="HTTP"):
     """
     優先透過 WebSocket 將指令推送到 ESP32-S3，再由 ESP-NOW 轉送到車子；
@@ -269,6 +283,10 @@ def send_serial_command(cmd, source="HTTP"):
     """
     if not cmd:
         return False, "Empty command"
+
+    # 方法0: UDP 直連遙控車（最低延遲）
+    if send_udp_command(cmd):
+        return True, "Sent via UDP"
 
     ws_url = _build_ws_url()
     if ws_url and state.ws_connected:
@@ -278,7 +296,10 @@ def send_serial_command(cmd, source="HTTP"):
     # 方法2: 直接透過 WiFi HTTP 控制車子（相容）
     target_urls = []
 
-    if state.current_ip:
+    if state.car_ip:
+        target_urls.append(f"http://{state.car_ip}/cmd")
+
+    if state.current_ip and state.current_ip != state.car_ip:
         target_urls.append(f"http://{state.current_ip}/cmd")
 
     default_car_ip = getattr(config, "DEFAULT_CAR_IP", "")
@@ -568,7 +589,7 @@ def handle_browser_controller_state(data):
 def api_status():
     return jsonify({
         "ip": state.current_ip,
-        "car_ip": state.current_ip,
+        "car_ip": state.car_ip,
         "bridge_ip": state.bridge_ip,
         "camera_ip": state.camera_ip,
         "video_url": state.video_url,
@@ -690,8 +711,9 @@ def api_set_ip():
     
     if not ip:
         return jsonify({"status": "error", "msg": "Invalid IP"})
-    
+
     if ip_type == 'car':
+        state.car_ip = ip
         state.current_ip = ip
         add_log(f"🚗 Car Control IP Set: {ip}")
     elif ip_type == 'bridge':

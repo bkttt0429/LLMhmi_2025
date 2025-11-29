@@ -1,23 +1,15 @@
 /**
- * ESP32-S3-CAM 韌體 v3.2 (自動降級修復版)
- * ✅ 新增：若 PSRAM 初始化失敗，自動降級為 QVGA/SRAM 模式
- * ✅ 修復：frame buffer malloc failed 導致的死機
+ * ESP32-S3-CAM 韌體 v4.0（精簡影像版）
+ * 專注串流：移除控制路徑，鎖定 20 FPS 與 JPEG Q=20，避免佔滿 WiFi 頻寬。
  */
 
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <WebServer.h>
-#include <esp_now.h>
-#include <mbedtls/base64.h>
-#include <mbedtls/sha1.h>
 
 // ============= WiFi 設定 =============
-const char* ssid     = "Bk";        
-const char* password = "........."; 
-
-// ============= 遙控車設定 (ESP8266 MAC) =============
-uint8_t carPeerMac[] = {0x24, 0x6F, 0x28, 0x00, 0x00, 0x00}; // 請確認此 MAC
-const int ESPNOW_CHANNEL = 0;
+const char* ssid     = "Bk";
+const char* password = ".........";
 
 // ============= 硬體腳位 (ESP32-S3-CAM N16R8) =============
 #define SIG_PIN 21
@@ -40,145 +32,10 @@ const int ESPNOW_CHANNEL = 0;
 
 // ============= 全域變數 =============
 WebServer server(81);
-WiFiServer wsServer(82);
-WiFiClient wsClient;
 WiFiClient streamClient;
-
-bool wsHandshakeDone = false;
 bool streamActive = false;
-bool espNowReady = false;
 unsigned long lastStreamFrame = 0;
-
-// 指令佇列
-#define CMD_QUEUE_SIZE 10
-char cmdQueue[CMD_QUEUE_SIZE];
-volatile int cmdHead = 0;
-volatile int cmdTail = 0;
-
-// ============= 指令處理 =============
-bool isValidCommand(char cmd) {
-  return cmd == 'F' || cmd == 'B' || cmd == 'L' || 
-         cmd == 'R' || cmd == 'S' || cmd == 'W' || cmd == 'w';
-}
-
-void queueCommand(char cmd) {
-  int next = (cmdHead + 1) % CMD_QUEUE_SIZE;
-  if (next != cmdTail) {
-    cmdQueue[cmdHead] = cmd;
-    cmdHead = next;
-  }
-}
-
-char dequeueCommand() {
-  if (cmdHead == cmdTail) return 0;
-  char cmd = cmdQueue[cmdTail];
-  cmdTail = (cmdTail + 1) % CMD_QUEUE_SIZE;
-  return cmd;
-}
-
-// ============= ESP-NOW (相容 Core 3.x) =============
-void onEspNowSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
-  // 發送回調，可在此加入除錯訊息
-}
-
-bool sendEspNow(char cmd) {
-  if (!espNowReady) return false;
-  return esp_now_send(carPeerMac, (uint8_t*)&cmd, 1) == ESP_OK;
-}
-
-void initEspNow() {
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("[ESPNOW] Init failed");
-    return;
-  }
-  esp_now_register_send_cb(onEspNowSent);
-  
-  esp_now_peer_info_t peer = {};
-  memcpy(peer.peer_addr, carPeerMac, 6);
-  peer.channel = 0;
-  peer.encrypt = false;
-  
-  if (esp_now_add_peer(&peer) == ESP_OK) {
-    espNowReady = true;
-    Serial.println("[ESPNOW] Ready");
-  } else {
-    Serial.println("[ESPNOW] Add peer failed");
-  }
-}
-
-// ============= WebSocket =============
-String buildAcceptKey(const String &clientKey) {
-  const char *guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-  String combined = clientKey + guid;
-  uint8_t sha1Result[20];
-  mbedtls_sha1((const unsigned char*)combined.c_str(), combined.length(), sha1Result);
-  size_t outLen = 0;
-  unsigned char base64Result[64] = {0};
-  mbedtls_base64_encode(base64Result, sizeof(base64Result), &outLen, sha1Result, sizeof(sha1Result));
-  return String((char*)base64Result);
-}
-
-bool performWebSocketHandshake(WiFiClient &client) {
-  unsigned long start = millis();
-  String request = "";
-  while (millis() - start < 1000) {
-    while (client.available()) {
-      request += (char)client.read();
-      if (request.endsWith("\r\n\r\n")) break;
-    }
-    if (request.endsWith("\r\n\r\n")) break;
-    delay(5);
-  }
-  int keyIndex = request.indexOf("Sec-WebSocket-Key:");
-  if (keyIndex < 0) return false;
-  int keyEnd = request.indexOf('\r', keyIndex);
-  if (keyEnd < 0) return false;
-  String clientKey = request.substring(keyIndex + 19, keyEnd);
-  clientKey.trim();
-  String acceptKey = buildAcceptKey(clientKey);
-  String response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + acceptKey + "\r\n\r\n";
-  client.print(response);
-  return true;
-}
-
-void handleWebSocketFrames() {
-  if (!wsClient || !wsClient.connected()) return;
-  while (wsClient.available() >= 2) {
-    uint8_t header[2];
-    wsClient.read(header, 2);
-    uint64_t payloadLen = header[1] & 0x7F;
-    if (payloadLen == 126) {
-      uint8_t ext[2];
-      wsClient.read(ext, 2);
-      payloadLen = (ext[0] << 8) | ext[1];
-    } else if (payloadLen == 127) return;
-    
-    uint8_t mask[4];
-    wsClient.read(mask, 4);
-    for (uint64_t i = 0; i < payloadLen; i++) {
-      char c = (char)(wsClient.read() ^ mask[i % 4]);
-      if (i == 0 && isValidCommand(c)) queueCommand(c);
-    }
-  }
-}
-
-void pollWebSocketControl() {
-  if (!wsClient || !wsClient.connected()) {
-    wsClient.stop();
-    wsHandshakeDone = false;
-    WiFiClient newClient = wsServer.available();
-    if (newClient) {
-      wsClient = newClient;
-      wsClient.setNoDelay(true);
-      if (performWebSocketHandshake(wsClient)) {
-        wsHandshakeDone = true;
-        Serial.println("[WS] Client connected");
-      }
-    }
-  } else if (wsHandshakeDone) {
-    handleWebSocketFrames();
-  }
-}
+const uint16_t TARGET_FPS_INTERVAL_MS = 50; // 鎖定 ~20 FPS
 
 // ============= 超聲波 =============
 void init_ultrasonic() {
@@ -200,7 +57,7 @@ float get_distance() {
   return duration * 0.034 / 2.0;
 }
 
-// ============= 相機初始化 (增強版) =============
+// ============= 相機初始化 (限流版) =============
 bool init_camera() {
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -223,33 +80,33 @@ bool init_camera() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  
-  // 嘗試使用 PSRAM
+
+  // 嘗試使用 PSRAM：VGA + Q=20
   if (psramFound()) {
-    Serial.println("[INFO] PSRAM detected, trying VGA resolution...");
+    Serial.println("[INFO] PSRAM detected, using VGA @ Q20");
     config.frame_size = FRAMESIZE_VGA;
-    config.jpeg_quality = 12;
+    config.jpeg_quality = 20;
     config.fb_count = 2;
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_LATEST;
-    
+
     if (esp_camera_init(&config) == ESP_OK) {
       Serial.println("[OK] Camera init success (PSRAM mode)");
       return true;
     }
     Serial.println("[WARN] PSRAM init failed, de-initializing...");
-    esp_camera_deinit(); // 初始化失敗需先釋放
+    esp_camera_deinit();
   } else {
     Serial.println("[WARN] No PSRAM detected");
   }
 
-  // 降級模式：使用內部 SRAM
+  // 降級模式：使用內部 SRAM，依然維持 Q=20 確保頻寬
   Serial.println("[INFO] Falling back to Low-Res (SRAM) mode...");
-  config.frame_size = FRAMESIZE_QVGA; // 降級為 QVGA
-  config.jpeg_quality = 15;
-  config.fb_count = 1;                // 單緩衝
-  config.fb_location = CAMERA_FB_IN_DRAM; // 使用內部 RAM
-  
+  config.frame_size = FRAMESIZE_QVGA;
+  config.jpeg_quality = 20;
+  config.fb_count = 1;
+  config.fb_location = CAMERA_FB_IN_DRAM;
+
   if (esp_camera_init(&config) == ESP_OK) {
     Serial.println("[OK] Camera init success (SRAM mode)");
     return true;
@@ -280,26 +137,7 @@ void handle_stream() {
   streamClient.print("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n");
   streamActive = true;
   lastStreamFrame = 0;
-  Serial.println("[STREAM] Started");
-}
-
-void handle_cmd() {
-  if (server.hasArg("act")) {
-    char cmd = server.arg("act").charAt(0);
-    if (isValidCommand(cmd)) queueCommand(cmd);
-    server.send(200, "text/plain", "OK");
-  } else server.send(400, "text/plain", "Invalid");
-}
-
-void commandForwardTask(void *param) {
-  while (true) {
-    char cmd = dequeueCommand();
-    if (cmd != 0) {
-      bool sent = sendEspNow(cmd);
-      Serial.printf("[CMD] %c %s\n", cmd, sent ? "✓" : "✗");
-    }
-    vTaskDelay(10 / portTICK_PERIOD_MS);
-  }
+  Serial.println("[STREAM] Started @20FPS");
 }
 
 // ============= Setup & Loop =============
@@ -307,15 +145,15 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
   delay(1000);
-  
-  Serial.println("\n=== ESP32-S3-CAM v3.2 ===");
+
+  Serial.println("\n=== ESP32-S3-CAM v4.0 (Stream Only) ===");
   init_ultrasonic();
-  
+
   if (!init_camera()) {
     Serial.println("❌ Camera FATAL ERROR! System halted.");
     while(1) delay(1000);
   }
-  
+
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   Serial.print("⏳ WiFi connecting");
@@ -324,32 +162,26 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("\n✓ WiFi Connected!");
-  Serial.printf("📡 IP: http://%s:81\n", WiFi.localIP().toString().c_str());
-  
-  initEspNow();
-  
+  Serial.printf("📡 Stream URL: http://%s:81/stream\n", WiFi.localIP().toString().c_str());
+
   server.on("/", handle_root);
   server.on("/capture", handle_capture);
   server.on("/stream", handle_stream);
-  server.on("/cmd", handle_cmd);
   server.begin();
-  wsServer.begin();
-  
-  xTaskCreatePinnedToCore(commandForwardTask, "CMD", 4096, NULL, 1, NULL, 0);
-  Serial.println("✓ System Ready!");
+
+  Serial.println("✓ System Ready! (Streaming only)");
 }
 
 void loop() {
   server.handleClient();
-  pollWebSocketControl();
-  
+
   if (streamActive) {
     if (!streamClient.connected()) {
       streamActive = false;
       streamClient.stop();
     } else {
       unsigned long now = millis();
-      if (now - lastStreamFrame >= 33) {
+      if (now - lastStreamFrame >= TARGET_FPS_INTERVAL_MS) {
         lastStreamFrame = now;
         camera_fb_t *fb = esp_camera_fb_get();
         if (fb) {
@@ -361,17 +193,11 @@ void loop() {
       }
     }
   }
-  
-  while (Serial.available() > 0) {
-    char cmd = Serial.read();
-    if (isValidCommand(cmd)) queueCommand(cmd);
-  }
-  
+
   static unsigned long lastDist = 0;
   if (millis() - lastDist >= 200) {
     lastDist = millis();
     float d = get_distance();
     if (d > 2.0 && d < 400.0) Serial.printf("DIST:%.1f\n", d);
   }
-  vTaskDelay(1);
 }

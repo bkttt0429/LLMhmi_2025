@@ -3,6 +3,7 @@
 #include <ESP8266mDNS.h>
 #include <Servo.h>
 #include <espnow.h>
+#include <WiFiUdp.h>
 
 // ============= WiFi 設定 =============
 const char* ssid     = "Bk";      // 請確認 WiFi 與相機一致
@@ -22,8 +23,11 @@ const int SPEED_BCK_R = 1700;
 
 // ============= 全域變數 =============
 ESP8266WebServer server(80);
+WiFiUDP udp;
 unsigned long lastCmdTime = 0;
 const unsigned long TIMEOUT_MS = 2000; // 2秒無指令自動停止
+const uint16_t UDP_PORT = 4210;
+char lastCmd = '\0';
 
 void stopCar() {
   leftServo.writeMicroseconds(STOP_VAL);
@@ -53,6 +57,10 @@ void turnRight() {
 // 處理接收到的指令
 void processCommand(char cmd) {
   lastCmdTime = millis();
+  if (cmd == lastCmd) {
+    return; // 避免重複執行浪費 CPU
+  }
+  lastCmd = cmd;
   Serial.printf("[CMD] Recv: %c\n", cmd);
   
   switch (cmd) {
@@ -107,6 +115,13 @@ void setup() {
   }
 
   initEspNow();
+
+  // UDP 監聽：允許電腦端直接透過 UDP 控制，延遲更低
+  if (udp.begin(UDP_PORT)) {
+    Serial.printf("[UDP] Listening on %d\n", UDP_PORT);
+  } else {
+    Serial.println("[UDP] Init failed");
+  }
   
   server.on("/", [](){ server.send(200, "text/plain", "Car Ready"); });
   server.on("/cmd", [](){
@@ -122,6 +137,15 @@ void setup() {
 void loop() {
   server.handleClient();
   MDNS.update();
+
+  int packetSize = udp.parsePacket();
+  if (packetSize > 0) {
+    char buf[4] = {0};
+    int len = udp.read(buf, sizeof(buf) - 1);
+    if (len > 0) {
+      processCommand(buf[0]);
+    }
+  }
   
   if (millis() - lastCmdTime > TIMEOUT_MS) {
     stopCar(); // 安全機制：超時停車
