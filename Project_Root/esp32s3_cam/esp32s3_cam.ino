@@ -44,6 +44,7 @@ WebServer server(81);
 WiFiServer controlServer(82);
 WiFiClient wsClient;
 bool wsHandshakeDone = false;
+bool isStreaming = false;
 bool espNowReady = false;
 
 // 非阻塞串流用
@@ -390,6 +391,7 @@ void handle_stream() {
   streamClient.setNoDelay(true);
   streamClient.print("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n");
   streamActive = true;
+  isStreaming = true;
   lastStreamFrame = 0;
   Serial.println("[STREAM] 開啟非阻塞串流");
 }
@@ -476,6 +478,7 @@ void loop() {
   if (streamActive) {
     if (!streamClient.connected()) {
       streamActive = false;
+      isStreaming = false;
       streamClient.stop();
       Serial.println("[STREAM] 客戶端中斷");
     } else {

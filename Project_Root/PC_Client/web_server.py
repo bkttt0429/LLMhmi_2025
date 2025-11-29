@@ -208,7 +208,7 @@ def send_serial_command(cmd, source="HTTP"):
 
     for url in target_urls:
         try:
-            resp = requests.get(f"{url}?act={cmd}", timeout=0.5)
+            resp = requests.get(f"{url}?act={cmd}", timeout=0.8)
             if resp.ok:
                 return True, "Sent via WiFi"
         except requests.exceptions.RequestException:
@@ -331,8 +331,6 @@ def xbox_controller_thread():
     COMMAND_THRESHOLD = 0.4
     last_missing_log = 0
     controller_ready = controller.joystick is not None
-
-    paused_for_flash = False
 
     while state.is_running:
         if state.is_flashing:
