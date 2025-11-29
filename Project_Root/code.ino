@@ -44,16 +44,28 @@ WebSocketsServer controlSocket(82);
 bool isStreaming = false;
 bool espNowReady = false;
 
-// 非阻塞串流用
-WiFiClient streamClient;
-bool streamActive = false;
-unsigned long lastStreamFrame = 0;
-
 // ============= [新增] 指令佇列 =============
 #define CMD_QUEUE_SIZE 10
-char cmdQueue[CMD_QUEUE_SIZE];
+const int MAX_RETRIES = 3;
+const unsigned long ACK_TIMEOUT = 250; // ms
+
+struct CommandItem {
+  char cmd;
+  uint16_t seq;
+  uint8_t retries;
+  unsigned long lastAttempt;
+  bool awaitingResponse;
+};
+
+CommandItem cmdQueue[CMD_QUEUE_SIZE];
 volatile int cmdQueueHead = 0;
 volatile int cmdQueueTail = 0;
+volatile uint16_t cmdSequence = 1;
+
+bool isValidCommand(char cmd) {
+  return cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' ||
+         cmd == 'W' || cmd == 'w';
+}
 
 bool isValidCommand(char cmd) {
   return cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' ||
@@ -64,17 +76,21 @@ bool isValidCommand(char cmd) {
 void queueCommand(char cmd) {
   int next = (cmdQueueHead + 1) % CMD_QUEUE_SIZE;
   if (next != cmdQueueTail) {
-    cmdQueue[cmdQueueHead] = cmd;
+    cmdQueue[cmdQueueHead] = {cmd, cmdSequence++, 0, 0, false};
     cmdQueueHead = next;
   }
 }
 
-// 從佇列取出指令
-char dequeueCommand() {
-  if (cmdQueueHead == cmdQueueTail) return 0;
-  char cmd = cmdQueue[cmdQueueTail];
+bool hasPendingCommand() {
+  return cmdQueueHead != cmdQueueTail;
+}
+
+CommandItem &currentCommand() {
+  return cmdQueue[cmdQueueTail];
+}
+
+void popCommand() {
   cmdQueueTail = (cmdQueueTail + 1) % CMD_QUEUE_SIZE;
-  return cmd;
 }
 
 // ============= ESP-NOW 相關 =============
@@ -262,6 +278,22 @@ void handle_cmd() {
   }
 }
 
+// 保留 HTTP 控制端點以便相容與除錯
+void handle_cmd() {
+  if (!server.hasArg("act")) {
+    server.send(400, "text/plain", "Missing act");
+    return;
+  }
+
+  char cmd = server.arg("act").charAt(0);
+  if (isValidCommand(cmd)) {
+    queueCommand(cmd);
+    server.send(200, "text/plain", "Queued");
+  } else {
+    server.send(400, "text/plain", "Invalid cmd");
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
@@ -323,30 +355,6 @@ void setup() {
 void loop() {
   server.handleClient();
   controlSocket.loop();
-
-  // 非阻塞串流：在主迴圈中推送影像，避免佔用 server.handleClient()
-  if (streamActive) {
-    if (!streamClient.connected()) {
-      streamActive = false;
-      isStreaming = false;
-      streamClient.stop();
-      Serial.println("[STREAM] 客戶端中斷");
-    } else {
-      const unsigned long now = millis();
-      if (now - lastStreamFrame >= 30) { // ~33fps 上限
-        lastStreamFrame = now;
-        camera_fb_t *fb = esp_camera_fb_get();
-        if (fb) {
-          streamClient.print("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ");
-          streamClient.print(fb->len);
-          streamClient.print("\r\n\r\n");
-          streamClient.write(fb->buf, fb->len);
-          streamClient.print("\r\n");
-          esp_camera_fb_return(fb);
-        }
-      }
-    }
-  }
 
   // 處理 Serial 指令（非阻塞）
   while (Serial.available() > 0) {
