@@ -40,7 +40,7 @@ bool isStreaming = false;
 // ============= 超聲波初始化 (單線模式，修正版) =============
 void init_ultrasonic() {
   // 平時保持為輸入腳，避免一開機就對模組輸出高電位
-  pinMode(SIG_PIN, INPUT_PULLDOWN);   // ESP32 支援 PULLDOWN，比較穩定
+  pinMode(SIG_PIN, INPUT_PULLUP);   // ESP32 支援 PULLDOWN，比較穩定
   digitalWrite(SIG_PIN, LOW);         // 確保不啟用 PULLUP
 
   Serial.println("[OK] 超聲波模組初始化完成 (單線 SIG=GPIO 21, INPUT_PULLDOWN)");
@@ -61,7 +61,7 @@ float get_distance() {
   digitalWrite(SIG_PIN, LOW);
 
   // 2. 切回輸入模式等待 Echo
-  pinMode(SIG_PIN, INPUT);      // 或保守一點用 INPUT_PULLDOWN
+  pinMode(SIG_PIN, INPUT_PULLUP);      // 或保守一點用 INPUT_PULLDOWN
 
   // 3. 讀取脈衝寬度 (Timeout 30ms，大約對應 5m 距離)
   duration = pulseIn(SIG_PIN, HIGH, 30000);
