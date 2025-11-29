@@ -331,6 +331,9 @@ def xbox_controller_thread():
     COMMAND_THRESHOLD = 0.4
     last_missing_log = 0
     controller_ready = controller.joystick is not None
+    
+    # ⭐ 修正：在此處初始化變數
+    paused_for_flash = False 
 
     while state.is_running:
         if state.is_flashing:
@@ -389,7 +392,6 @@ def xbox_controller_thread():
         
     pygame.quit()
     add_log("Xbox Controller Thread Stopped.")
-
 def generate_frames():
     cap = None
     frame_count = 0
