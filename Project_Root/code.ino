@@ -1,17 +1,23 @@
 /**
- * ESP32-S3-CAM N16R8 終極整合版 (修正腳位衝突版)
- * 修正說明：
- * 1. 將超聲波腳位改為 GPIO 21 (單線模式)，避開相機的 GPIO 13
- * 2. 整合單線驅動邏輯 (One-wire Mode)
+ * ESP32-S3-CAM N16R8 終極整合版 (包含 HTTP 遙控轉發功能)
+ * 功能：
+ * 1. 影像串流 (Web Server)
+ * 2. 超聲波測距 (GPIO 21, 單線模式)
+ * 3. [新增] 接收 Serial 指令並透過 WiFi 轉發給 ESP8266 車子
  */
 
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <WebServer.h>
+#include <HTTPClient.h> // [新增] 用於發送 HTTP 請求給車子
 
 // ============= WiFi 設定 =============
-const char* ssid     = "Bk";      // 請確認您的 WiFi 名稱
+const char* ssid     = "Bk";        // 請確認您的 WiFi 名稱
 const char* password = "........."; // 請確認您的 WiFi 密碼
+
+// ============= 遙控車設定 [新增] =============
+String carIP = "boebot.local";  // 車子的 IP，預設使用 mDNS 名稱，也可改為 "192.168.x.x"
+const int CAR_PORT = 80;
 
 // ============= 超聲波腳位 (修正為 21) =============
 #define SIG_PIN 21
@@ -32,48 +38,64 @@ const char* password = "........."; // 請確認您的 WiFi 密碼
 #define Y2_GPIO_NUM       11
 #define VSYNC_GPIO_NUM    6
 #define HREF_GPIO_NUM     7
-#define PCLK_GPIO_NUM     13  // 相機專用，絕對不能跟超聲波共用！
+#define PCLK_GPIO_NUM     13 
+#define PCLK_GPIO_NUM     13
 
 WebServer server(81);
 bool isStreaming = false;
 
-// ============= 超聲波初始化 (單線模式，修正版) =============
-void init_ultrasonic() {
-  // 平時保持為輸入腳，避免一開機就對模組輸出高電位
-  pinMode(SIG_PIN, INPUT_PULLUP);   // ESP32 支援 PULLDOWN，比較穩定
-  digitalWrite(SIG_PIN, LOW);         // 確保不啟用 PULLUP
+// ============= [新增] 轉發指令到 ESP8266 車子 =============
+void forwardCommandToCar(char cmd) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[FORWARD] WiFi not connected!");
+    return;
+  }
 
-  Serial.println("[OK] 超聲波模組初始化完成 (單線 SIG=GPIO 21, INPUT_PULLDOWN)");
+  // 組合 URL: http://boebot.local/cmd?act=F
+  String url = "http://" + carIP + "/cmd?act=" + String(cmd);
+  
+  HTTPClient http;
+  http.setTimeout(500);  // 設定 500ms 超時，避免卡住太久
+  
+  // 開始連線
+  if (http.begin(url)) {
+    int httpCode = http.GET(); // 發送 GET 請求
+    
+    if (httpCode > 0) {
+      Serial.printf("[FORWARD] ✅ Sent '%c' to car (Code: %d)\n", cmd, httpCode);
+    } else {
+      Serial.printf("[FORWARD] ❌ Failed to send '%c' (Error: %s)\n", cmd, http.errorToString(httpCode).c_str());
+    }
+    http.end(); // 結束連線
+  } else {
+    Serial.println("[FORWARD] ❌ Unable to connect to car");
+  }
 }
 
-// ============= 超聲波測距 (單線模式邏輯，稍微加強穩定性) =============
+// ============= 超聲波初始化 (單線模式) =============
+void init_ultrasonic() {
+  pinMode(SIG_PIN, INPUT_PULLDOWN); 
+  digitalWrite(SIG_PIN, LOW);         
+  Serial.println("[OK] 超聲波模組初始化完成");
+}
+
+// ============= 超聲波測距 =============
 float get_distance() {
   unsigned long duration;
-  float distance;
-
-  // 1. 先確定腳位目前是低電位 & 輸出模式，再送 Trigger
+  
   pinMode(SIG_PIN, OUTPUT);
   digitalWrite(SIG_PIN, LOW);
   delayMicroseconds(2);
-
-  digitalWrite(SIG_PIN, HIGH);  // 10us Trigger 脈衝
+  digitalWrite(SIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(SIG_PIN, LOW);
 
-  // 2. 切回輸入模式等待 Echo
-  pinMode(SIG_PIN, INPUT_PULLUP);      // 或保守一點用 INPUT_PULLDOWN
-
-  // 3. 讀取脈衝寬度 (Timeout 30ms，大約對應 5m 距離)
+  pinMode(SIG_PIN, INPUT_PULLUP);
+  
   duration = pulseIn(SIG_PIN, HIGH, 30000);
-
-  if (duration == 0) {
-    // 超時或沒收到回波
-    return -1.0;
-  }
-
-  // 4. 換算成距離 (cm)
-  distance = duration * 0.034 / 2.0;
-  return distance;
+  
+  if (duration == 0) return -1.0;
+  return duration * 0.034 / 2.0;
 }
 
 // ============= 相機初始化 =============
@@ -103,7 +125,7 @@ bool init_camera() {
   if (psramFound()) {
     config.frame_size = FRAMESIZE_VGA;
     config.jpeg_quality = 14;
-    config.fb_count = 2; // 稍微減少緩衝區數量，釋放記憶體給系統
+    config.fb_count = 2;
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_LATEST;
   } else {
@@ -112,173 +134,107 @@ bool init_camera() {
     config.fb_count = 1;
   }
 
-  esp_err_t err = esp_camera_init(&config);
-  if (err != ESP_OK) {
-    Serial.printf("[錯誤] 相機初始化失敗: 0x%x\n", err);
+  if (esp_camera_init(&config) != ESP_OK) {
     return false;
   }
-
-  sensor_t *s = esp_camera_sensor_get();
-  if (s) {
-    s->set_framesize(s, FRAMESIZE_VGA); // 確保解析度
-    s->set_brightness(s, 1); // 稍微調亮
-    s->set_saturation(s, 0);
-  }
-
-  Serial.println("[OK] 相機初始化成功");
   return true;
 }
 
-// ============= 網頁首頁 =============
+// ============= Web Server 處理函數 =============
 void handle_root() {
-  String html = R"(
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>ESP32-S3-CAM</title>
+  String html = R"(<!DOCTYPE html><html><head><meta charset="utf-8"><title>ESP32-S3-CAM</title>
 <style>body{background:#111;color:#0f0;font-family:monospace;text-align:center;padding:20px;}
 img{width:100%;max-width:640px;border:2px solid #0f0;border-radius:8px;}
 .btn{background:#333;color:#fff;padding:10px 20px;text-decoration:none;border:1px solid #fff;border-radius:5px;}
-</style>
-</head><body>
-<h1>ESP32-S3-CAM 遙控戰車</h1>
-<p>即時影像串流：</p>
-<img src="/stream" id="stream">
-<br><br>
-<p>
-  <a href="/capture" class="btn">📷 拍照</a> 
-  <a href="/stream" class="btn">📺 全螢幕串流</a>
-</p>
-<p id="ip">IP: )" + WiFi.localIP().toString() + R"(</p>
-<script>
-  // 斷線自動重連影像
-  document.getElementById('stream').onerror = function() {
-    this.style.display = 'none';
-    setTimeout(() => {
-      this.src = '/stream?t=' + new Date().getTime();
-      this.style.display = 'block';
-    }, 1000);
-  };
-</script>
+</style></head><body><h1>ESP32-S3-CAM 遙控戰車</h1>
+<p>即時影像串流：</p><img src="/stream" id="stream"><br><br>
+<p><a href="/capture" class="btn">📷 拍照</a> <a href="/stream" class="btn">📺 全螢幕串流</a></p>
+<script>document.getElementById('stream').onerror=function(){this.style.display='none';setTimeout(()=>{this.src='/stream?t='+new Date().getTime();this.style.display='block';},1000);};</script>
 </body></html>)";
   server.send(200, "text/html", html);
 }
 
-// ============= 拍照 =============
 void handle_capture() {
   camera_fb_t *fb = esp_camera_fb_get();
-  if (!fb) {
-    server.send(500, "text/plain", "Capture failed");
-    return;
-  }
+  if (!fb) { server.send(500, "text/plain", "Capture failed"); return; }
   server.sendHeader("Content-Type", "image/jpeg");
   server.sendHeader("Content-Disposition", "inline; filename=capture.jpg");
   server.send_P(200, "image/jpeg", (const char *)fb->buf, fb->len);
   esp_camera_fb_return(fb);
 }
 
-// ============= MJPEG 串流 =============
 void handle_stream() {
   WiFiClient client = server.client();
-  client.setNoDelay(true); // 降低延遲
-  
-  String response = "HTTP/1.1 200 OK\r\n";
-  response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
+  client.setNoDelay(true);
+  String response = "HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
   client.print(response);
-
   isStreaming = true;
-  Serial.println("[STREAM] 用戶端已連接");
-
   while (client.connected()) {
     camera_fb_t *fb = esp_camera_fb_get();
-    if (!fb) {
-      delay(10);
-      continue;
-    }
-
-    client.print("--frame\r\n");
-    client.print("Content-Type: image/jpeg\r\n");
-    client.print("Content-Length: " + String(fb->len) + "\r\n\r\n");
+    if (!fb) { delay(10); continue; }
+    client.print("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + String(fb->len) + "\r\n\r\n");
     client.write(fb->buf, fb->len);
     client.print("\r\n");
-
     esp_camera_fb_return(fb);
-    
-    // 稍微延遲讓 CPU 有機會處理 WiFi
-    // 如果想要更高 FPS 可以設為 0，但可能會卡住
-    delay(1); 
+    delay(1);
   }
-
   isStreaming = false;
-  Serial.println("[STREAM] 用戶端斷開");
 }
 
-void handle_not_found() {
-  server.send(404, "text/plain", "404: Not Found");
-}
-
-// ============= setup =============
 void setup() {
   Serial.begin(115200);
-  Serial.setDebugOutput(false); // 減少雜訊
-  delay(1000);
-  Serial.println("\n\n=== ESP32-S3-CAM 啟動 (GPIO 21 Ultrasonic) ===");
-
-  // 1. 初始化超聲波
+  Serial.setDebugOutput(false);
+  
   init_ultrasonic();
 
-  // 2. 初始化相機
   if (!init_camera()) {
-    Serial.println("❌ 相機初始化失敗！請檢查接線或電源。");
-    while (1) delay(1000); // 停在這裡
+    Serial.println("❌ 相機初始化失敗！");
+    while (1) delay(1000);
   }
 
-  // 3. 連接 WiFi
   WiFi.begin(ssid, password);
-  Serial.print("正在連接 WiFi");
-  
-  int retry = 0;
-  while (WiFi.status() != WL_CONNECTED && retry < 20) {
+  Serial.print("Connecting WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-    retry++;
   }
   
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n[OK] WiFi 連線成功");
-    Serial.print("IP 位址: http://");
-    Serial.println(WiFi.localIP());
-    
-    // 啟動 Web Server
-    server.on("/", handle_root);
-    server.on("/capture", handle_capture);
-    server.on("/stream", handle_stream);
-    server.onNotFound(handle_not_found);
-    server.begin();
-    Serial.println("Web Server 已啟動");
-  } else {
-    Serial.println("\n[錯誤] WiFi 連線逾時，請檢查密碼");
-  }
+  Serial.println("\n[OK] WiFi Connected");
+  Serial.print("Camera IP: http://"); Serial.println(WiFi.localIP());
+  Serial.print("Car Target: http://"); Serial.println(carIP);
+
+  server.on("/", handle_root);
+  server.on("/capture", handle_capture);
+  server.on("/stream", handle_stream);
+  server.begin();
 }
 
-// ============= loop =============
 void loop() {
   server.handleClient();
 
-  // 每 100ms 測距並回傳給 Python
+  // 1. [新增] 處理來自電腦 Serial 的指令 -> 轉發給車子
+  if (Serial.available() > 0) {
+    char cmd = Serial.read();
+    
+    // 忽略換行符號
+    if (cmd != '\n' && cmd != '\r') {
+      // 判斷是否為有效指令 (F/B/L/R/S)
+      if (cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S') {
+        forwardCommandToCar(cmd);
+      }
+      // 這裡也可以加入邏輯來處理 "CAR_IP:192.168.x.x" 的字串設定
+    }
+  }
+
+  // 2. 超聲波測距邏輯 (每 100ms)
   static unsigned long lastDistTime = 0;
   if (millis() - lastDistTime >= 100) {
     lastDistTime = millis();
-
     float dist = get_distance();
-    
-    // 簡單過濾無效值 (小於 2cm 或大於 400cm 視為無效)
     if (dist > 2.0 && dist < 400.0) {
       Serial.printf("DIST:%.1f\n", dist);
-    } else {
-       // 讀取錯誤時也可以傳送，或選擇不傳送
-       // Serial.println("DIST:-1.0"); 
     }
   }
   
-  // 讓 CPU 休息一下，避免 Watchdog 觸發
   delay(1);
 }
