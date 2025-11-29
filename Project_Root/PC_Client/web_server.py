@@ -31,6 +31,7 @@ class SystemState:
     def __init__(self):
         self.current_ip = ""
         self.serial_port = None
+        self.preferred_port = None
         self.ser = None
         self.video_url = ""
         self.radar_dist = 0.0
@@ -122,10 +123,22 @@ def serial_worker_thread():
         if state.ser is None or not state.ser.is_open:
             ports = list_ports.comports()
             target = None
-            for p in ports:
-                if "USB" in p.description or "COM" in p.device or "ttyUSB" in p.device or "ttyACM" in p.device:
-                    target = p.device
-                    break
+
+            # 先檢查使用者指定的 Port
+            if state.preferred_port:
+                for p in ports:
+                    if p.device == state.preferred_port:
+                        target = p.device
+                        break
+                if not target:
+                    add_log(f"Preferred port {state.preferred_port} not found, waiting...")
+
+            # 若沒有指定或找不到，退回自動偵測
+            if not target:
+                for p in ports:
+                    if "USB" in p.description or "COM" in p.device or "ttyUSB" in p.device or "ttyACM" in p.device:
+                        target = p.device
+                        break
             if target:
                 try:
                     state.ser = serial.Serial(target, config.BAUD_RATE, timeout=0.1)
@@ -278,6 +291,7 @@ def api_status():
     return jsonify({
         "ip": state.current_ip,
         "port": state.serial_port or "DISCONNECTED",
+        "preferred_port": state.preferred_port,
         "dist": state.radar_dist,
         "logs": state.logs,
         "ai_status": state.ai_enabled
@@ -364,6 +378,34 @@ def api_set_ip():
         add_log(f"Manual IP Set: {ip}")
         return jsonify({"status": "ok"})
     return jsonify({"status": "error", "msg": "Invalid IP"})
+
+@app.route('/api/ports')
+def api_ports():
+    ports = list_ports.comports()
+    port_list = [{"device": p.device, "description": p.description} for p in ports]
+    return jsonify({"ports": port_list, "current": state.serial_port, "preferred": state.preferred_port})
+
+@app.route('/api/set_port', methods=['POST'])
+def api_set_port():
+    data = request.json or {}
+    port = data.get('port')
+    ports = [p.device for p in list_ports.comports()]
+    if not port or port not in ports:
+        return jsonify({"status": "error", "msg": "Port not available"})
+
+    state.preferred_port = port
+    add_log(f"Preferred serial port set to {port}")
+
+    # 如果當前連線不是目標 Port，強制重連
+    if state.ser and state.ser.is_open and state.serial_port != port:
+        try:
+            state.ser.close()
+        except Exception as e:
+            print(f"[SERIAL] Close error: {e}")
+        state.ser = None
+        state.serial_port = None
+
+    return jsonify({"status": "ok", "port": port})
 
 if __name__ == '__main__':
     threading.Thread(target=serial_worker_thread, daemon=True).start()

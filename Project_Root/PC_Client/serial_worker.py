@@ -211,12 +211,22 @@ def serial_worker(state):
         if state.ser is None or not state.ser.is_open:
             ports = list_ports.comports()
             target = None
-            
-            for p in ports:
-                # 尋找 USB Serial 裝置
-                if "USB" in p.description or "COM" in p.device or "ttyUSB" in p.device or "ttyACM" in p.device:
-                    target = p.device
-                    break
+
+            # 若 state 有指定 Port，優先使用
+            preferred = getattr(state, 'preferred_port', None)
+            if preferred:
+                for p in ports:
+                    if p.device == preferred:
+                        target = p.device
+                        break
+
+            # 自動偵測
+            if not target:
+                for p in ports:
+                    # 尋找 USB Serial 裝置
+                    if "USB" in p.description or "COM" in p.device or "ttyUSB" in p.device or "ttyACM" in p.device:
+                        target = p.device
+                        break
             
             if target:
                 try:
