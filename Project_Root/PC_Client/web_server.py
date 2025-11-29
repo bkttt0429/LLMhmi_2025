@@ -73,17 +73,26 @@ class XboxController:
     def __init__(self):
         pygame.init()
         pygame.joystick.init()
+        self.joystick = None
+        self._connect()
+
+    def _connect(self):
         joystick_count = pygame.joystick.get_count()
         if joystick_count == 0:
-            print("錯誤：未偵測到任何手把。")
             self.joystick = None
-            return
+            return False
+
         self.joystick = pygame.joystick.Joystick(0)
         self.joystick.init()
-        print(f"成功初始化手把: {self.joystick.get_name()}")
+        return True
+
+    def ensure_connected(self):
+        if self.joystick and self.joystick.get_init():
+            return True
+        return self._connect()
 
     def get_input(self):
-        if not self.joystick:
+        if not self.ensure_connected():
             return None
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -316,11 +325,12 @@ def xbox_controller_thread():
     add_log("Xbox Controller Thread Started...")
     controller = XboxController()
     if not controller.joystick:
-        add_log("Xbox Controller not found.")
-        return
+        add_log("Xbox Controller not found. Waiting for connection...")
 
     last_cmd = None
     COMMAND_THRESHOLD = 0.4
+    last_missing_log = 0
+    controller_ready = controller.joystick is not None
 
     while state.is_running:
         controller_state = controller.get_input()
@@ -328,27 +338,43 @@ def xbox_controller_thread():
             state.is_running = False
             break
 
-        if controller_state:
-            # 決定方向指令（優先判斷按鍵）
-            if controller_state.get("stick_pressed") or controller_state.get("button_x"):
-                cmd = "S"
+        if not controller_state:
+            if not controller_ready:
+                # 仍未連上
+                pass
             else:
-                x = controller_state.get("left_stick_x", 0)
-                y = controller_state.get("left_stick_y", 0)
-                if abs(x) < COMMAND_THRESHOLD and abs(y) < COMMAND_THRESHOLD:
-                    cmd = "S"
-                elif abs(y) >= abs(x):
-                    cmd = "F" if y > 0 else "B"
-                else:
-                    cmd = "R" if x > 0 else "L"
+                controller_ready = False
+                add_log("Xbox controller disconnected.")
+            if time.time() - last_missing_log > 3:
+                add_log("Waiting for Xbox controller...")
+                last_missing_log = time.time()
+            time.sleep(0.1)
+            continue
 
-            if cmd != last_cmd:
-                send_serial_command(cmd, source="Xbox")
-                last_cmd = cmd
+        if not controller_ready:
+            controller_ready = True
+            add_log("Xbox controller connected.")
 
-            controller_state_with_cmd = dict(controller_state)
-            controller_state_with_cmd["cmd"] = cmd
-            socketio.emit('controller_data', controller_state_with_cmd)
+        # 決定方向指令（優先判斷按鍵）
+        if controller_state.get("stick_pressed") or controller_state.get("button_x"):
+            cmd = "S"
+        else:
+            x = controller_state.get("left_stick_x", 0)
+            y = controller_state.get("left_stick_y", 0)
+            if abs(x) < COMMAND_THRESHOLD and abs(y) < COMMAND_THRESHOLD:
+                cmd = "S"
+            elif abs(y) >= abs(x):
+                cmd = "F" if y > 0 else "B"
+            else:
+                cmd = "R" if x > 0 else "L"
+
+        if cmd != last_cmd:
+            send_serial_command(cmd, source="Xbox")
+            last_cmd = cmd
+
+        controller_state_with_cmd = dict(controller_state)
+        controller_state_with_cmd["cmd"] = cmd
+        socketio.emit('controller_data', controller_state_with_cmd)
         time.sleep(0.02)
         
     pygame.quit()

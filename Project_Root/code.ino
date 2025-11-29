@@ -67,6 +67,11 @@ bool isValidCommand(char cmd) {
          cmd == 'W' || cmd == 'w';
 }
 
+bool isValidCommand(char cmd) {
+  return cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' ||
+         cmd == 'W' || cmd == 'w';
+}
+
 // 將指令加入佇列（非阻塞）
 void queueCommand(char cmd) {
   int next = (cmdQueueHead + 1) % CMD_QUEUE_SIZE;
@@ -247,29 +252,30 @@ void handle_capture() {
 }
 
 void handle_stream() {
-  WiFiClient client = server.client();
-  client.setNoDelay(true);
-  String response = "HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
-  client.print(response);
+  // 只保留一個串流客戶端，並在 loop() 中持續餵影像以避免阻塞其他處理
+  streamClient = server.client();
+  streamClient.setNoDelay(true);
+  streamClient.print("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n");
+  streamActive = true;
   isStreaming = true;
-  Serial.println("[STREAM] 開始串流...");
-  
-  while (client.connected()) {
-    camera_fb_t *fb = esp_camera_fb_get();
-    if (!fb) { delay(10); continue; }
-    
-    client.print("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ");
-    client.print(fb->len);
-    client.print("\r\n\r\n");
-    client.write(fb->buf, fb->len);
-    client.print("\r\n");
-    
-    esp_camera_fb_return(fb);
-    vTaskDelay(1); // 釋放 CPU
+  lastStreamFrame = 0;
+  Serial.println("[STREAM] 開啟非阻塞串流");
+}
+
+// 保留 HTTP 控制端點以便相容與除錯
+void handle_cmd() {
+  if (!server.hasArg("act")) {
+    server.send(400, "text/plain", "Missing act");
+    return;
   }
-  
-  isStreaming = false;
-  Serial.println("[STREAM] 串流結束");
+
+  char cmd = server.arg("act").charAt(0);
+  if (isValidCommand(cmd)) {
+    queueCommand(cmd);
+    server.send(200, "text/plain", "Queued");
+  } else {
+    server.send(400, "text/plain", "Invalid cmd");
+  }
 }
 
 // 保留 HTTP 控制端點以便相容與除錯
