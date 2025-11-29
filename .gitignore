@@ -20,3 +20,5 @@ __pycache__/
 node_modules/
 dist/
 build/
+# 忽略整個資料夾
+yolov13-main/
