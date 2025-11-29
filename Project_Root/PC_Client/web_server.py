@@ -34,11 +34,9 @@ class SystemState:
         self.serial_port = None
         self.preferred_port = None
         self.ser = None
-        self.video_url = (
-            f"http://{config.DEFAULT_STREAM_IP}:{config.DEFAULT_STREAM_PORT}/stream"
-            if getattr(config, "DEFAULT_STREAM_IP", "")
-            else ""
-        )
+        self.stream_hosts = self._init_stream_hosts()
+        self.stream_host_index = 0
+        self.video_url = self._build_stream_url(self.stream_hosts[0]) if self.stream_hosts else ""
         self.radar_dist = 0.0
         self.logs = []
         self.is_running = True
@@ -47,6 +45,39 @@ class SystemState:
         self.is_flashing = False
         self.flash_lock = threading.Lock()
         self.add_log = None
+
+    def _init_stream_hosts(self):
+        hosts = []
+        default_hosts = getattr(config, "DEFAULT_STREAM_HOSTS", [])
+        default_ip = getattr(config, "DEFAULT_STREAM_IP", "")
+        if default_ip:
+            default_hosts = [default_ip] + default_hosts
+        for host in default_hosts:
+            host = host.strip()
+            if host and host not in hosts:
+                hosts.append(host)
+        return hosts
+
+    def _build_stream_url(self, host):
+        return f"http://{host}:{config.DEFAULT_STREAM_PORT}/stream" if host else ""
+
+    def set_primary_host(self, host):
+        if not host:
+            return
+        if host in self.stream_hosts:
+            self.stream_hosts.remove(host)
+        self.stream_hosts.insert(0, host)
+        self.stream_host_index = 0
+        self.video_url = self._build_stream_url(host)
+
+    def rotate_stream_host(self):
+        if not self.stream_hosts:
+            self.video_url = ""
+            return None
+        self.stream_host_index = (self.stream_host_index + 1) % len(self.stream_hosts)
+        host = self.stream_hosts[self.stream_host_index]
+        self.video_url = self._build_stream_url(host)
+        return host
 
 state = SystemState()
 
@@ -137,7 +168,8 @@ def send_serial_command(cmd, source="HTTP"):
             return False, str(e)
 
     # 2) Fallback to HTTP if we know the car IP
-    target_ip = state.current_ip or getattr(config, "DEFAULT_STREAM_IP", "")
+    fallback_host = state.stream_hosts[0] if state.stream_hosts else getattr(config, "DEFAULT_STREAM_IP", "")
+    target_ip = state.current_ip or fallback_host
     if target_ip:
         url = f"http://{target_ip}/cmd?act={cmd}"
         try:
@@ -204,7 +236,7 @@ def serial_worker_thread():
                     if ip_match:
                         ip = ip_match.group()
                         state.current_ip = ip
-                        state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
+                        state.set_primary_host(ip)
                         add_log(f"Auto-IP: {ip}")
                 if "DIST:" in line:
                     try:
@@ -227,6 +259,9 @@ def xbox_controller_thread():
     if not controller.joystick:
         add_log("Xbox Controller not found.")
         return
+    last_cmd = None
+    light_on = False
+    last_button_a = 0
     while state.is_running:
         controller_state = controller.get_input()
         if controller_state == "QUIT":
@@ -234,6 +269,43 @@ def xbox_controller_thread():
             break
         if controller_state:
             socketio.emit('controller_data', controller_state)
+
+            cmd = config.CMD_STOP
+            x = controller_state.get("left_stick_x", 0)
+            y = controller_state.get("left_stick_y", 0)
+            dpad_x = controller_state.get("dpad_x", 0)
+            dpad_y = controller_state.get("dpad_y", 0)
+
+            if y < -JOYSTICK_DEADZONE:
+                cmd = config.CMD_FORWARD
+            elif y > JOYSTICK_DEADZONE:
+                cmd = config.CMD_BACKWARD
+            elif x < -JOYSTICK_DEADZONE:
+                cmd = config.CMD_LEFT
+            elif x > JOYSTICK_DEADZONE:
+                cmd = config.CMD_RIGHT
+
+            if dpad_y == 1:
+                cmd = config.CMD_FORWARD
+            elif dpad_y == -1:
+                cmd = config.CMD_BACKWARD
+            elif dpad_x == -1:
+                cmd = config.CMD_LEFT
+            elif dpad_x == 1:
+                cmd = config.CMD_RIGHT
+
+            if cmd != last_cmd:
+                send_serial_command(cmd, source="XBOX")
+                last_cmd = cmd
+
+            button_a = controller_state.get("button_a", 0)
+            if button_a and not last_button_a:
+                light_on = not light_on
+                send_serial_command(
+                    config.CMD_LIGHT_ON if light_on else config.CMD_LIGHT_OFF,
+                    source="XBOX"
+                )
+            last_button_a = button_a
         time.sleep(0.02)
     pygame.quit()
     add_log("Xbox Controller Thread Stopped.")
@@ -241,14 +313,21 @@ def xbox_controller_thread():
 def generate_frames():
     cap = None
     frame_count = 0
+    connect_failures = 0
     while state.is_running:
         if state.video_url and (cap is None or not cap.isOpened()):
             print(f"[VIDEO] Connecting to {state.video_url}")
             cap = cv2.VideoCapture(state.video_url)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             if not cap.isOpened():
+                connect_failures += 1
+                if connect_failures >= max(1, len(state.stream_hosts)):
+                    next_host = state.rotate_stream_host()
+                    if next_host:
+                        add_log(f"[VIDEO] Switching stream host -> {next_host}")
                 time.sleep(1)
                 continue
+            connect_failures = 0
             print("[VIDEO] Connected!")
         if cap and cap.isOpened():
             success, frame = cap.read()
@@ -424,7 +503,7 @@ def api_set_ip():
     ip = data.get('ip') or request.values.get('ip')
     if ip:
         state.current_ip = ip
-        state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
+        state.set_primary_host(ip)
         add_log(f"Manual IP Set: {ip}")
         return jsonify({"status": "ok"})
     return jsonify({"status": "error", "msg": "Invalid IP"})
