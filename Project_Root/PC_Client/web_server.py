@@ -7,6 +7,8 @@ import re
 import requests
 import serial
 import pygame
+import websocket
+from queue import SimpleQueue, Empty
 from serial.tools import list_ports
 from flask import Flask, render_template, Response, request, jsonify
 from flask_socketio import SocketIO, emit
@@ -30,11 +32,13 @@ socketio = SocketIO(app)
 # === 全域狀態 ===
 class SystemState:
     def __init__(self):
-        self.current_ip = getattr(config, "DEFAULT_CAR_IP", "boebot.local")  # 車子控制 IP
+        self.current_ip = getattr(config, "DEFAULT_CAR_IP", "boebot.local")  # 車子控制 IP（相容用）
+        self.bridge_ip = getattr(config, "DEFAULT_STREAM_IP", "") or getattr(config, "DEFAULT_CAR_IP", "")
         self.camera_ip = ""   # 相機串流 IP
         self.serial_port = None
         self.preferred_port = None
         self.ser = None
+        self.ws_connected = False
         
         # 初始化影像串流 URL
         default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
@@ -53,6 +57,7 @@ class SystemState:
         self.add_log = None
 
 state = SystemState()
+ws_outbox: "SimpleQueue[str]" = SimpleQueue()
 
 # Xbox 手把按鈕和搖桿的對應編號
 AXIS_LEFT_STICK_X = 0
@@ -68,17 +73,26 @@ class XboxController:
     def __init__(self):
         pygame.init()
         pygame.joystick.init()
+        self.joystick = None
+        self._connect()
+
+    def _connect(self):
         joystick_count = pygame.joystick.get_count()
         if joystick_count == 0:
-            print("錯誤：未偵測到任何手把。")
             self.joystick = None
-            return
+            return False
+
         self.joystick = pygame.joystick.Joystick(0)
         self.joystick.init()
-        print(f"成功初始化手把: {self.joystick.get_name()}")
+        return True
+
+    def ensure_connected(self):
+        if self.joystick and self.joystick.get_init():
+            return True
+        return self._connect()
 
     def get_input(self):
-        if not self.joystick:
+        if not self.ensure_connected():
             return None
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -119,55 +133,102 @@ def add_log(msg):
 
 state.add_log = add_log
 
+def _build_ws_url():
+    host = state.bridge_ip or state.camera_ip or state.current_ip
+    if not host:
+        return None
+    return f"ws://{host}:82/ws"
+
+
+def websocket_bridge_thread():
+    add_log("WebSocket Bridge Thread Started...")
+    while state.is_running:
+        url = _build_ws_url()
+        if not url:
+            state.ws_connected = False
+            time.sleep(1)
+            continue
+
+        ws = None
+        try:
+            ws = websocket.create_connection(url, timeout=3)
+            state.ws_connected = True
+            add_log(f"🔗 WebSocket connected: {url}")
+
+            while state.is_running and state.ws_connected:
+                try:
+                    cmd = ws_outbox.get(timeout=0.25)
+                except Empty:
+                    continue
+
+                try:
+                    ws.send(cmd)
+                except Exception as send_err:
+                    add_log(f"[WS] Send error: {send_err}")
+                    break
+
+        except Exception as e:
+            state.ws_connected = False
+            add_log(f"[WS] Reconnect in 1s ({e})")
+            time.sleep(1)
+        finally:
+            if ws:
+                try:
+                    ws.close()
+                except Exception:
+                    pass
+            state.ws_connected = False
+
+    add_log("WebSocket Bridge Thread Stopped")
+
+
 # === 🔧 修正後的指令發送函數 ===
 def send_serial_command(cmd, source="HTTP"):
     """
-    雙通道控制策略：
-    1. 優先透過 WiFi HTTP 直接控制 ESP8266 車子（快速、穩定）
-    2. 備用：透過 Serial 轉發給 ESP32-S3 CAM（需要 CAM 韌體支援）
+    優先透過 WebSocket 將指令推送到 ESP32-S3，再由 ESP-NOW 轉送到車子；
+    保留原始 HTTP 控制與 Serial 備援以維持向下相容。
     """
     if not cmd:
         return False, "Empty command"
 
-    # 方法1: 直接透過 WiFi HTTP 控制車子（推薦）
+    ws_url = _build_ws_url()
+    if ws_url and state.ws_connected:
+        ws_outbox.put(cmd)
+        return True, "Sent via WebSocket"
+
+    # 方法2: 直接透過 WiFi HTTP 控制車子（相容）
     target_urls = []
-    
-    # 先試車子的 IP（從 config 或手動設定）
+
     if state.current_ip:
         target_urls.append(f"http://{state.current_ip}/cmd")
-    
-    # 備用：嘗試 DEFAULT_CAR_IP
+
     default_car_ip = getattr(config, "DEFAULT_CAR_IP", "")
     if default_car_ip and f"http://{default_car_ip}/cmd" not in target_urls:
         target_urls.append(f"http://{default_car_ip}/cmd")
 
-    # 嘗試所有 URL
     for url in target_urls:
         try:
             resp = requests.get(f"{url}?act={cmd}", timeout=0.5)
             if resp.ok:
-                # add_log(f"[{source}] ✅ WiFi → {cmd}")  # 減少 log 頻率
                 return True, "Sent via WiFi"
         except requests.exceptions.RequestException:
             continue
 
-    # 方法2: 透過 Serial 轉發（備用，需要 ESP32-S3 CAM 韌體支援）
+    # 方法3: 透過 Serial 轉發（備用，需要 ESP32-S3 CAM 韌體支援）
     if state.ser and state.ser.is_open:
         try:
             state.ser.write(cmd.encode())
-            # add_log(f"[{source}] ⚠️ Serial fallback → {cmd}")
             return True, "Sent via Serial (fallback)"
-        except Exception as e:
+        except Exception:
             pass
 
-    # 所有方法都失敗（只在第一次失敗時記錄）
     if not hasattr(send_serial_command, '_last_fail_time') or \
        time.time() - send_serial_command._last_fail_time > 5:
         add_log(f"[{source}] ❌ Car unreachable: {cmd}")
         add_log(f"💡 嘗試的 URL: {', '.join(target_urls)}")
         add_log("💡 提示：確認車子已連線且網路可達")
         send_serial_command._last_fail_time = time.time()
-    
+
     return False, "Car unreachable"
 
 # === Threads ===
@@ -237,6 +298,9 @@ def serial_worker_thread():
                                 state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
                                 add_log(f"📹 Camera IP detected: {ip}")
                                 add_log(f"🎥 Stream URL updated: {state.video_url}")
+                                if not state.bridge_ip:
+                                    state.bridge_ip = ip
+                                    add_log(f"🔗 WebSocket bridge host set: {ip}")
                             # 如果還沒設定車子 IP，使用相同網段猜測
                             if not state.current_ip:
                                 add_log(f"💡 提示：請在 Settings 中設定車子的 IP 地址")
@@ -261,11 +325,12 @@ def xbox_controller_thread():
     add_log("Xbox Controller Thread Started...")
     controller = XboxController()
     if not controller.joystick:
-        add_log("Xbox Controller not found.")
-        return
+        add_log("Xbox Controller not found. Waiting for connection...")
 
     last_cmd = None
     COMMAND_THRESHOLD = 0.4
+    last_missing_log = 0
+    controller_ready = controller.joystick is not None
 
     while state.is_running:
         controller_state = controller.get_input()
@@ -273,27 +338,43 @@ def xbox_controller_thread():
             state.is_running = False
             break
 
-        if controller_state:
-            # 決定方向指令（優先判斷按鍵）
-            if controller_state.get("stick_pressed") or controller_state.get("button_x"):
-                cmd = "S"
+        if not controller_state:
+            if not controller_ready:
+                # 仍未連上
+                pass
             else:
-                x = controller_state.get("left_stick_x", 0)
-                y = controller_state.get("left_stick_y", 0)
-                if abs(x) < COMMAND_THRESHOLD and abs(y) < COMMAND_THRESHOLD:
-                    cmd = "S"
-                elif abs(y) >= abs(x):
-                    cmd = "F" if y > 0 else "B"
-                else:
-                    cmd = "R" if x > 0 else "L"
+                controller_ready = False
+                add_log("Xbox controller disconnected.")
+            if time.time() - last_missing_log > 3:
+                add_log("Waiting for Xbox controller...")
+                last_missing_log = time.time()
+            time.sleep(0.1)
+            continue
 
-            if cmd != last_cmd:
-                send_serial_command(cmd, source="Xbox")
-                last_cmd = cmd
+        if not controller_ready:
+            controller_ready = True
+            add_log("Xbox controller connected.")
 
-            controller_state_with_cmd = dict(controller_state)
-            controller_state_with_cmd["cmd"] = cmd
-            socketio.emit('controller_data', controller_state_with_cmd)
+        # 決定方向指令（優先判斷按鍵）
+        if controller_state.get("stick_pressed") or controller_state.get("button_x"):
+            cmd = "S"
+        else:
+            x = controller_state.get("left_stick_x", 0)
+            y = controller_state.get("left_stick_y", 0)
+            if abs(x) < COMMAND_THRESHOLD and abs(y) < COMMAND_THRESHOLD:
+                cmd = "S"
+            elif abs(y) >= abs(x):
+                cmd = "F" if y > 0 else "B"
+            else:
+                cmd = "R" if x > 0 else "L"
+
+        if cmd != last_cmd:
+            send_serial_command(cmd, source="Xbox")
+            last_cmd = cmd
+
+        controller_state_with_cmd = dict(controller_state)
+        controller_state_with_cmd["cmd"] = cmd
+        socketio.emit('controller_data', controller_state_with_cmd)
         time.sleep(0.02)
         
     pygame.quit()
@@ -392,12 +473,14 @@ def api_status():
     return jsonify({
         "ip": state.current_ip,
         "car_ip": state.current_ip,
+        "bridge_ip": state.bridge_ip,
         "camera_ip": state.camera_ip,
         "video_url": state.video_url,
         "port": state.serial_port or "DISCONNECTED",
         "preferred_port": state.preferred_port,
         "dist": state.radar_dist,
         "logs": state.logs,
+        "ws_connected": state.ws_connected,
         "ai_status": state.ai_enabled
     })
 
@@ -507,20 +590,24 @@ def api_set_ip():
     """
     data = request.get_json(silent=True) or {}
     ip = data.get('ip') or request.values.get('ip')
-    ip_type = data.get('type', 'stream')  # 'stream' 或 'car'
+    ip_type = data.get('type', 'stream')  # 'stream' / 'car' / 'bridge'
     
     if not ip:
         return jsonify({"status": "error", "msg": "Invalid IP"})
     
     if ip_type == 'car':
-        # 設定車子的 IP（用於控制）
         state.current_ip = ip
         add_log(f"🚗 Car Control IP Set: {ip}")
+    elif ip_type == 'bridge':
+        state.bridge_ip = ip
+        add_log(f"🔗 WebSocket Bridge IP Set: {ip}")
     else:
-        # 設定影像串流 IP
         state.camera_ip = ip
         state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
         add_log(f"📹 Camera Stream IP Set: {ip}")
+        if not state.bridge_ip:
+            state.bridge_ip = ip
+            add_log(f"🔗 WebSocket bridge host set: {ip}")
     
     return jsonify({"status": "ok", "ip": ip, "type": ip_type})
 
@@ -556,6 +643,7 @@ def api_set_port():
 if __name__ == '__main__':
     threading.Thread(target=serial_worker_thread, daemon=True).start()
     threading.Thread(target=xbox_controller_thread, daemon=True).start()
+    threading.Thread(target=websocket_bridge_thread, daemon=True).start()
 
     print("=" * 60)
     print(f"🚀 Web Server Online: http://127.0.0.1:{config.WEB_PORT}")

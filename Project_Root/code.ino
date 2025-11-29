@@ -6,15 +6,17 @@
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <WebServer.h>
-#include <HTTPClient.h>
+#include <esp_now.h>
+#include <WebSocketsServer.h>
 
 // ============= WiFi 設定 =============
 const char* ssid     = "Bk";
 const char* password = ".........";
 
 // ============= 遙控車設定 =============
-String carIP = "boebot.local";
-const int CAR_PORT = 80;
+// 👉 將下面的 MAC 換成 ESP8266/12F 車子的 WiFi MAC 位址
+uint8_t carPeerMac[] = {0x24, 0x6F, 0x28, 0x00, 0x00, 0x00};
+const int ESPNOW_CHANNEL = 0; // 0 = 跟隨目前 WiFi 頻道
 
 // ============= 超聲波腳位 =============
 #define SIG_PIN 21
@@ -38,13 +40,25 @@ const int CAR_PORT = 80;
 #define PCLK_GPIO_NUM     13
 
 WebServer server(81);
+WebSocketsServer controlSocket(82);
 bool isStreaming = false;
+bool espNowReady = false;
+
+// 非阻塞串流用
+WiFiClient streamClient;
+bool streamActive = false;
+unsigned long lastStreamFrame = 0;
 
 // ============= [新增] 指令佇列 =============
 #define CMD_QUEUE_SIZE 10
 char cmdQueue[CMD_QUEUE_SIZE];
 volatile int cmdQueueHead = 0;
 volatile int cmdQueueTail = 0;
+
+bool isValidCommand(char cmd) {
+  return cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' ||
+         cmd == 'W' || cmd == 'w';
+}
 
 // 將指令加入佇列（非阻塞）
 void queueCommand(char cmd) {
@@ -63,31 +77,75 @@ char dequeueCommand() {
   return cmd;
 }
 
-// ============= [修改] 獨立任務處理 HTTP 轉發 =============
+// ============= ESP-NOW 相關 =============
+void onEspNowSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.printf("[ESPNOW] Send status: %s\n", status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
+}
+
+bool sendEspNow(char cmd) {
+  if (!espNowReady) return false;
+  esp_err_t result = esp_now_send(carPeerMac, reinterpret_cast<uint8_t *>(&cmd), 1);
+  return result == ESP_OK;
+}
+
+void initEspNow() {
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("[ESPNOW] Init failed");
+    espNowReady = false;
+    return;
+  }
+
+  esp_now_register_send_cb(onEspNowSent);
+
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, carPeerMac, 6);
+  peerInfo.channel = ESPNOW_CHANNEL == 0 ? static_cast<uint8_t>(WiFi.channel()) : ESPNOW_CHANNEL;
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("[ESPNOW] Add peer failed");
+    espNowReady = false;
+    return;
+  }
+
+  espNowReady = true;
+  Serial.print("[ESPNOW] Ready on channel ");
+  Serial.println(peerInfo.channel);
+}
+
+// ============= [修改] 獨立任務處理指令轉發 =============
 void commandForwardTask(void *parameter) {
-  HTTPClient http;
-  
   while (true) {
     char cmd = dequeueCommand();
-    
+
     if (cmd != 0) {
-      String url = "http://" + carIP + "/cmd?act=" + String(cmd);
-      
-      http.setTimeout(300); // 縮短超時時間
-      http.begin(url);
-      
-      int httpCode = http.GET();
-      
-      if (httpCode > 0) {
-        Serial.printf("[FWD] ✓ %c\n", cmd);
-      } else {
-        Serial.printf("[FWD] ✗ %c\n", cmd);
-      }
-      
-      http.end();
+      bool sent = sendEspNow(cmd);
+      Serial.printf("[FWD][ESPNOW] %s %c\n", sent ? "✓" : "✗", cmd);
     }
-    
+
     vTaskDelay(10 / portTICK_PERIOD_MS); // 釋放 CPU
+  }
+}
+
+// ============= WebSocket 控制通道 =============
+void onWebSocketEvent(uint8_t clientNum, WStype_t type, uint8_t *payload, size_t length) {
+  switch (type) {
+    case WStype_DISCONNECTED:
+      Serial.printf("[WS] Client %u disconnected\n", clientNum);
+      break;
+    case WStype_CONNECTED:
+      Serial.printf("[WS] Client %u connected\n", clientNum);
+      break;
+    case WStype_TEXT:
+      if (length > 0) {
+        char cmd = static_cast<char>(payload[0]);
+        if (isValidCommand(cmd)) {
+          queueCommand(cmd);
+        }
+      }
+      break;
+    default:
+      break;
   }
 }
 
@@ -178,29 +236,30 @@ void handle_capture() {
 }
 
 void handle_stream() {
-  WiFiClient client = server.client();
-  client.setNoDelay(true);
-  String response = "HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
-  client.print(response);
+  // 只保留一個串流客戶端，並在 loop() 中持續餵影像以避免阻塞其他處理
+  streamClient = server.client();
+  streamClient.setNoDelay(true);
+  streamClient.print("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n");
+  streamActive = true;
   isStreaming = true;
-  Serial.println("[STREAM] 開始串流...");
-  
-  while (client.connected()) {
-    camera_fb_t *fb = esp_camera_fb_get();
-    if (!fb) { delay(10); continue; }
-    
-    client.print("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ");
-    client.print(fb->len);
-    client.print("\r\n\r\n");
-    client.write(fb->buf, fb->len);
-    client.print("\r\n");
-    
-    esp_camera_fb_return(fb);
-    vTaskDelay(1); // 釋放 CPU
+  lastStreamFrame = 0;
+  Serial.println("[STREAM] 開啟非阻塞串流");
+}
+
+// 保留 HTTP 控制端點以便相容與除錯
+void handle_cmd() {
+  if (!server.hasArg("act")) {
+    server.send(400, "text/plain", "Missing act");
+    return;
   }
-  
-  isStreaming = false;
-  Serial.println("[STREAM] 串流結束");
+
+  char cmd = server.arg("act").charAt(0);
+  if (isValidCommand(cmd)) {
+    queueCommand(cmd);
+    server.send(200, "text/plain", "Queued");
+  } else {
+    server.send(400, "text/plain", "Invalid cmd");
+  }
 }
 
 void setup() {
@@ -238,11 +297,17 @@ void setup() {
     Serial.println("\n[ERR] WiFi 連線失敗");
   }
 
+  initEspNow();
+
   server.on("/", handle_root);
   server.on("/capture", handle_capture);
   server.on("/stream", handle_stream);
+  server.on("/cmd", handle_cmd);
   server.begin();
-  
+
+  controlSocket.begin();
+  controlSocket.onEvent(onWebSocketEvent);
+
   // 啟動獨立的指令轉發任務
   xTaskCreatePinnedToCore(
     commandForwardTask,   // 任務函數
@@ -257,14 +322,38 @@ void setup() {
 
 void loop() {
   server.handleClient();
+  controlSocket.loop();
+
+  // 非阻塞串流：在主迴圈中推送影像，避免佔用 server.handleClient()
+  if (streamActive) {
+    if (!streamClient.connected()) {
+      streamActive = false;
+      isStreaming = false;
+      streamClient.stop();
+      Serial.println("[STREAM] 客戶端中斷");
+    } else {
+      const unsigned long now = millis();
+      if (now - lastStreamFrame >= 30) { // ~33fps 上限
+        lastStreamFrame = now;
+        camera_fb_t *fb = esp_camera_fb_get();
+        if (fb) {
+          streamClient.print("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ");
+          streamClient.print(fb->len);
+          streamClient.print("\r\n\r\n");
+          streamClient.write(fb->buf, fb->len);
+          streamClient.print("\r\n");
+          esp_camera_fb_return(fb);
+        }
+      }
+    }
+  }
 
   // 處理 Serial 指令（非阻塞）
   while (Serial.available() > 0) {
     char cmd = Serial.read();
-    
+
     if (cmd != '\n' && cmd != '\r') {
-      if (cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' || 
-          cmd == 'W' || cmd == 'w') {
+      if (isValidCommand(cmd)) {
         queueCommand(cmd); // 加入佇列，由獨立任務處理
       }
     }
