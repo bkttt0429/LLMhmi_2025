@@ -37,36 +37,41 @@ const char* password = "........."; // 請確認您的 WiFi 密碼
 WebServer server(81);
 bool isStreaming = false;
 
-// ============= 超聲波初始化 (單線模式) =============
+// ============= 超聲波初始化 (單線模式，修正版) =============
 void init_ultrasonic() {
-  pinMode(SIG_PIN, INPUT); // 預設為輸入，避免干擾
-  Serial.println("[OK] 超聲波模組初始化完成 (SIG=GPIO 21)");
+  // 平時保持為輸入腳，避免一開機就對模組輸出高電位
+  pinMode(SIG_PIN, INPUT_PULLDOWN);   // ESP32 支援 PULLDOWN，比較穩定
+  digitalWrite(SIG_PIN, LOW);         // 確保不啟用 PULLUP
+
+  Serial.println("[OK] 超聲波模組初始化完成 (單線 SIG=GPIO 21, INPUT_PULLDOWN)");
 }
 
-// ============= 超聲波測距 (單線模式邏輯) =============
+// ============= 超聲波測距 (單線模式邏輯，稍微加強穩定性) =============
 float get_distance() {
   unsigned long duration;
   float distance;
 
-  // 1. 切換為 OUTPUT 發送 Trigger
+  // 1. 先確定腳位目前是低電位 & 輸出模式，再送 Trigger
   pinMode(SIG_PIN, OUTPUT);
   digitalWrite(SIG_PIN, LOW);
   delayMicroseconds(2);
-  digitalWrite(SIG_PIN, HIGH);
+
+  digitalWrite(SIG_PIN, HIGH);  // 10us Trigger 脈衝
   delayMicroseconds(10);
   digitalWrite(SIG_PIN, LOW);
 
-  // 2. 切換為 INPUT 接收 Echo
-  pinMode(SIG_PIN, INPUT);
-  
-  // 3. 讀取脈衝 (Timeout 30ms)
-  duration = pulseIn(SIG_PIN, HIGH, 30000); 
+  // 2. 切回輸入模式等待 Echo
+  pinMode(SIG_PIN, INPUT);      // 或保守一點用 INPUT_PULLDOWN
+
+  // 3. 讀取脈衝寬度 (Timeout 30ms，大約對應 5m 距離)
+  duration = pulseIn(SIG_PIN, HIGH, 30000);
 
   if (duration == 0) {
-    return -1.0; // 超時或無訊號
+    // 超時或沒收到回波
+    return -1.0;
   }
 
-  // 4. 計算距離
+  // 4. 換算成距離 (cm)
   distance = duration * 0.034 / 2.0;
   return distance;
 }
