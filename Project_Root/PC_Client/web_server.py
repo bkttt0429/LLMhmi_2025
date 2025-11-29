@@ -448,3 +448,16 @@ if __name__ == '__main__':
     print("=" * 60)
 
     socketio.run(app, host=config.WEB_HOST, port=config.WEB_PORT, debug=False)
+# === 串口寫入輔助 ===
+def send_serial_command(cmd, source="HTTP"):
+    if not cmd:
+        return False, "Empty command"
+    if not state.ser or not state.ser.is_open:
+        add_log(f"[{source}] Serial unavailable")
+        return False, "Serial not ready"
+    try:
+        state.ser.write(cmd.encode())
+        return True, "Sent"
+    except Exception as e:
+        add_log(f"[{source}] Serial write failed: {e}")
+        return False, str(e)
