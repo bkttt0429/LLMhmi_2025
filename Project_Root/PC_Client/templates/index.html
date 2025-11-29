@@ -231,7 +231,19 @@
                         <div class="flex items-center gap-2"><span class="text-green-400 font-mono">Y</span>：AI 開/關</div>
                     </div>
                 </div>
-                <div class="text-[10px] text-gray-500">左搖桿偏移與按下狀態會即時顯示。</div>
+                <div class="flex items-center justify-between text-[10px] sm:text-xs text-gray-400">
+                    <div>LINK：<span id="xbox-link" class="text-red-500 font-bold">OFFLINE</span></div>
+                    <div>CMD：<span id="xbox-cmd" class="text-yellow-400 font-mono">--</span></div>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-[10px] sm:text-xs text-gray-300">
+                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">A</span><span id="xbox-a" class="text-gray-500">OFF</span></div>
+                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">B</span><span id="xbox-b" class="text-gray-500">OFF</span></div>
+                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">X</span><span id="xbox-x" class="text-gray-500">OFF</span></div>
+                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">Y</span><span id="xbox-y" class="text-gray-500">OFF</span></div>
+                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">LS</span><span id="xbox-ls" class="text-gray-500">OFF</span></div>
+                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">D-PAD</span><span id="xbox-dpad" class="text-gray-500">—</span></div>
+                </div>
+                <div class="text-[10px] text-gray-500">左搖桿偏移與按下狀態、按鍵回饋會即時顯示。</div>
             </div>
 
             <div class="cyber-border p-2 sm:p-3 text-[10px] sm:text-xs flex flex-col gap-1">
@@ -464,7 +476,8 @@
             requestAnimationFrame(animationLoop);
             fetchPorts();
             startStatusPolling();
-            
+            startXboxHeartbeat();
+
             // Initial Log
             log("System Initialized. Native WS mode active.");
             
@@ -513,6 +526,9 @@
                 document.getElementById('ws-status').className = "text-red-500 font-bold";
                 document.getElementById('link-text').innerText = "RETRYING...";
                 document.getElementById('link-text').className = "text-yellow-500 font-bold";
+                controllerLinked = false;
+                lastXboxUpdate = 0;
+                setGamepadLink(false);
                 setTimeout(initWebSocket, 2000);
             });
 
@@ -734,6 +750,71 @@
             const dy = -clamp(y) * offset;
             stick.style.transform = `translate(${dx}px, ${dy}px)`;
             stick.classList.toggle('xbox-pulse', !!pressed);
+        }
+
+        function setGamepadLink(isConnected) {
+            const icon = document.getElementById('gamepad-status');
+            if (icon) {
+                icon.classList.toggle('gamepad-connected', isConnected);
+            }
+
+            const linkEl = document.getElementById('xbox-link');
+            if (linkEl) {
+                linkEl.innerText = isConnected ? 'ONLINE' : 'OFFLINE';
+                linkEl.className = isConnected ? 'text-green-400 font-bold' : 'text-red-500 font-bold';
+            }
+
+            if (!isConnected) {
+                updateXboxCommand('--');
+                updateXboxVisual(0, 0, false);
+                updateXboxButtons({});
+            }
+        }
+
+        function updateXboxCommand(cmd) {
+            const cmdEl = document.getElementById('xbox-cmd');
+            if (!cmdEl) return;
+            cmdEl.innerText = cmd || '--';
+            cmdEl.className = cmd ? 'text-yellow-400 font-mono font-bold' : 'text-gray-500';
+        }
+
+        function setButtonState(id, active) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.innerText = active ? 'ON' : 'OFF';
+            el.className = active ? 'text-green-400 font-bold' : 'text-gray-500';
+        }
+
+        function setDpadState(x, y) {
+            const el = document.getElementById('xbox-dpad');
+            if (!el) return;
+            let dir = '—';
+            if (x || y) {
+                const horiz = x > 0 ? '→' : x < 0 ? '←' : '';
+                const vert = y > 0 ? '↑' : y < 0 ? '↓' : '';
+                dir = `${vert}${horiz}` || '—';
+            }
+            el.innerText = dir;
+            el.className = (x || y) ? 'text-green-400 font-bold' : 'text-gray-500';
+        }
+
+        function updateXboxButtons(data) {
+            setButtonState('xbox-a', data.button_a);
+            setButtonState('xbox-b', data.button_b);
+            setButtonState('xbox-x', data.button_x);
+            setButtonState('xbox-y', data.button_y);
+            setButtonState('xbox-ls', data.stick_pressed);
+            setDpadState(data.dpad_x || 0, data.dpad_y || 0);
+        }
+
+        function startXboxHeartbeat() {
+            setInterval(() => {
+                if (lastXboxUpdate && Date.now() - lastXboxUpdate > 2000) {
+                    controllerLinked = false;
+                    lastXboxUpdate = 0;
+                    setGamepadLink(false);
+                }
+            }, 500);
         }
 
         // === Other Logic (Chart, Stats) ===
