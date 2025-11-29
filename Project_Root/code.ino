@@ -46,9 +46,21 @@ bool espNowReady = false;
 
 // ============= [新增] 指令佇列 =============
 #define CMD_QUEUE_SIZE 10
-char cmdQueue[CMD_QUEUE_SIZE];
+const int MAX_RETRIES = 3;
+const unsigned long ACK_TIMEOUT = 250; // ms
+
+struct CommandItem {
+  char cmd;
+  uint16_t seq;
+  uint8_t retries;
+  unsigned long lastAttempt;
+  bool awaitingResponse;
+};
+
+CommandItem cmdQueue[CMD_QUEUE_SIZE];
 volatile int cmdQueueHead = 0;
 volatile int cmdQueueTail = 0;
+volatile uint16_t cmdSequence = 1;
 
 bool isValidCommand(char cmd) {
   return cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' ||
@@ -59,17 +71,21 @@ bool isValidCommand(char cmd) {
 void queueCommand(char cmd) {
   int next = (cmdQueueHead + 1) % CMD_QUEUE_SIZE;
   if (next != cmdQueueTail) {
-    cmdQueue[cmdQueueHead] = cmd;
+    cmdQueue[cmdQueueHead] = {cmd, cmdSequence++, 0, 0, false};
     cmdQueueHead = next;
   }
 }
 
-// 從佇列取出指令
-char dequeueCommand() {
-  if (cmdQueueHead == cmdQueueTail) return 0;
-  char cmd = cmdQueue[cmdQueueTail];
+bool hasPendingCommand() {
+  return cmdQueueHead != cmdQueueTail;
+}
+
+CommandItem &currentCommand() {
+  return cmdQueue[cmdQueueTail];
+}
+
+void popCommand() {
   cmdQueueTail = (cmdQueueTail + 1) % CMD_QUEUE_SIZE;
-  return cmd;
 }
 
 // ============= ESP-NOW 相關 =============
