@@ -903,7 +903,11 @@
         
         function setManualIP() {
              const ip = document.getElementById('ip-input').value;
-             if(ip) fetch('/api/set_ip', { method: 'POST', body: JSON.stringify({ip}) });
+             if(ip) fetch('/api/set_ip', { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ip}) 
+             });
         }
         
         function applySettings() {

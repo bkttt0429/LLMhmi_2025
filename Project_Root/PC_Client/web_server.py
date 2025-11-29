@@ -4,6 +4,7 @@ import cv2
 import time
 import threading
 import re
+import requests
 import serial
 import pygame
 from serial.tools import list_ports
@@ -117,6 +118,41 @@ def add_log(msg):
 
 state.add_log = add_log
 
+# === 串口 / 網路寫入輔助 ===
+def send_serial_command(cmd, source="HTTP"):
+    """
+    Primary control channel: USB serial.
+    Fallback: HTTP to the ESP8266 car if we have an IP (e.g., MDNS/manually set).
+    """
+    if not cmd:
+        return False, "Empty command"
+
+    # 1) Serial first
+    if state.ser and state.ser.is_open:
+        try:
+            state.ser.write(cmd.encode())
+            return True, "Sent over serial"
+        except Exception as e:
+            add_log(f"[{source}] Serial write failed: {e}")
+            return False, str(e)
+
+    # 2) Fallback to HTTP if we know the car IP
+    target_ip = state.current_ip or getattr(config, "DEFAULT_STREAM_IP", "")
+    if target_ip:
+        url = f"http://{target_ip}/cmd?act={cmd}"
+        try:
+            resp = requests.get(url, timeout=2)
+            if resp.ok:
+                add_log(f"[{source}] HTTP control -> {url} ({resp.status_code})")
+                return True, "Sent over HTTP"
+            add_log(f"[{source}] HTTP control failed ({resp.status_code})")
+            return False, f"HTTP {resp.status_code}"
+        except Exception as e:
+            add_log(f"[{source}] HTTP control error: {e}")
+            return False, str(e)
+
+    add_log(f"[{source}] Serial unavailable and no IP set")
+    return False, "Serial not ready"
 # === 串口寫入輔助 ===
 def send_serial_command(cmd, source="HTTP"):
     if not cmd:
@@ -397,8 +433,8 @@ def toggle_ai():
 
 @app.route('/api/set_ip', methods=['POST'])
 def api_set_ip():
-    data = request.json
-    ip = data.get('ip')
+    data = request.get_json(silent=True) or {}
+    ip = data.get('ip') or request.values.get('ip')
     if ip:
         state.current_ip = ip
         state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
