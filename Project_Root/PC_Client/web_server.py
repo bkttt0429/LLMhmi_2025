@@ -33,7 +33,11 @@ class SystemState:
         self.serial_port = None
         self.preferred_port = None
         self.ser = None
-        self.video_url = ""
+        self.video_url = (
+            f"http://{config.DEFAULT_STREAM_IP}:{config.DEFAULT_STREAM_PORT}/stream"
+            if getattr(config, "DEFAULT_STREAM_IP", "")
+            else ""
+        )
         self.radar_dist = 0.0
         self.logs = []
         self.is_running = True
@@ -112,6 +116,20 @@ def add_log(msg):
     socketio.emit('log', {'data': log_entry})
 
 state.add_log = add_log
+
+# === 串口寫入輔助 ===
+def send_serial_command(cmd, source="HTTP"):
+    if not cmd:
+        return False, "Empty command"
+    if not state.ser or not state.ser.is_open:
+        add_log(f"[{source}] Serial unavailable")
+        return False, "Serial not ready"
+    try:
+        state.ser.write(cmd.encode())
+        return True, "Sent"
+    except Exception as e:
+        add_log(f"[{source}] Serial write failed: {e}")
+        return False, str(e)
 
 # === Threads ===
 def serial_worker_thread():
@@ -280,11 +298,7 @@ def handle_disconnect():
 @socketio.on('command')
 def handle_command(data):
     cmd = data.get('cmd')
-    if state.ser and state.ser.is_open:
-        try:
-            state.ser.write(cmd.encode())
-        except Exception as e:
-            print(f"Serial write failed: {e}")
+    send_serial_command(cmd, source="WS")
 
 @app.route('/api/status')
 def api_status():
@@ -296,6 +310,19 @@ def api_status():
         "logs": state.logs,
         "ai_status": state.ai_enabled
     })
+
+@app.route('/api/control', methods=['POST'])
+def api_control():
+    data = request.get_json(silent=True) or {}
+    cmd = (data.get('cmd') or '').strip()
+
+    if not cmd:
+        return jsonify({"status": "error", "msg": "Missing command"}), 400
+
+    success, msg = send_serial_command(cmd, source="API")
+    status = "ok" if success else "error"
+    code = 200 if success else 500
+    return jsonify({"status": status, "msg": msg, "cmd": cmd}), code
 
 @app.route('/api/flash', methods=['POST'])
 def api_flash():
@@ -416,6 +443,8 @@ if __name__ == '__main__':
     print(f"📦 YOLO Available: {YOLO_AVAILABLE}")
     print(f"🔧 Serial Auto-Detection: ACTIVE")
     print(f"🎮 Xbox Controller: {'ACTIVE' if pygame.joystick.get_count() > 0 else 'NOT FOUND'}")
+    if state.video_url:
+        print(f"🎥 Default Stream URL: {state.video_url}")
     print("=" * 60)
 
     socketio.run(app, host=config.WEB_HOST, port=config.WEB_PORT, debug=False)
