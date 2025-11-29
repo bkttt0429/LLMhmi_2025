@@ -360,6 +360,13 @@
                         <select id="port-select" class="w-full bg-black text-green-400 border border-green-900 px-2 py-1 rounded focus:outline-none focus:border-green-500 text-sm"></select>
                         <button onclick="setPreferredPort()" class="btn-cy w-full py-2 rounded text-sm mt-2">SET PORT</button>
                     </div>
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="block text-xs text-gray-400">Xbox 手柄偵測</label>
+                            <button onclick="detectXboxController()" class="text-[10px] border border-green-700 px-2 py-1 hover:bg-green-900 rounded">SCAN</button>
+                        </div>
+                        <div id="xbox-detect-status" class="text-sm text-yellow-400">尚未檢測</div>
+                    </div>
                     <button onclick="applySettings()" class="btn-cy w-full py-2 rounded text-sm">APPLY SETTINGS</button>
                 </div>
             </div>
@@ -468,6 +475,9 @@
         const CHART_THROTTLE_MS = 50; // Max 20fps for chart
 
         let controllerLinked = false;
+        let lastXboxUpdate = 0;
+        let lastBrowserGamepadSend = 0;
+        const GAMEPAD_SEND_INTERVAL = 50; // ms
 
         // === Initialization ===
         window.onload = () => {
@@ -535,6 +545,8 @@
 
             socket.on('controller_data', (data) => {
                 controllerLinked = true;
+                lastXboxUpdate = Date.now();
+                setGamepadLink(true);
                 document.getElementById('gamepad-status').classList.add('gamepad-connected');
                 updateXboxVisual(data.left_stick_x || 0, data.left_stick_y || 0, data.stick_pressed || false);
                 if (data.cmd) {
@@ -639,7 +651,7 @@
             drawRadar(document.getElementById('radar-canvas-main'), timestamp, false);
             if(currentView === 'sensors') {
                 drawRadar(document.getElementById('radar-canvas-sensor'), timestamp, true);
-                
+
                 // 2. Throttled Chart Update
                 if (timestamp - lastChartUpdate > CHART_THROTTLE_MS) {
                     drawChart();
@@ -648,6 +660,7 @@
             }
 
             // 3. Poll Gamepad
+            streamBrowserGamepad();
             requestAnimationFrame(animationLoop);
         }
 
@@ -820,6 +833,41 @@
                     setGamepadLink(false);
                 }
             }, 500);
+        }
+
+        function streamBrowserGamepad() {
+            if (!navigator.getGamepads || !socket || !socket.connected) return;
+            const pads = Array.from(navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean);
+            if (!pads.length) return;
+
+            const preferred = pads.find(p => (p.id || '').toLowerCase().includes('xbox')) || pads[0];
+            const now = performance.now();
+            if (now - lastBrowserGamepadSend < GAMEPAD_SEND_INTERVAL) return;
+            lastBrowserGamepadSend = now;
+
+            const state = normalizeGamepadState(preferred);
+            socket.emit('browser_controller_state', state);
+        }
+
+        function normalizeGamepadState(pad) {
+            const axes = pad.axes || [];
+            const buttons = pad.buttons || [];
+            const btn = (idx) => buttons[idx] ? buttons[idx].pressed : false;
+
+            const dpad_x = (btn(15) ? 1 : 0) + (btn(14) ? -1 : 0);
+            const dpad_y = (btn(12) ? 1 : 0) + (btn(13) ? -1 : 0);
+
+            return {
+                left_stick_x: axes[0] || 0,
+                left_stick_y: -(axes[1] || 0),
+                button_a: btn(0),
+                button_b: btn(1),
+                button_x: btn(2),
+                button_y: btn(3),
+                stick_pressed: btn(8) || btn(9),
+                dpad_x,
+                dpad_y
+            };
         }
 
         // === Other Logic (Chart, Stats) ===
@@ -1006,6 +1054,37 @@
                 log('Port selection failed');
             }
         }
+
+        function detectXboxController() {
+            const statusEl = document.getElementById('xbox-detect-status');
+            if (!statusEl) return;
+
+            if (!navigator.getGamepads) {
+                statusEl.innerText = '瀏覽器不支援 Gamepad API';
+                statusEl.className = 'text-sm text-red-400';
+                log('Gamepad API not supported in this browser');
+                return;
+            }
+
+            const pads = Array.from(navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean);
+            const xboxPad = pads.find(p => (p.id || '').toLowerCase().includes('xbox'));
+
+            if (xboxPad) {
+                const streamingHint = (socket && socket.connected) ? '（串流中）' : '';
+                statusEl.innerText = `偵測到：${xboxPad.id}${streamingHint}`;
+                statusEl.className = 'text-sm text-green-400';
+                log(`Xbox controller detected: ${xboxPad.id}`);
+            } else {
+                statusEl.innerText = '未偵測到 Xbox 手柄，請檢查連接後再試一次。';
+                statusEl.className = 'text-sm text-yellow-400';
+                log('No Xbox controller detected');
+            }
+        }
+
+        window.addEventListener('gamepadconnected', detectXboxController);
+        window.addEventListener('gamepaddisconnected', detectXboxController);
+
+        detectXboxController();
 
         function startStatusPolling() {
             setInterval(async () => {
