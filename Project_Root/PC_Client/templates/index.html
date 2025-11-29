@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>TACTICAL COMMAND v14.0 [MERGED]</title>
+    <title>TACTICAL COMMAND v15.0 [DUAL-LINK]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <style>
@@ -91,10 +91,6 @@
         .nav-btn:hover { background: #00ff9d; color: #000; box-shadow: 0 0 15px #00ff9d; }
         .nav-btn.active { background: #00ff9d; color: #000; box-shadow: 0 0 20px #00ff9d; }
         
-        /* Gamepad Indicator */
-        .gamepad-icon { opacity: 0.3; transition: opacity 0.3s; }
-        .gamepad-connected { opacity: 1; color: #00ff9d; text-shadow: 0 0 10px #00ff9d; }
-
         /* Xbox Visualizer */
         .xbox-card {
             background: radial-gradient(circle at 20% 20%, rgba(0,255,157,0.06), transparent 35%),
@@ -135,10 +131,17 @@
 
     <header class="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-green-500/30 pb-2 shrink-0 gap-2">
         <div>
-            <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-widest text-green-400 drop-shadow-[0_0_5px_rgba(0,255,157,0.8)]">SHIM INTERFACE <span class="text-xs sm:text-sm text-gray-500">v14.0 MERGED</span></h1>
-            <div class="text-[10px] sm:text-xs text-gray-400 tracking-wider flex items-center gap-2">
-                LINK: <span id="ws-status" class="text-red-500 font-bold">OFFLINE</span>
-                <span id="gamepad-status" class="gamepad-icon ml-4 flex items-center gap-1">🎮 GAMEPAD</span>
+            <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-widest text-green-400 drop-shadow-[0_0_5px_rgba(0,255,157,0.8)]">SHIM INTERFACE <span class="text-xs sm:text-sm text-gray-500">v15.0 DUAL-LINK</span></h1>
+            <div class="text-[10px] sm:text-xs text-gray-400 tracking-wider flex items-center gap-4 flex-wrap">
+                <div class="flex items-center gap-1">
+                    <span>CONTROL(UDP):</span> 
+                    <span id="car-ip-display" class="text-yellow-500 font-bold">--.--.--.--</span>
+                </div>
+                <div class="flex items-center gap-1">
+                    <span>VIDEO:</span> 
+                    <span id="cam-ip-display" class="text-blue-400 font-bold">--.--.--.--</span>
+                </div>
+                <span id="gamepad-status" class="opacity-30 transition-opacity flex items-center gap-1">🎮 GAMEPAD</span>
             </div>
         </div>
         <div id="clock" class="text-lg sm:text-2xl text-green-600">00:00:00</div>
@@ -148,10 +151,8 @@
         
         <div class="lg:col-span-8 flex flex-col gap-2 relative cyber-border rounded p-1 min-h-[300px]">
             <div class="flex justify-between px-2 text-[10px] sm:text-xs text-gray-500 font-bold flex-wrap gap-2">
-                <div class="flex gap-2 items-center">
-                    <span class="hidden sm:inline">TARGET IP:</span>
-                    <input type="text" id="ip-input" class="bg-black text-green-400 border border-green-900 px-1 w-24 sm:w-32 focus:outline-none focus:border-green-500" placeholder="Waiting...">
-                    <button onclick="setManualIP()" class="text-[10px] border border-green-700 px-1 sm:px-2 hover:bg-green-900">SET</button>
+                <div class="flex gap-2 items-center text-green-600">
+                    SYSTEM STATUS: <span class="text-green-400">OPERATIONAL</span>
                 </div>
                 <span>FEED: <span class="text-green-400 animate-pulse">LIVE</span></span>
             </div>
@@ -162,7 +163,7 @@
                 
                 <div id="no-sig" class="hidden absolute inset-0 flex-col items-center justify-center bg-black/80 z-20">
                     <div class="text-2xl sm:text-4xl text-red-500 font-bold border-4 border-red-500 p-4 sm:p-6 animate-pulse">NO SIGNAL</div>
-                    <div class="text-red-400 mt-2 text-xs sm:text-sm">CHECK CONNECTION OR SERIAL PORT</div>
+                    <div class="text-red-400 mt-2 text-xs sm:text-sm">CHECK ESP32-S3 (CAMERA)</div>
                 </div>
                 
                 <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
@@ -173,14 +174,14 @@
             </div>
 
             <div id="log-box" class="h-24 sm:h-32 bg-black border-t border-gray-700 p-2 font-mono text-[10px] sm:text-xs overflow-y-auto text-gray-400 leading-tight">
-                <div class="text-green-700">> Initializing Native WebSocket & Canvas...</div>
+                <div class="text-green-700">> Initializing Dual-Link Interface...</div>
             </div>
         </div>
 
         <div class="lg:col-span-4 flex flex-col gap-4">
             
             <div class="cyber-border p-2 sm:p-4 flex flex-col items-center justify-center relative grow-0">
-                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">SONAR ARRAY</div>
+                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">SONAR (ESP12F)</div>
                 
                 <div class="relative w-32 h-32 sm:w-40 sm:h-40 lg:w-56 lg:h-56 rounded-full border border-green-900 bg-black/80 shadow-[inset_0_0_20px_rgba(0,50,0,0.5)]">
                      <canvas id="radar-canvas-main" class="absolute inset-0 w-full h-full rounded-full"></canvas>
@@ -216,535 +217,253 @@
                     <div></div>
                 </div>
 
-                <button class="btn-cy w-full py-2 sm:py-3 rounded tracking-widest text-xs sm:text-sm" onclick="toggleLight()">TOGGLE LIGHTS</button>
+                <button class="btn-cy w-full py-2 sm:py-3 rounded tracking-widest text-xs sm:text-sm" onclick="toggleLight()">TOGGLE LIGHTS (ESP32 CAM)</button>
             </div>
 
             <div class="xbox-card rounded p-3 sm:p-4 flex flex-col gap-3 relative">
-                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">XBOX 視覺化</div>
+                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">XBOX TELEMETRY</div>
                 <div class="flex items-center gap-4">
                     <div class="relative xbox-stick" id="xbox-stick"></div>
                     <div class="space-y-1 text-xs sm:text-sm text-gray-300">
-                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">LS</span>：前進/後退/轉向</div>
-                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">LS 按下</span>：緊急煞車</div>
-                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">A</span>：車燈</div>
-                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">X</span>：立即停止</div>
-                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">Y</span>：AI 開/關</div>
+                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">LS</span>：移動控制</div>
+                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">X</span>：緊急煞車</div>
+                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">A</span>：補光燈 (CAM)</div>
                     </div>
                 </div>
                 <div class="flex items-center justify-between text-[10px] sm:text-xs text-gray-400">
-                    <div>LINK：<span id="xbox-link" class="text-red-500 font-bold">OFFLINE</span></div>
-                    <div>CMD：<span id="xbox-cmd" class="text-yellow-400 font-mono">--</span></div>
+                    <div>CMD: <span id="xbox-cmd" class="text-yellow-400 font-mono">--</span></div>
+                    <div id="ai-status" class="text-gray-500">AI: STANDBY</div>
                 </div>
-                <div class="grid grid-cols-2 gap-2 text-[10px] sm:text-xs text-gray-300">
-                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">A</span><span id="xbox-a" class="text-gray-500">OFF</span></div>
-                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">B</span><span id="xbox-b" class="text-gray-500">OFF</span></div>
-                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">X</span><span id="xbox-x" class="text-gray-500">OFF</span></div>
-                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">Y</span><span id="xbox-y" class="text-gray-500">OFF</span></div>
-                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">LS</span><span id="xbox-ls" class="text-gray-500">OFF</span></div>
-                    <div class="flex items-center gap-2"><span class="w-6 text-green-400 font-mono text-center">D-PAD</span><span id="xbox-dpad" class="text-gray-500">—</span></div>
-                </div>
-                <div class="text-[10px] text-gray-500">左搖桿偏移與按下狀態、按鍵回饋會即時顯示。</div>
-            </div>
-
-            <div class="cyber-border p-2 sm:p-3 text-[10px] sm:text-xs flex flex-col gap-1">
-                <div class="flex justify-between">
-                    <span class="text-gray-500">SERIAL PORT:</span>
-                    <span id="port-val" class="text-yellow-500 font-bold truncate max-w-[120px]">SEARCHING...</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-gray-500">LINK STATUS:</span>
-                    <span id="link-text" class="text-gray-500 font-bold">WAITING</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-gray-500">AI STATUS:</span>
-                    <span id="ai-status" class="text-gray-400 font-bold">STANDBY</span>
-                </div>
-                <button onclick="toggleAI()" id="ai-toggle-btn" class="btn-cy w-full py-2 mt-2 rounded text-[10px] sm:text-xs tracking-wider">
-                    ACTIVATE AI
-                </button>
             </div>
 
         </div>
     </div>
 
-    <div id="sensors-view" class="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 pb-20 overflow-auto" style="display:none;">
-        <div class="flex-[2] flex flex-col gap-2 min-h-[400px]">
-            <div class="cyber-border rounded p-4 flex-1 relative overflow-hidden bg-black">
-                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">ULTRASONIC RADAR</div>
-                
-                <div class="absolute inset-0 flex items-center justify-center p-4">
-                    <div class="w-full h-full max-w-[400px] max-h-[400px] lg:max-w-[500px] lg:max-h-[500px] relative">
-                         <canvas id="radar-canvas-sensor" class="w-full h-full rounded-full bg-black/80 border border-green-900 shadow-[inset_0_0_40px_rgba(0,50,0,0.3)]"></canvas>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="cyber-border rounded p-3 h-32 bg-black">
-                <div class="text-[10px] text-gray-500 mb-1">DISTANCE HISTORY (THROTTLED)</div>
-                <canvas id="distance-chart" class="w-full h-full"></canvas>
-            </div>
-        </div>
-
-        <div class="flex-1 cyber-border rounded p-4 flex flex-col gap-3 min-w-[280px]">
-            <div class="text-sm text-green-400 font-bold border-b border-green-900 pb-2">SENSOR TELEMETRY</div>
-            
-            <div class="cyber-border p-3 rounded bg-black/60">
-                <div class="text-xs text-gray-400 mb-1">Current Distance</div>
-                <div id="sensor-distance-large" class="text-4xl sm:text-5xl font-bold font-mono text-green-400">--.-- CM</div>
-                <div class="mt-2 flex gap-2 text-xs">
-                    <div class="flex-1 bg-gray-800 rounded p-1">
-                        <div class="text-gray-500">MIN</div>
-                        <div id="sensor-min" class="text-yellow-400 font-mono">∞</div>
-                    </div>
-                    <div class="flex-1 bg-gray-800 rounded p-1">
-                        <div class="text-gray-500">MAX</div>
-                        <div id="sensor-max" class="text-yellow-400 font-mono">0</div>
-                    </div>
-                    <div class="flex-1 bg-gray-800 rounded p-1">
-                        <div class="text-gray-500">AVG</div>
-                        <div id="sensor-avg" class="text-yellow-400 font-mono">0</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="cyber-border p-3 rounded bg-black/60">
-                <div class="text-xs text-gray-400 mb-2">ALERT ZONES</div>
-                <div class="space-y-2 text-xs">
-                    <div class="flex items-center justify-between">
-                        <span class="text-red-400">● DANGER (&lt;20cm)</span>
-                        <span id="zone-danger" class="text-gray-500">CLEAR</span>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <span class="text-yellow-400">● WARNING (20-50cm)</span>
-                        <span id="zone-warning" class="text-gray-500">CLEAR</span>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <span class="text-green-400">● SAFE (&gt;50cm)</span>
-                        <span id="zone-safe" class="text-green-500">OK</span>
-                    </div>
-                </div>
-            </div>
-
-             <div class="cyber-border p-3 rounded bg-black/60 mt-auto">
-                <div class="text-xs text-gray-400 mb-2">SENSOR STATUS</div>
-                <div class="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                        <div class="text-gray-500">Sampling Rate</div>
-                        <div class="text-green-400 font-mono">WS-STREAM</div>
-                    </div>
-                    <div>
-                        <div class="text-gray-500">Data Points</div>
-                        <div id="data-count" class="text-green-400 font-mono">0</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
+    <!-- Settings View -->
     <div id="settings-view" class="flex-1 overflow-auto p-2 sm:p-4 pb-20" style="display:none;">
         <div class="max-w-3xl mx-auto space-y-4">
+            
             <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
                 <div class="text-green-400 font-bold mb-3 flex items-center gap-2 text-sm sm:text-base">
-                    <span class="text-xl">⚙</span> CONNECTION SETTINGS
+                    <span class="text-xl">📡</span> DUAL-LINK CONNECTION
                 </div>
-                <div class="space-y-3">
-                    <div>
-                        <label class="block text-xs text-gray-400 mb-1">Target IP Address</label>
-                        <input id="settings-ip" type="text" class="w-full bg-black text-green-400 border border-green-900 px-2 py-1 rounded focus:outline-none focus:border-green-500 text-sm" placeholder="192.168.x.x">
+                <div class="space-y-4">
+                    <div class="p-3 border border-green-900/50 rounded bg-green-900/10">
+                        <label class="block text-xs text-green-400 mb-1 font-bold">🚗 Car Control IP (ESP12F)</label>
+                        <div class="text-[10px] text-gray-500 mb-2">接收 UDP 指令的遙控車 (Port 4210)</div>
+                        <input id="settings-car-ip" type="text" class="w-full bg-black text-green-400 border border-green-900 px-2 py-2 rounded focus:outline-none focus:border-green-500 text-sm font-mono" placeholder="192.168.x.x">
                     </div>
-                    <div>
-                        <div class="flex items-center justify-between mb-1">
-                            <label class="block text-xs text-gray-400">Serial COM Port</label>
-                            <button onclick="fetchPorts()" class="text-[10px] border border-green-700 px-2 py-1 hover:bg-green-900 rounded">REFRESH</button>
-                        </div>
-                        <select id="port-select" class="w-full bg-black text-green-400 border border-green-900 px-2 py-1 rounded focus:outline-none focus:border-green-500 text-sm"></select>
-                        <button onclick="setPreferredPort()" class="btn-cy w-full py-2 rounded text-sm mt-2">SET PORT</button>
+                    
+                    <div class="p-3 border border-blue-900/50 rounded bg-blue-900/10">
+                        <label class="block text-xs text-blue-400 mb-1 font-bold">📹 Camera Stream IP (ESP32-S3)</label>
+                        <div class="text-[10px] text-gray-500 mb-2">提供影像串流 (Port 81)</div>
+                        <input id="settings-cam-ip" type="text" class="w-full bg-black text-blue-400 border border-blue-900 px-2 py-2 rounded focus:outline-none focus:border-blue-500 text-sm font-mono" placeholder="192.168.x.x">
                     </div>
-                    <div>
-                        <div class="flex items-center justify-between mb-1">
-                            <label class="block text-xs text-gray-400">Xbox 手柄偵測</label>
-                            <button onclick="detectXboxController()" class="text-[10px] border border-green-700 px-2 py-1 hover:bg-green-900 rounded">SCAN</button>
-                        </div>
-                        <div id="xbox-detect-status" class="text-sm text-yellow-400">尚未檢測</div>
-                    </div>
-                    <button onclick="applySettings()" class="btn-cy w-full py-2 rounded text-sm">APPLY SETTINGS</button>
+
+                    <button onclick="applySettings()" class="btn-cy w-full py-3 rounded text-sm font-bold">APPLY DUAL IP SETTINGS</button>
                 </div>
             </div>
 
             <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
-                <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">CONTROL SETTINGS</div>
-                <div class="space-y-3">
-                    <div class="flex items-center justify-between">
-                        <span class="text-xs sm:text-sm text-gray-300">Auto-Stop on Obstacle</span>
-                        <label class="relative inline-flex items-center cursor-pointer">
-                            <input id="auto-stop" type="checkbox" checked class="sr-only peer">
-                            <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
-                        </label>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <span class="text-xs sm:text-sm text-gray-300">Enable Collision Warning</span>
-                        <label class="relative inline-flex items-center cursor-pointer">
-                            <input id="collision-warn" type="checkbox" checked class="sr-only peer">
-                            <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
-                        </label>
-                    </div>
-                </div>
-            </div>
-
-            <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
-                <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">SYSTEM INFORMATION</div>
-                <div class="space-y-2 text-xs sm:text-sm font-mono">
-                    <div class="flex justify-between">
-                        <span class="text-gray-400">Interface Version:</span>
-                        <span class="text-green-400">v14.0 MERGED_WS</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span class="text-gray-400">Backend Status:</span>
-                        <span class="text-green-400">ACTIVE</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span class="text-gray-400">Protocol:</span>
-                        <span class="text-green-400">NATIVE WEBSOCKET</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="cyber-border rounded p-3 sm:p-4 bg-black/60 border-orange-900">
-                <div class="text-orange-400 font-bold mb-3 text-sm sm:text-base flex items-center gap-2">
-                    <span class="text-xl">⚡</span> FIRMWARE FLASH
-                </div>
-                <div class="space-y-3">
-                    <div class="text-xs text-gray-400">
-                        Upload latest firmware to ESP32-S3 CAM. This will disconnect serial temporarily.
-                    </div>
-                    
-                    <div id="flash-progress-container" class="hidden">
-                        <div class="w-full bg-gray-800 rounded-full h-4 mb-2 overflow-hidden">
-                            <div id="flash-progress-bar" class="bg-orange-500 h-4 rounded-full transition-all duration-300 flex items-center justify-center text-[10px] font-bold" style="width: 0%">
-                                <span id="flash-progress-text">0%</span>
-                            </div>
-                        </div>
-                        <div id="flash-status-text" class="text-xs text-orange-400 text-center"></div>
-                    </div>
-                    
-                    <button id="flash-btn" onclick="startFlashing()" class="btn-cy w-full py-3 rounded text-sm font-bold bg-orange-900/30 border-orange-500 hover:bg-orange-500">
-                        🔥 FLASH FIRMWARE
-                    </button>
+                <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">SYSTEM TOOLS</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                     <button onclick="toggleAI()" id="ai-toggle-btn" class="btn-cy py-2 rounded text-xs sm:text-sm">ACTIVATE AI HUD</button>
+                     <button onclick="exportLogs()" class="btn-cy py-2 rounded text-xs sm:text-sm">EXPORT SYSTEM LOGS</button>
                 </div>
             </div>
             
-            <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
-                <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">QUICK ACTIONS</div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button onclick="resetSettings()" class="btn-cy py-2 rounded text-xs sm:text-sm">RESET TO DEFAULT</button>
-                    <button onclick="exportLogs()" class="btn-cy py-2 rounded text-xs sm:text-sm">EXPORT LOGS</button>
-                    <button onclick="calibrateSensor()" class="btn-cy py-2 rounded text-xs sm:text-sm">CALIBRATE SENSOR</button>
-                    <button onclick="reconnectWS()" class="btn-cy py-2 rounded text-xs sm:text-sm">RECONNECT WEBSOCKET</button>
-                </div>
-            </div>
         </div>
     </div>
 
     <div class="nav-bar">
         <button onclick="switchView('main')" class="nav-btn active" id="nav-main">
-            <span>🎮</span> <span class="hidden sm:inline">MAIN</span>
-        </button>
-        <button onclick="switchView('sensors')" class="nav-btn" id="nav-sensors">
-            <span>📡</span> <span class="hidden sm:inline">SENSORS</span>
+            <span>🎮</span> <span class="hidden sm:inline">COMMAND</span>
         </button>
         <button onclick="switchView('settings')" class="nav-btn" id="nav-settings">
-            <span>⚙</span> <span class="hidden sm:inline">SETTINGS</span>
+            <span>⚙</span> <span class="hidden sm:inline">SYSTEM</span>
         </button>
     </div>
 
     <script>
         // === Global State ===
         let currentView = 'main';
-        let sensorHistory = [];
         let socket;
         let wsConnected = false;
         let lastLogs = [];
         
-        // Canvas & Animation State
-        const radarBlips = []; // { dist, angle, alpha, timestamp }
+        // Canvas State
+        const radarBlips = [];
         let radarAngle = 0;
         let lastFrameTime = 0;
-
-        // Chart Throttling
-        let lastChartUpdate = 0;
-        const CHART_THROTTLE_MS = 50; // Max 20fps for chart
-
         let controllerLinked = false;
         let lastXboxUpdate = 0;
 
-        // === Initialization ===
         window.onload = () => {
             initWebSocket();
-            initChart();
             resizeCanvas();
             requestAnimationFrame(animationLoop);
-            fetchPorts();
-            startStatusPolling();
-            startXboxHeartbeat();
-
-            // Initial Log
-            log("System Initialized. Native WS mode active.");
-            
+            startStatusPolling(); // 自動輪詢 IP 狀態
+            log("System Initialized. Dual-Link Mode Active.");
         };
 
         window.addEventListener('resize', resizeCanvas);
 
         function resizeCanvas() {
-            // Resize main radar
             const mainC = document.getElementById('radar-canvas-main');
             if(mainC) {
                 mainC.width = mainC.parentElement.clientWidth;
                 mainC.height = mainC.parentElement.clientHeight;
             }
-            // Resize sensor radar
-            const sensC = document.getElementById('radar-canvas-sensor');
-            if(sensC) {
-                sensC.width = sensC.parentElement.clientWidth;
-                sensC.height = sensC.parentElement.clientHeight;
-            }
-            // Resize chart
-            const chartC = document.getElementById('distance-chart');
-            if(chartC) {
-                chartC.width = chartC.parentElement.clientWidth;
-                chartC.height = chartC.parentElement.clientHeight;
-            }
         }
 
-        // === Socket.IO Implementation ===
         function initWebSocket() {
-            log("Connecting to Socket.IO...");
             socket = io({ transports: ['websocket'] });
-
-            socket.on('connect', () => {
-                wsConnected = true;
-                document.getElementById('ws-status').innerText = "ONLINE";
-                document.getElementById('ws-status').className = "text-green-500 font-bold animate-pulse";
-                document.getElementById('link-text').innerText = "CONNECTED";
-                document.getElementById('link-text').className = "text-green-500 font-bold animate-pulse";
-                log("WS Connected");
-            });
-
-            socket.on('disconnect', () => {
-                wsConnected = false;
-                document.getElementById('ws-status').innerText = "OFFLINE";
-                document.getElementById('ws-status').className = "text-red-500 font-bold";
-                document.getElementById('link-text').innerText = "RETRYING...";
-                document.getElementById('link-text').className = "text-yellow-500 font-bold";
-                controllerLinked = false;
-                lastXboxUpdate = 0;
-                setGamepadLink(false);
-                setTimeout(initWebSocket, 2000);
-            });
-
+            socket.on('connect', () => { wsConnected = true; log("WS Connected"); });
+            socket.on('disconnect', () => { wsConnected = false; log("WS Disconnected"); });
+            
             socket.on('controller_data', (data) => {
                 controllerLinked = true;
                 lastXboxUpdate = Date.now();
-                setGamepadLink(true);
-                document.getElementById('gamepad-status').classList.add('gamepad-connected');
                 updateXboxVisual(data.left_stick_x || 0, data.left_stick_y || 0, data.stick_pressed || false);
                 if (data.cmd) {
+                    document.getElementById('xbox-cmd').innerText = data.cmd;
                     highlightKey(data.cmd);
                 }
+                const icon = document.getElementById('gamepad-status');
+                if(icon) icon.style.opacity = '1';
             });
         }
 
-        function reconnectWS() {
-            if(socket) socket.close();
-            initWebSocket();
+        // === Data Handling (Polling Status) ===
+        function startStatusPolling() {
+            setInterval(async () => {
+                try {
+                    const res = await fetch('/api/status');
+                    const data = await res.json();
+                    
+                    // 更新 header 的 IP 顯示
+                    const carIpDisplay = document.getElementById('car-ip-display');
+                    const camIpDisplay = document.getElementById('cam-ip-display');
+                    
+                    if(data.car_ip) {
+                        carIpDisplay.innerText = data.car_ip;
+                        carIpDisplay.className = "text-green-400 font-bold font-mono";
+                        // 同步更新 Settings 欄位
+                        const setCar = document.getElementById('settings-car-ip');
+                        if(setCar && !setCar.value) setCar.value = data.car_ip;
+                    }
+                    
+                    if(data.camera_ip) {
+                        camIpDisplay.innerText = data.camera_ip;
+                        camIpDisplay.className = "text-blue-400 font-bold font-mono";
+                        // 同步更新 Settings 欄位
+                        const setCam = document.getElementById('settings-cam-ip');
+                        if(setCam && !setCam.value) setCam.value = data.camera_ip;
+                    }
+                    
+                    // 更新 AI 狀態
+                    const aiStatus = document.getElementById('ai-status');
+                    if(data.ai_status) {
+                        aiStatus.innerText = "AI: ACTIVE";
+                        aiStatus.className = "text-green-400 font-bold animate-pulse";
+                        document.getElementById('ai-toggle-btn').innerText = "DEACTIVATE AI";
+                    } else {
+                        aiStatus.innerText = "AI: STANDBY";
+                        aiStatus.className = "text-gray-500";
+                        document.getElementById('ai-toggle-btn').innerText = "ACTIVATE AI HUD";
+                    }
+
+                    // Logs
+                    if(data.logs) {
+                        const serialized = JSON.stringify(data.logs);
+                        if (serialized !== JSON.stringify(lastLogs)) {
+                            lastLogs = data.logs.slice();
+                            const box = document.getElementById('log-box');
+                            box.innerHTML = "";
+                            data.logs.forEach(l => {
+                                const d = document.createElement('div');
+                                d.innerText = l;
+                                box.appendChild(d);
+                            });
+                            box.scrollTop = box.scrollHeight;
+                        }
+                    }
+
+                } catch (err) { /* ignore */ }
+            }, 1000);
         }
 
-        // === Data Handling ===
-        function handleData(data) {
-            // Update IP
-            const ipInput = document.getElementById('ip-input');
-            if (ipInput && ipInput.value === "") {
-                if (data.camera_ip) {
-                    ipInput.value = data.camera_ip;
-                } else if (data.ip) {
-                    ipInput.value = data.ip;
-                }
-            }
-
-            const settingsIp = document.getElementById('settings-ip');
-            if (settingsIp && settingsIp.value === "" && data.car_ip) {
-                settingsIp.value = data.car_ip;
-            }
+        function applySettings() {
+            const carIp = document.getElementById('settings-car-ip').value;
+            const camIp = document.getElementById('settings-cam-ip').value;
             
-            // Port Status
-            const portEl = document.getElementById('port-val');
-            portEl.innerText = data.port || "DISCONNECTED";
-            portEl.className = data.port ? "text-green-500 font-bold truncate max-w-[120px]" : "text-red-500 font-bold truncate max-w-[120px]";
-
-            // 更新 Settings 下拉選單的顯示
-            const portSelect = document.getElementById('port-select');
-            if (portSelect && data.preferred_port && portSelect.value !== data.preferred_port) {
-                portSelect.value = data.preferred_port;
+            // 分別發送設定
+            if(carIp) {
+                fetch('/api/set_ip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ car_ip: carIp })
+                });
             }
-
-            // AI Status
-            const aiStatus = document.getElementById('ai-status');
-            const aiBtn = document.getElementById('ai-toggle-btn');
-            if(data.ai_status) {
-                aiStatus.innerText = 'ACTIVE';
-                aiStatus.className = 'text-green-400 font-bold animate-pulse';
-                aiBtn.innerText = 'DEACTIVATE AI';
-                aiBtn.classList.add('btn-active');
-            } else {
-                aiStatus.innerText = 'STANDBY';
-                aiStatus.className = 'text-gray-400 font-bold';
-                aiBtn.innerText = 'ACTIVATE AI';
-                aiBtn.classList.remove('btn-active');
+            if(camIp) {
+                fetch('/api/set_ip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cam_ip: camIp })
+                });
             }
-
-            // Radar & Distance
-            const dist = parseFloat(data.dist);
-            if (!isNaN(dist)) {
-                document.getElementById('dist-val').innerText = dist.toFixed(1) + " CM";
-                
-                // Add Blip to Canvas Radar
-                if(dist > 0 && dist < 100) {
-                    // Random angle for visual effect since we assume 1D sonar
-                    const angle = (Math.random() * 60 - 30 - 90) * (Math.PI/180); // Upward cone
-                    radarBlips.push({
-                        dist: dist,
-                        angle: angle,
-                        alpha: 1.0,
-                        timestamp: performance.now()
-                    });
-                }
-                
-                if(currentView === 'sensors') {
-                    updateSensorStats(dist);
-                }
-            }
-
-            // Logs
-            if(data.logs) {
-                const serialized = JSON.stringify(data.logs);
-                if (serialized !== JSON.stringify(lastLogs)) {
-                    lastLogs = data.logs.slice();
-                    const box = document.getElementById('log-box');
-                    box.innerHTML = "";
-                    data.logs.forEach(l => {
-                        const d = document.createElement('div');
-                        d.innerText = l;
-                        box.appendChild(d);
-                    });
-                    box.scrollTop = box.scrollHeight;
-                }
-            }
+            log(`Settings applied. CAR:${carIp}, CAM:${camIp}`);
+            switchView('main');
         }
 
-        // === Unified Animation Loop (rAF) ===
+        // === Animation & Visuals ===
         function animationLoop(timestamp) {
             const dt = timestamp - lastFrameTime;
             lastFrameTime = timestamp;
-
-            // 1. Draw Radars
-            drawRadar(document.getElementById('radar-canvas-main'), timestamp, false);
-            if(currentView === 'sensors') {
-                drawRadar(document.getElementById('radar-canvas-sensor'), timestamp, true);
-
-                // 2. Throttled Chart Update
-                if (timestamp - lastChartUpdate > CHART_THROTTLE_MS) {
-                    drawChart();
-                    lastChartUpdate = timestamp;
-                }
+            drawRadar(document.getElementById('radar-canvas-main'), timestamp);
+            
+            // Gamepad heartbeat check
+            if(Date.now() - lastXboxUpdate > 2000) {
+                const icon = document.getElementById('gamepad-status');
+                if(icon) icon.style.opacity = '0.3';
             }
-
-            // 3. Poll Gamepad
-            streamBrowserGamepad();
+            
             requestAnimationFrame(animationLoop);
         }
 
-        // === Canvas Radar Logic ===
-        function drawRadar(canvas, time, detailed) {
+        function drawRadar(canvas, time) {
             if(!canvas) return;
             const ctx = canvas.getContext('2d');
-            const w = canvas.width;
-            const h = canvas.height;
-            const cx = w / 2;
-            const cy = h / 2;
-            const radius = Math.min(w, h) / 2 - 2;
-
-            // Clear
-            ctx.clearRect(0, 0, w, h);
-
-            // Draw Grid
+            const w = canvas.width, h = canvas.height;
+            const cx = w/2, cy = h/2, radius = Math.min(w,h)/2 - 2;
+            
+            ctx.clearRect(0,0,w,h);
+            
+            // Grid
             ctx.strokeStyle = 'rgba(0, 255, 157, 0.2)';
             ctx.lineWidth = 1;
-            
-            // Circles
-            ctx.beginPath(); ctx.arc(cx, cy, radius * 0.33, 0, Math.PI * 2); ctx.stroke();
-            ctx.beginPath(); ctx.arc(cx, cy, radius * 0.66, 0, Math.PI * 2); ctx.stroke();
-            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, radius*0.5, 0, Math.PI*2); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx, cy-radius); ctx.lineTo(cx, cy+radius); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx-radius, cy); ctx.lineTo(cx+radius, cy); ctx.stroke();
 
-            // Crosshairs
-            ctx.beginPath(); ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy); ctx.stroke();
-
-            // Draw Sweep (Rotating Line)
-            radarAngle = (time / 2000 * Math.PI * 2) % (Math.PI * 2); // 2 seconds per rev
-            
+            // Sweep
+            radarAngle = (time / 2000 * Math.PI * 2) % (Math.PI * 2);
             const grad = ctx.createConicGradient(radarAngle - Math.PI/2, cx, cy);
             grad.addColorStop(0, 'rgba(0, 255, 157, 0)');
             grad.addColorStop(0.8, 'rgba(0, 255, 157, 0.1)');
-            grad.addColorStop(1, 'rgba(0, 255, 157, 0.5)');
-            
+            grad.addColorStop(1, 'rgba(0, 255, 157, 0.4)');
             ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Draw Blips
-            for(let i = radarBlips.length - 1; i >= 0; i--) {
-                const b = radarBlips[i];
-                const age = time - b.timestamp;
-                
-                if(age > 1500) {
-                    radarBlips.splice(i, 1);
-                    continue;
-                }
-
-                const alpha = 1 - (age / 1500);
-                const r = (b.dist / 100) * radius; // Map 0-100cm to radius
-                
-                const bx = cx + r * Math.cos(b.angle);
-                const by = cy + r * Math.sin(b.angle);
-
-                ctx.fillStyle = b.dist < 20 ? `rgba(239, 68, 68, ${alpha})` : `rgba(0, 255, 157, ${alpha})`;
-                ctx.beginPath();
-                ctx.arc(bx, by, detailed ? 4 : 3, 0, Math.PI * 2);
-                ctx.fill();
-                
-                // Glow
-                ctx.shadowBlur = 5;
-                ctx.shadowColor = ctx.fillStyle;
-                ctx.fill();
-                ctx.shadowBlur = 0;
-            }
+            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.fill();
         }
 
-        // === Command Sending (WS First, Fetch Fallback) ===
         function sendCmd(cmd) {
             highlightKey(cmd);
-            
-            // Try Socket.IO
-            if(wsConnected && socket && socket.connected) {
-                socket.emit('command', { cmd });
-            } else {
-                // Fallback HTTP
-                fetch('/api/control', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ cmd: cmd })
-                }).catch(e => { /* Ignore fetch errors if offline */ });
-            }
+            fetch('/api/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cmd: cmd })
+            }).catch(e => {});
         }
 
         function highlightKey(cmd) {
@@ -765,184 +484,37 @@
             const dx = clamp(x) * offset;
             const dy = -clamp(y) * offset;
             stick.style.transform = `translate(${dx}px, ${dy}px)`;
-            stick.classList.toggle('xbox-pulse', !!pressed);
+            if(pressed) stick.style.boxShadow = "0 0 15px #fff";
+            else stick.style.boxShadow = "inset 0 0 12px rgba(0,255,157,0.35)";
         }
 
-        function setGamepadLink(isConnected) {
-            const icon = document.getElementById('gamepad-status');
-            if (icon) {
-                icon.classList.toggle('gamepad-connected', isConnected);
-            }
-
-            const linkEl = document.getElementById('xbox-link');
-            if (linkEl) {
-                linkEl.innerText = isConnected ? 'ONLINE' : 'OFFLINE';
-                linkEl.className = isConnected ? 'text-green-400 font-bold' : 'text-red-500 font-bold';
-            }
-
-            if (!isConnected) {
-                updateXboxCommand('--');
-                updateXboxVisual(0, 0, false);
-                updateXboxButtons({});
-            }
+        let lightState = false;
+        function toggleLight() {
+            lightState = !lightState;
+            sendCmd(lightState ? 'W' : 'w');
         }
 
-        function updateXboxCommand(cmd) {
-            const cmdEl = document.getElementById('xbox-cmd');
-            if (!cmdEl) return;
-            cmdEl.innerText = cmd || '--';
-            cmdEl.className = cmd ? 'text-yellow-400 font-mono font-bold' : 'text-gray-500';
+        function toggleAI() {
+            fetch('/api/toggle_ai', { method: 'POST' });
         }
 
-        function setButtonState(id, active) {
-            const el = document.getElementById(id);
-            if (!el) return;
-            el.innerText = active ? 'ON' : 'OFF';
-            el.className = active ? 'text-green-400 font-bold' : 'text-gray-500';
+        function exportLogs() {
+            const logs = document.getElementById('log-box').innerText;
+            const blob = new Blob([logs], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'system_logs.txt'; a.click();
         }
 
-        function setDpadState(x, y) {
-            const el = document.getElementById('xbox-dpad');
-            if (!el) return;
-            let dir = '—';
-            if (x || y) {
-                const horiz = x > 0 ? '→' : x < 0 ? '←' : '';
-                const vert = y > 0 ? '↑' : y < 0 ? '↓' : '';
-                dir = `${vert}${horiz}` || '—';
-            }
-            el.innerText = dir;
-            el.className = (x || y) ? 'text-green-400 font-bold' : 'text-gray-500';
-        }
-
-        function updateXboxButtons(data) {
-            setButtonState('xbox-a', data.button_a);
-            setButtonState('xbox-b', data.button_b);
-            setButtonState('xbox-x', data.button_x);
-            setButtonState('xbox-y', data.button_y);
-            setButtonState('xbox-ls', data.stick_pressed);
-            setDpadState(data.dpad_x || 0, data.dpad_y || 0);
-        }
-
-        function startXboxHeartbeat() {
-            setInterval(() => {
-                if (lastXboxUpdate && Date.now() - lastXboxUpdate > 2000) {
-                    controllerLinked = false;
-                    lastXboxUpdate = 0;
-                    setGamepadLink(false);
-                }
-            }, 500);
-        }
-
-        function streamBrowserGamepad() {
-            if (!navigator.getGamepads || !socket || !socket.connected) return;
-            const pads = Array.from(navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean);
-            if (!pads.length) return;
-
-            const preferred = pads.find(p => (p.id || '').toLowerCase().includes('xbox')) || pads[0];
-            const now = performance.now();
-            if (now - lastBrowserGamepadSend < GAMEPAD_SEND_INTERVAL) return;
-            lastBrowserGamepadSend = now;
-
-            const state = normalizeGamepadState(preferred);
-            socket.emit('browser_controller_state', state);
-        }
-
-        function normalizeGamepadState(pad) {
-            const axes = pad.axes || [];
-            const buttons = pad.buttons || [];
-            const btn = (idx) => buttons[idx] ? buttons[idx].pressed : false;
-
-            const dpad_x = (btn(15) ? 1 : 0) + (btn(14) ? -1 : 0);
-            const dpad_y = (btn(12) ? 1 : 0) + (btn(13) ? -1 : 0);
-
-            return {
-                left_stick_x: axes[0] || 0,
-                left_stick_y: -(axes[1] || 0),
-                button_a: btn(0),
-                button_b: btn(1),
-                button_x: btn(2),
-                button_y: btn(3),
-                stick_pressed: btn(8) || btn(9),
-                dpad_x,
-                dpad_y
-            };
-        }
-
-        // === Other Logic (Chart, Stats) ===
-        function updateSensorStats(dist) {
-            document.getElementById('sensor-distance-large').innerText = dist.toFixed(1) + " CM";
+        function switchView(view) {
+            currentView = view;
+            document.getElementById('main-view').style.display = view === 'main' ? 'grid' : 'none';
+            document.getElementById('settings-view').style.display = view === 'settings' ? 'block' : 'none';
             
-            sensorHistory.push(dist);
-            if(sensorHistory.length > 50) sensorHistory.shift(); // Keep more history for chart
-            
-            const min = Math.min(...sensorHistory);
-            const max = Math.max(...sensorHistory);
-            const avg = (sensorHistory.reduce((a,b) => a+b, 0) / sensorHistory.length).toFixed(1);
-            
-            document.getElementById('sensor-min').innerText = min.toFixed(1);
-            document.getElementById('sensor-max').innerText = max.toFixed(1);
-            document.getElementById('sensor-avg').innerText = avg;
-            document.getElementById('data-count').innerText = sensorHistory.length;
-            
-            // Zones
-            const danger = document.getElementById('zone-danger');
-            const warn = document.getElementById('zone-warning');
-            const safe = document.getElementById('zone-safe');
-
-            danger.innerText = dist < 20 ? "⚠ ALERT" : "CLEAR";
-            danger.className = dist < 20 ? "text-red-500 font-bold animate-pulse" : "text-gray-500";
-            
-            warn.innerText = (dist >= 20 && dist < 50) ? "⚠ CAUTION" : "CLEAR";
-            warn.className = (dist >= 20 && dist < 50) ? "text-yellow-500 font-bold" : "text-gray-500";
-            
-            safe.innerText = dist >= 50 ? "✓ OK" : "CHECK";
-            safe.className = dist >= 50 ? "text-green-500 font-bold" : "text-gray-500";
+            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('nav-' + view).classList.add('active');
         }
-
-        let chartCtx;
-        function initChart() {
-            const c = document.getElementById('distance-chart');
-            if(c) {
-                chartCtx = c.getContext('2d');
-            }
-        }
-
-        function drawChart() {
-            if(!chartCtx) return;
-            const canvas = document.getElementById('distance-chart');
-            const w = canvas.width;
-            const h = canvas.height;
-            const data = sensorHistory;
-
-            chartCtx.clearRect(0, 0, w, h);
-            
-            // Grid
-            chartCtx.strokeStyle = '#1f2937';
-            chartCtx.lineWidth = 1;
-            chartCtx.beginPath();
-            chartCtx.moveTo(0, h/2); chartCtx.lineTo(w, h/2);
-            chartCtx.stroke();
-
-            if(data.length < 2) return;
-
-            // Line
-            chartCtx.strokeStyle = '#00ff9d';
-            chartCtx.lineWidth = 2;
-            chartCtx.beginPath();
-            
-            const step = w / (data.length - 1);
-            const maxVal = 100; // Fixed scale for stability
-
-            data.forEach((dist, i) => {
-                const x = i * step;
-                const y = h - (Math.min(dist, maxVal) / maxVal) * h;
-                if(i === 0) chartCtx.moveTo(x, y);
-                else chartCtx.lineTo(x, y);
-            });
-            chartCtx.stroke();
-        }
-
-        // Helpers
+        
         function log(msg) {
             const box = document.getElementById('log-box');
             if(box) {
@@ -954,257 +526,20 @@
             }
         }
 
-        let lightState = false;
-        function toggleLight() {
-            lightState = !lightState;
-            sendCmd(lightState ? 'W' : 'w');
-            log(`LIGHTS: ${lightState ? 'ON' : 'OFF'}`);
-        }
-
-        function toggleAI() {
-            fetch('/api/toggle_ai', { method: 'POST' });
-        }
-        
-        function setManualIP() {
-             const ip = document.getElementById('ip-input').value;
-             if(ip) fetch('/api/set_ip', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ip, type: 'stream' })
-             });
-        }
-        
-        function applySettings() {
-            const ip = document.getElementById('settings-ip').value;
-            if(ip) {
-                fetch('/api/set_ip', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ip, type: 'car' })
-                });
-                log(`Settings applied: CAR IP=${ip}`);
-            }
-            setPreferredPort();
-        }
-
-        function resetSettings() {
-            document.getElementById('settings-ip').value = '';
-            document.getElementById('auto-stop').checked = true;
-            document.getElementById('collision-warn').checked = true;
-            log('Settings reset to default.');
-        }
-
-        function exportLogs() {
-            const logs = document.getElementById('log-box').innerText;
-            const blob = new Blob([logs], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'logs.txt';
-            a.click();
-        }
-
-        function calibrateSensor() {
-            log('Sensor calibration initiated...');
-            setTimeout(() => log('Calibration complete.'), 2000);
-        }
-
-        async function fetchPorts() {
-            try {
-                const res = await fetch('/api/ports');
-                const data = await res.json();
-                const select = document.getElementById('port-select');
-                if (select && Array.isArray(data.ports)) {
-                    select.innerHTML = '';
-                    data.ports.forEach(p => {
-                        const opt = document.createElement('option');
-                        opt.value = p.device;
-                        opt.textContent = `${p.device} (${p.description})`;
-                        select.appendChild(opt);
-                    });
-                    if (data.preferred && data.ports.find(p => p.device === data.preferred)) {
-                        select.value = data.preferred;
-                    } else if (data.current && data.ports.find(p => p.device === data.current)) {
-                        select.value = data.current;
-                    }
-                }
-            } catch (err) {
-                log('Failed to load COM ports');
-            }
-        }
-
-        async function setPreferredPort() {
-            const select = document.getElementById('port-select');
-            if (!select || !select.value) return;
-            try {
-                const res = await fetch('/api/set_port', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ port: select.value })
-                });
-                const data = await res.json();
-                if (data.status === 'ok') {
-                    log(`Preferred port set to ${select.value}`);
-                } else if (data.msg) {
-                    log(`Port set failed: ${data.msg}`);
-                }
-            } catch (err) {
-                log('Port selection failed');
-            }
-        }
-
-        function detectXboxController() {
-            const statusEl = document.getElementById('xbox-detect-status');
-            if (!statusEl) return;
-
-            if (!navigator.getGamepads) {
-                statusEl.innerText = '瀏覽器不支援 Gamepad API';
-                statusEl.className = 'text-sm text-red-400';
-                log('Gamepad API not supported in this browser');
-                return;
-            }
-
-            const pads = Array.from(navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean);
-            const xboxPad = pads.find(p => (p.id || '').toLowerCase().includes('xbox'));
-
-            if (xboxPad) {
-                statusEl.innerText = `偵測到：${xboxPad.id}`;
-                statusEl.className = 'text-sm text-green-400';
-                log(`Xbox controller detected: ${xboxPad.id}`);
-            } else {
-                statusEl.innerText = '未偵測到 Xbox 手柄，請檢查連接後再試一次。';
-                statusEl.className = 'text-sm text-yellow-400';
-                log('No Xbox controller detected');
-            }
-        }
-
-        window.addEventListener('gamepadconnected', detectXboxController);
-        window.addEventListener('gamepaddisconnected', detectXboxController);
-
-        detectXboxController();
-
-        function startStatusPolling() {
-            setInterval(async () => {
-                try {
-                    const res = await fetch('/api/status');
-                    const data = await res.json();
-                    handleData(data);
-                } catch (err) {
-                    // ignore
-                }
-            }, 300);
-        }
-
-        // === Firmware Flashing ===
-        async function startFlashing() {
-            const btn = document.getElementById('flash-btn');
-            const progressContainer = document.getElementById('flash-progress-container');
-            const progressBar = document.getElementById('flash-progress-bar');
-            const progressText = document.getElementById('flash-progress-text');
-            const statusText = document.getElementById('flash-status-text');
-
-            if (!confirm('⚠️ WARNING: This will flash new firmware to your ESP32-S3 CAM.\n\nThe device will be temporarily disconnected during this process.\n\nContinue?')) {
-                return;
-            }
-
-            btn.disabled = true;
-            btn.innerText = '⏳ FLASHING...';
-            progressContainer.classList.remove('hidden');
-            progressBar.style.width = '12%';
-            progressText.innerText = '...';
-            statusText.innerText = 'Starting flash (this may take up to a few minutes)...';
-            statusText.className = 'text-xs text-orange-400 text-center';
-            log('🔥 Starting firmware flash process (check logs for progress)...');
-
-            try {
-                const res = await fetch('/api/flash', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-
-                const data = await res.json();
-                const ok = data.status === 'ok';
-
-                progressBar.style.width = '100%';
-                progressText.innerText = ok ? '100%' : 'ERR';
-                progressBar.classList.remove('bg-orange-500', 'bg-red-500', 'bg-green-500');
-                progressBar.classList.add(ok ? 'bg-green-500' : 'bg-red-500');
-
-                if (ok) {
-                    statusText.innerText = '✅ Firmware flash completed!';
-                    statusText.className = 'text-xs text-green-400 text-center font-bold';
-                    log('✅ Firmware flash completed!');
-                } else {
-                    statusText.innerText = data.msg || 'Flash failed. See logs.';
-                    statusText.className = 'text-xs text-red-400 text-center font-bold';
-                    log(`❌ Flash failed: ${data.msg || 'unknown error'}`);
-                }
-            } catch (err) {
-                progressBar.style.width = '100%';
-                progressText.innerText = 'ERR';
-                progressBar.classList.remove('bg-orange-500');
-                progressBar.classList.add('bg-red-500');
-                statusText.innerText = 'Flash request failed. Please retry.';
-                statusText.className = 'text-xs text-red-400 text-center font-bold';
-                log('❌ Flash request failed.');
-            } finally {
-                setTimeout(() => {
-                    progressContainer.classList.add('hidden');
-                    progressBar.style.width = '0%';
-                    progressBar.classList.remove('bg-green-500', 'bg-red-500');
-                    progressBar.classList.add('bg-orange-500');
-                    progressText.innerText = '0%';
-                    statusText.innerText = '';
-                    statusText.className = '';
-                    btn.disabled = false;
-                    btn.innerText = '🔥 FLASH FIRMWARE';
-                }, 2500);
-            }
-        }
-
-        function switchView(view) {
-            currentView = view;
-            
-            document.getElementById('main-view').style.display = 'none';
-            document.getElementById('sensors-view').style.display = 'none';
-            document.getElementById('settings-view').style.display = 'none';
-            
-            if(view === 'main') {
-                document.getElementById('main-view').style.display = 'grid';
-            } else if(view === 'sensors') {
-                document.getElementById('sensors-view').style.display = 'flex';
-                // Trigger chart/canvas resize when view becomes visible
-                setTimeout(resizeCanvas, 50); 
-            } else if(view === 'settings') {
-                document.getElementById('settings-view').style.display = 'block';
-            }
-            
-            document.querySelectorAll('.nav-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            document.getElementById('nav-' + view).classList.add('active');
-            
-            log(`Switched to ${view.toUpperCase()} view`);
-        }
-        
-        // Keyboard Support
+        // Keyboard
         document.addEventListener('keydown', (e) => {
             if(e.repeat) return;
             const k = e.key.toUpperCase();
             const map = {'W':'F', 'A':'L', 'S':'S', 'D':'R', 'X':'B', ' ':'S'};
             if(map[k]) sendCmd(map[k]);
         });
-
         document.addEventListener('keyup', (e) => {
-            const k = e.key.toUpperCase();
-            if(['W','A','D','X'].includes(k)) sendCmd('S');
+            if(['W','A','D','X'].includes(e.key.toUpperCase())) sendCmd('S');
         });
 
-        // Clock
         setInterval(() => {
             document.getElementById('clock').innerText = new Date().toLocaleTimeString();
         }, 1000);
-
     </script>
 </body>
 </html>
