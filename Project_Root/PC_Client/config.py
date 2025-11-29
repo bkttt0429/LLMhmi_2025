@@ -5,7 +5,8 @@ import os
 DEFAULT_STREAM_PORT = 81
 # 若已知 CAM 的 IP，可在此預先填入或透過環境變數 DEFAULT_STREAM_IP 指定，
 # 方便啟動時直接嘗試連線，例如：export DEFAULT_STREAM_IP=192.168.4.1
-DEFAULT_STREAM_IP = os.environ.get("DEFAULT_STREAM_IP", "")
+# 預設改為 mDNS 名稱，讓未連上 USB 時也能直接嘗試串流
+DEFAULT_STREAM_IP = os.environ.get("DEFAULT_STREAM_IP", "boebot.local")
 
 # Arduino CLI 路徑 (燒錄用)
 SKETCH_DIR = "../esp32s3_cam"          
