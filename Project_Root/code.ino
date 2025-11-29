@@ -7,8 +7,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <esp_now.h>
-#include <mbedtls/base64.h>
-#include <mbedtls/sha1.h>
+#include <WebSocketsServer.h>
 
 // ============= WiFi 設定 =============
 const char* ssid     = "Bk";
@@ -41,22 +40,37 @@ const int ESPNOW_CHANNEL = 0; // 0 = 跟隨目前 WiFi 頻道
 #define PCLK_GPIO_NUM     13
 
 WebServer server(81);
-WiFiServer controlServer(82);
-WiFiClient wsClient;
-bool wsHandshakeDone = false;
+WebSocketsServer controlSocket(82);
 bool isStreaming = false;
 bool espNowReady = false;
 
-// 非阻塞串流用
-WiFiClient streamClient;
-bool streamActive = false;
-unsigned long lastStreamFrame = 0;
-
 // ============= [新增] 指令佇列 =============
 #define CMD_QUEUE_SIZE 10
-char cmdQueue[CMD_QUEUE_SIZE];
+const int MAX_RETRIES = 3;
+const unsigned long ACK_TIMEOUT = 250; // ms
+
+struct CommandItem {
+  char cmd;
+  uint16_t seq;
+  uint8_t retries;
+  unsigned long lastAttempt;
+  bool awaitingResponse;
+};
+
+CommandItem cmdQueue[CMD_QUEUE_SIZE];
 volatile int cmdQueueHead = 0;
 volatile int cmdQueueTail = 0;
+volatile uint16_t cmdSequence = 1;
+
+bool isValidCommand(char cmd) {
+  return cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' ||
+         cmd == 'W' || cmd == 'w';
+}
+
+bool isValidCommand(char cmd) {
+  return cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' ||
+         cmd == 'W' || cmd == 'w';
+}
 
 bool isValidCommand(char cmd) {
   return cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' ||
@@ -67,17 +81,21 @@ bool isValidCommand(char cmd) {
 void queueCommand(char cmd) {
   int next = (cmdQueueHead + 1) % CMD_QUEUE_SIZE;
   if (next != cmdQueueTail) {
-    cmdQueue[cmdQueueHead] = cmd;
+    cmdQueue[cmdQueueHead] = {cmd, cmdSequence++, 0, 0, false};
     cmdQueueHead = next;
   }
 }
 
-// 從佇列取出指令
-char dequeueCommand() {
-  if (cmdQueueHead == cmdQueueTail) return 0;
-  char cmd = cmdQueue[cmdQueueTail];
+bool hasPendingCommand() {
+  return cmdQueueHead != cmdQueueTail;
+}
+
+CommandItem &currentCommand() {
+  return cmdQueue[cmdQueueTail];
+}
+
+void popCommand() {
   cmdQueueTail = (cmdQueueTail + 1) % CMD_QUEUE_SIZE;
-  return cmd;
 }
 
 // ============= ESP-NOW 相關 =============
@@ -130,172 +148,25 @@ void commandForwardTask(void *parameter) {
   }
 }
 
-// ============= WebSocket 控制通道（無外部函式庫版） =============
-String buildAcceptKey(const String &clientKey) {
-  const char *guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-  String combined = clientKey + guid;
-
-  uint8_t sha1Result[20];
-  mbedtls_sha1_ret(reinterpret_cast<const unsigned char *>(combined.c_str()), combined.length(), sha1Result);
-
-  size_t outLen = 0;
-  unsigned char base64Result[64] = {0};
-  mbedtls_base64_encode(base64Result, sizeof(base64Result), &outLen, sha1Result, sizeof(sha1Result));
-
-  return String(reinterpret_cast<char *>(base64Result));
-}
-
-bool performWebSocketHandshake(WiFiClient &client) {
-  unsigned long start = millis();
-  String request = "";
-
-  while (millis() - start < 1000) {
-    while (client.available()) {
-      char c = client.read();
-      request += c;
-      if (request.endsWith("\r\n\r\n")) {
-        break;
-      }
-    }
-
-    if (request.endsWith("\r\n\r\n")) {
+// ============= WebSocket 控制通道 =============
+void onWebSocketEvent(uint8_t clientNum, WStype_t type, uint8_t *payload, size_t length) {
+  switch (type) {
+    case WStype_DISCONNECTED:
+      Serial.printf("[WS] Client %u disconnected\n", clientNum);
       break;
-    }
-
-    delay(5);
-  }
-
-  int keyIndex = request.indexOf("Sec-WebSocket-Key:");
-  if (keyIndex < 0) {
-    Serial.println("[WS] Handshake failed: no key");
-    return false;
-  }
-
-  int keyEnd = request.indexOf('\r', keyIndex);
-  if (keyEnd < 0) {
-    Serial.println("[WS] Handshake failed: malformed key");
-    return false;
-  }
-
-  String clientKey = request.substring(keyIndex + 19, keyEnd);
-  clientKey.trim();
-
-  String acceptKey = buildAcceptKey(clientKey);
-  String response =
-      "HTTP/1.1 101 Switching Protocols\r\n"
-      "Upgrade: websocket\r\n"
-      "Connection: Upgrade\r\n"
-      "Sec-WebSocket-Accept: " + acceptKey + "\r\n\r\n";
-
-  client.write(reinterpret_cast<const uint8_t *>(response.c_str()), response.length());
-  client.flush();
-
-  Serial.println("[WS] Handshake success");
-  return true;
-}
-
-void handleWebSocketFrames() {
-  if (!wsClient || !wsClient.connected()) {
-    return;
-  }
-
-  while (wsClient.available() >= 2) {
-    uint8_t header[2];
-    wsClient.read(header, 2);
-
-    bool fin = header[0] & 0x80;
-    uint8_t opcode = header[0] & 0x0F;
-    bool masked = header[1] & 0x80;
-    uint64_t payloadLen = header[1] & 0x7F;
-
-    (void)fin; // 單一幀控制訊息，無需進一步處理分片
-
-    if (payloadLen == 126) {
-      if (wsClient.available() < 2) break;
-      uint8_t ext[2];
-      wsClient.read(ext, 2);
-      payloadLen = (ext[0] << 8) | ext[1];
-    } else if (payloadLen == 127) {
-      // 控制訊息不會這麼長，直接丟棄
-      Serial.println("[WS] Payload too large");
-      wsClient.stop();
-      wsHandshakeDone = false;
-      return;
-    }
-
-    if (!masked) {
-      Serial.println("[WS] Client frames must be masked");
-      wsClient.stop();
-      wsHandshakeDone = false;
-      return;
-    }
-
-    size_t totalNeeded = 4 + payloadLen;
-    unsigned long waitStart = millis();
-    while (wsClient.connected() && wsClient.available() < totalNeeded && millis() - waitStart < 500) {
-      delay(5);
-    }
-
-    if (wsClient.available() < totalNeeded) {
-      Serial.println("[WS] Frame timeout, closing");
-      wsClient.stop();
-      wsHandshakeDone = false;
-      return;
-    }
-
-    uint8_t mask[4];
-    wsClient.read(mask, 4);
-
-    String payload = "";
-    payload.reserve(payloadLen);
-    for (uint64_t i = 0; i < payloadLen; i++) {
-      int c = wsClient.read();
-      if (c < 0) break;
-      payload += static_cast<char>(c ^ mask[i % 4]);
-    }
-
-    if (opcode == 0x8) { // close
-      wsClient.stop();
-      wsHandshakeDone = false;
-      return;
-    } else if (opcode == 0x9) { // ping -> pong
-      uint8_t pongHeader[2] = {0x8A, static_cast<uint8_t>(payloadLen)};
-      wsClient.write(pongHeader, 2);
-      for (uint64_t i = 0; i < payloadLen; i++) {
-        wsClient.write(static_cast<uint8_t>(payload[i]));
-      }
-    } else if (opcode == 0x1 && fin) { // text
-      if (payloadLen > 0) {
-        char cmd = payload.charAt(0);
+    case WStype_CONNECTED:
+      Serial.printf("[WS] Client %u connected\n", clientNum);
+      break;
+    case WStype_TEXT:
+      if (length > 0) {
+        char cmd = static_cast<char>(payload[0]);
         if (isValidCommand(cmd)) {
           queueCommand(cmd);
-          Serial.printf("[WS] CMD %c\n", cmd);
         }
       }
-    }
-  }
-}
-
-void pollWebSocketControl() {
-  if (!wsClient || !wsClient.connected()) {
-    wsClient.stop();
-    wsHandshakeDone = false;
-
-    WiFiClient newClient = controlServer.available();
-    if (newClient) {
-      wsClient = newClient;
-      wsClient.setNoDelay(true);
-      Serial.println("[WS] Incoming connection");
-      wsHandshakeDone = performWebSocketHandshake(wsClient);
-      if (!wsHandshakeDone) {
-        wsClient.stop();
-      }
-    }
-    return;
-  }
-
-  if (wsHandshakeDone) {
-    handleWebSocketFrames();
+      break;
+    default:
+      break;
   }
 }
 
@@ -412,6 +283,22 @@ void handle_cmd() {
   }
 }
 
+// 保留 HTTP 控制端點以便相容與除錯
+void handle_cmd() {
+  if (!server.hasArg("act")) {
+    server.send(400, "text/plain", "Missing act");
+    return;
+  }
+
+  char cmd = server.arg("act").charAt(0);
+  if (isValidCommand(cmd)) {
+    queueCommand(cmd);
+    server.send(200, "text/plain", "Queued");
+  } else {
+    server.send(400, "text/plain", "Invalid cmd");
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
@@ -455,8 +342,8 @@ void setup() {
   server.on("/cmd", handle_cmd);
   server.begin();
 
-  controlServer.begin();
-  controlServer.setNoDelay(true);
+  controlSocket.begin();
+  controlSocket.onEvent(onWebSocketEvent);
 
   // 啟動獨立的指令轉發任務
   xTaskCreatePinnedToCore(
@@ -472,31 +359,7 @@ void setup() {
 
 void loop() {
   server.handleClient();
-  pollWebSocketControl();
-
-  // 非阻塞串流：在主迴圈中推送影像，避免佔用 server.handleClient()
-  if (streamActive) {
-    if (!streamClient.connected()) {
-      streamActive = false;
-      isStreaming = false;
-      streamClient.stop();
-      Serial.println("[STREAM] 客戶端中斷");
-    } else {
-      const unsigned long now = millis();
-      if (now - lastStreamFrame >= 30) { // ~33fps 上限
-        lastStreamFrame = now;
-        camera_fb_t *fb = esp_camera_fb_get();
-        if (fb) {
-          streamClient.print("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ");
-          streamClient.print(fb->len);
-          streamClient.print("\r\n\r\n");
-          streamClient.write(fb->buf, fb->len);
-          streamClient.print("\r\n");
-          esp_camera_fb_return(fb);
-        }
-      }
-    }
-  }
+  controlSocket.loop();
 
   // 處理 Serial 指令（非阻塞）
   while (Serial.available() > 0) {
