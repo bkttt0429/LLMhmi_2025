@@ -18,7 +18,7 @@ except ImportError:
     YOLO_AVAILABLE = False
 
 class ObjectDetector:
-    def __init__(self, model_path='./yolov8n.pt'):
+    def __init__(self, model_path='./yolov13n.pt'):
         self.model = None
         self.enabled = False
         self.frame_count = 0
