@@ -72,6 +72,11 @@ bool isValidCommand(char cmd) {
          cmd == 'W' || cmd == 'w';
 }
 
+bool isValidCommand(char cmd) {
+  return cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' ||
+         cmd == 'W' || cmd == 'w';
+}
+
 // 將指令加入佇列（非阻塞）
 void queueCommand(char cmd) {
   int next = (cmdQueueHead + 1) % CMD_QUEUE_SIZE;
