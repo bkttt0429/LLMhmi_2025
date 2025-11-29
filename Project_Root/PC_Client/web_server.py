@@ -333,6 +333,16 @@ def xbox_controller_thread():
     controller_ready = controller.joystick is not None
 
     while state.is_running:
+        if state.is_flashing:
+            if not paused_for_flash:
+                add_log("⏳ Firmware flashing... pausing Xbox polling")
+                paused_for_flash = True
+            time.sleep(0.5)
+            continue
+        elif paused_for_flash:
+            add_log("✅ Flash complete. Resuming Xbox polling")
+            paused_for_flash = False
+
         controller_state = controller.get_input()
         if controller_state == "QUIT":
             state.is_running = False
