@@ -15,11 +15,21 @@ Servo rightServo;
 const int LEFT_PIN = 5;  // D1
 const int RIGHT_PIN = 4; // D2
 
+// ============= 速度設定 =============
+// 停止與全速
 const int STOP_VAL = 1500; 
 const int SPEED_FWD_L = 1700; 
 const int SPEED_BCK_L = 1300; 
-const int SPEED_FWD_R = 1300; // 右輪反向
+const int SPEED_FWD_R = 1300; // 右輪反向安裝，數值相反
 const int SPEED_BCK_R = 1700;
+
+// 弧線轉彎 (差速) 設定
+// 數值越接近 1500 越慢，越遠越快
+const int ARC_INNER_FWD_L = 1550;   // 左輪內側慢速 (接近停止但微動)
+const int ARC_OUTER_FWD_L = 1700;   // 左輪外側全速
+
+const int ARC_INNER_FWD_R = 1450;   // 右輪內側慢速
+const int ARC_OUTER_FWD_R = 1300;   // 右輪外側全速
 
 // ============= 全域變數 =============
 ESP8266WebServer server(80);
@@ -28,6 +38,8 @@ unsigned long lastCmdTime = 0;
 const unsigned long TIMEOUT_MS = 2000; // 2秒無指令自動停止
 const uint16_t UDP_PORT = 4210;
 char lastCmd = '\0';
+
+// ============= 動作函式 =============
 
 void stopCar() {
   leftServo.writeMicroseconds(STOP_VAL);
@@ -44,6 +56,7 @@ void goBackward() {
   rightServo.writeMicroseconds(SPEED_BCK_R);
 }
 
+// 原地旋轉 (坦克式)
 void turnLeft() {
   leftServo.writeMicroseconds(SPEED_BCK_L);
   rightServo.writeMicroseconds(SPEED_FWD_R);
@@ -54,20 +67,36 @@ void turnRight() {
   rightServo.writeMicroseconds(SPEED_BCK_R);
 }
 
+// 弧線轉彎 (邊走邊轉)
+void arcTurnLeft() {
+  // 左轉時：左輪慢(內側)，右輪快(外側)
+  leftServo.writeMicroseconds(ARC_INNER_FWD_L);
+  rightServo.writeMicroseconds(ARC_OUTER_FWD_R);
+}
+
+void arcTurnRight() {
+  // 右轉時：左輪快(外側)，右輪慢(內側)
+  leftServo.writeMicroseconds(ARC_OUTER_FWD_L);
+  rightServo.writeMicroseconds(ARC_INNER_FWD_R);
+}
+
 // 處理接收到的指令
 void processCommand(char cmd) {
   lastCmdTime = millis();
-  if (cmd == lastCmd) {
-    return; // 避免重複執行浪費 CPU
-  }
+  
+  // 避免重複刷新 Servo (節省 CPU)
+  if (cmd == lastCmd) return;
   lastCmd = cmd;
+  
   Serial.printf("[CMD] Recv: %c\n", cmd);
   
   switch (cmd) {
     case 'F': goForward(); break;
     case 'B': goBackward(); break;
-    case 'L': turnLeft(); break;
-    case 'R': turnRight(); break;
+    case 'L': turnLeft(); break;       // 原地左轉
+    case 'R': turnRight(); break;      // 原地右轉
+    case 'Q': arcTurnLeft(); break;    // [新功能] 左前弧線
+    case 'E': arcTurnRight(); break;   // [新功能] 右前弧線
     case 'S': stopCar(); break;
     default: stopCar(); break;
   }
@@ -90,6 +119,7 @@ void initEspNow() {
   Serial.println("[ESPNOW] Ready");
 }
 
+// ============= Setup & Loop =============
 void setup() {
   Serial.begin(115200);
   delay(500);
@@ -108,21 +138,19 @@ void setup() {
   }
   Serial.println("\n✓ Connected!");
   Serial.print("IP: "); Serial.println(WiFi.localIP());
-  Serial.print("MAC: "); Serial.println(WiFi.macAddress()); // 顯示 MAC
 
+  // 啟動 mDNS
   if (MDNS.begin("boebot")) {
-    Serial.println("mDNS started: http://boebot.local");
+    Serial.println("mDNS started");
   }
+
+  // 啟動 UDP 監聽 (接收來自 PC 的指令)
+  udp.begin(UDP_PORT);
+  Serial.printf("UDP Listening on port %d\n", UDP_PORT);
 
   initEspNow();
-
-  // UDP 監聽：允許電腦端直接透過 UDP 控制，延遲更低
-  if (udp.begin(UDP_PORT)) {
-    Serial.printf("[UDP] Listening on %d\n", UDP_PORT);
-  } else {
-    Serial.println("[UDP] Init failed");
-  }
   
+  // HTTP 備援控制
   server.on("/", [](){ server.send(200, "text/plain", "Car Ready"); });
   server.on("/cmd", [](){
     if(server.hasArg("act")) {
@@ -135,19 +163,26 @@ void setup() {
 }
 
 void loop() {
+  // 1. 處理 HTTP
   server.handleClient();
   MDNS.update();
-
+  
+  // 2. 處理 UDP (最快)
   int packetSize = udp.parsePacket();
-  if (packetSize > 0) {
-    char buf[4] = {0};
-    int len = udp.read(buf, sizeof(buf) - 1);
+  if (packetSize) {
+    char packetBuffer[255];
+    int len = udp.read(packetBuffer, 255);
     if (len > 0) {
-      processCommand(buf[0]);
+      packetBuffer[len] = 0;
+      processCommand(packetBuffer[0]);
     }
   }
-  
+
+  // 3. 安全機制：超時停車
   if (millis() - lastCmdTime > TIMEOUT_MS) {
-    stopCar(); // 安全機制：超時停車
+    if (lastCmd != 'S') {
+      stopCar();
+      lastCmd = 'S';
+    }
   }
 }
