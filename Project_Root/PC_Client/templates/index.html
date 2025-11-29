@@ -468,6 +468,7 @@
         const CHART_THROTTLE_MS = 50; // Max 20fps for chart
 
         let controllerLinked = false;
+        let lastXboxUpdate = 0;
 
         // === Initialization ===
         window.onload = () => {
@@ -535,6 +536,8 @@
 
             socket.on('controller_data', (data) => {
                 controllerLinked = true;
+                lastXboxUpdate = Date.now();
+                setGamepadLink(true);
                 document.getElementById('gamepad-status').classList.add('gamepad-connected');
                 updateXboxVisual(data.left_stick_x || 0, data.left_stick_y || 0, data.stick_pressed || false);
                 if (data.cmd) {
