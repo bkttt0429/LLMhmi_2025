@@ -4,6 +4,7 @@ import cv2
 import time
 import threading
 import re
+import requests
 import serial
 import pygame
 from serial.tools import list_ports
@@ -33,7 +34,11 @@ class SystemState:
         self.serial_port = None
         self.preferred_port = None
         self.ser = None
-        self.video_url = ""
+        self.video_url = (
+            f"http://{config.DEFAULT_STREAM_IP}:{config.DEFAULT_STREAM_PORT}/stream"
+            if getattr(config, "DEFAULT_STREAM_IP", "")
+            else ""
+        )
         self.radar_dist = 0.0
         self.logs = []
         self.is_running = True
@@ -112,6 +117,42 @@ def add_log(msg):
     socketio.emit('log', {'data': log_entry})
 
 state.add_log = add_log
+
+# === 串口 / 網路寫入輔助 ===
+def send_serial_command(cmd, source="HTTP"):
+    """
+    Primary control channel: USB serial.
+    Fallback: HTTP to the ESP8266 car if we have an IP (e.g., MDNS/manually set).
+    """
+    if not cmd:
+        return False, "Empty command"
+
+    # 1) Serial first
+    if state.ser and state.ser.is_open:
+        try:
+            state.ser.write(cmd.encode())
+            return True, "Sent over serial"
+        except Exception as e:
+            add_log(f"[{source}] Serial write failed: {e}")
+            return False, str(e)
+
+    # 2) Fallback to HTTP if we know the car IP
+    target_ip = state.current_ip or getattr(config, "DEFAULT_STREAM_IP", "")
+    if target_ip:
+        url = f"http://{target_ip}/cmd?act={cmd}"
+        try:
+            resp = requests.get(url, timeout=2)
+            if resp.ok:
+                add_log(f"[{source}] HTTP control -> {url} ({resp.status_code})")
+                return True, "Sent over HTTP"
+            add_log(f"[{source}] HTTP control failed ({resp.status_code})")
+            return False, f"HTTP {resp.status_code}"
+        except Exception as e:
+            add_log(f"[{source}] HTTP control error: {e}")
+            return False, str(e)
+
+    add_log(f"[{source}] Serial unavailable and no IP set")
+    return False, "Serial not ready"
 
 # === Threads ===
 def serial_worker_thread():
@@ -280,11 +321,7 @@ def handle_disconnect():
 @socketio.on('command')
 def handle_command(data):
     cmd = data.get('cmd')
-    if state.ser and state.ser.is_open:
-        try:
-            state.ser.write(cmd.encode())
-        except Exception as e:
-            print(f"Serial write failed: {e}")
+    send_serial_command(cmd, source="WS")
 
 @app.route('/api/status')
 def api_status():
@@ -296,6 +333,19 @@ def api_status():
         "logs": state.logs,
         "ai_status": state.ai_enabled
     })
+
+@app.route('/api/control', methods=['POST'])
+def api_control():
+    data = request.get_json(silent=True) or {}
+    cmd = (data.get('cmd') or '').strip()
+
+    if not cmd:
+        return jsonify({"status": "error", "msg": "Missing command"}), 400
+
+    success, msg = send_serial_command(cmd, source="API")
+    status = "ok" if success else "error"
+    code = 200 if success else 500
+    return jsonify({"status": status, "msg": msg, "cmd": cmd}), code
 
 @app.route('/api/flash', methods=['POST'])
 def api_flash():
@@ -370,8 +420,8 @@ def toggle_ai():
 
 @app.route('/api/set_ip', methods=['POST'])
 def api_set_ip():
-    data = request.json
-    ip = data.get('ip')
+    data = request.get_json(silent=True) or {}
+    ip = data.get('ip') or request.values.get('ip')
     if ip:
         state.current_ip = ip
         state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
@@ -416,6 +466,8 @@ if __name__ == '__main__':
     print(f"📦 YOLO Available: {YOLO_AVAILABLE}")
     print(f"🔧 Serial Auto-Detection: ACTIVE")
     print(f"🎮 Xbox Controller: {'ACTIVE' if pygame.joystick.get_count() > 0 else 'NOT FOUND'}")
+    if state.video_url:
+        print(f"🎥 Default Stream URL: {state.video_url}")
     print("=" * 60)
 
     socketio.run(app, host=config.WEB_HOST, port=config.WEB_PORT, debug=False)

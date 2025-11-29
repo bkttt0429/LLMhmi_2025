@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>TACTICAL COMMAND v14.0 [MERGED]</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
         
@@ -93,6 +94,41 @@
         /* Gamepad Indicator */
         .gamepad-icon { opacity: 0.3; transition: opacity 0.3s; }
         .gamepad-connected { opacity: 1; color: #00ff9d; text-shadow: 0 0 10px #00ff9d; }
+
+        /* Xbox Visualizer */
+        .xbox-card {
+            background: radial-gradient(circle at 20% 20%, rgba(0,255,157,0.06), transparent 35%),
+                        radial-gradient(circle at 80% 0%, rgba(0,255,255,0.06), transparent 30%),
+                        rgba(5, 15, 10, 0.85);
+            border: 1px solid rgba(0,255,157,0.2);
+            box-shadow: 0 0 25px rgba(0,255,157,0.08);
+        }
+        .xbox-stick {
+            width: 64px; height: 64px;
+            border: 1px solid #0f766e;
+            border-radius: 50%;
+            background: radial-gradient(circle, #0b1f1a 0%, #04100c 65%);
+            box-shadow: inset 0 0 12px rgba(0,255,157,0.35);
+            transition: transform 0.1s ease-out;
+        }
+        .xbox-stick::after {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 14px; height: 14px;
+            background: #00ff9d;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 8px rgba(0,255,157,0.6);
+        }
+        .xbox-pulse {
+            animation: pulse 1.2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 0.35; }
+            50% { opacity: 1; }
+            100% { opacity: 0.35; }
+        }
     </style>
 </head>
 <body class="h-screen flex flex-col p-2 sm:p-4 gap-4 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
@@ -181,6 +217,21 @@
                 </div>
 
                 <button class="btn-cy w-full py-2 sm:py-3 rounded tracking-widest text-xs sm:text-sm" onclick="toggleLight()">TOGGLE LIGHTS</button>
+            </div>
+
+            <div class="xbox-card rounded p-3 sm:p-4 flex flex-col gap-3 relative">
+                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">XBOX 視覺化</div>
+                <div class="flex items-center gap-4">
+                    <div class="relative xbox-stick" id="xbox-stick"></div>
+                    <div class="space-y-1 text-xs sm:text-sm text-gray-300">
+                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">LS</span>：前進/後退/轉向</div>
+                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">LS 按下</span>：緊急煞車</div>
+                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">A</span>：車燈</div>
+                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">X</span>：立即停止</div>
+                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">Y</span>：AI 開/關</div>
+                    </div>
+                </div>
+                <div class="text-[10px] text-gray-500">左搖桿偏移與按下狀態會即時顯示。</div>
             </div>
 
             <div class="cyber-border p-2 sm:p-3 text-[10px] sm:text-xs flex flex-col gap-1">
@@ -407,6 +458,7 @@
         let gamepadIndex = null;
         let lastGamepadCmd = 'S';
         let gamepadLoopActive = false;
+        let lastGamepadName = '';
 
         // === Initialization ===
         window.onload = () => {
@@ -424,6 +476,7 @@
             window.addEventListener("gamepadconnected", (e) => {
                 gamepadIndex = e.gamepad.index;
                 document.getElementById('gamepad-status').classList.add('gamepad-connected');
+                lastGamepadName = e.gamepad.id || '';
                 log(`Gamepad Connected: ${e.gamepad.id}`);
             });
             window.addEventListener("gamepaddisconnected", (e) => {
@@ -456,43 +509,32 @@
             }
         }
 
-        // === WebSocket Implementation (Standard API) ===
+        // === Socket.IO Implementation ===
         function initWebSocket() {
-            const proto = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-            const wsUrl = proto + window.location.host + '/ws';
-            
-            log(`Connecting to WS: ${wsUrl}`);
-            socket = new WebSocket(wsUrl);
+            log("Connecting to Socket.IO...");
+            socket = io({ transports: ['websocket'] });
 
-            socket.onopen = () => {
+            socket.on('connect', () => {
                 wsConnected = true;
                 document.getElementById('ws-status').innerText = "ONLINE";
                 document.getElementById('ws-status').className = "text-green-500 font-bold animate-pulse";
                 document.getElementById('link-text').innerText = "CONNECTED";
                 document.getElementById('link-text').className = "text-green-500 font-bold animate-pulse";
                 log("WS Connected");
-            };
+            });
 
-            socket.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    handleData(data);
-                } catch(e) {
-                    // console.error("WS Parse Error", e); 
-                    // Silent fail for non-JSON logs
-                }
-            };
-
-            socket.onclose = () => {
+            socket.on('disconnect', () => {
                 wsConnected = false;
                 document.getElementById('ws-status').innerText = "OFFLINE";
                 document.getElementById('ws-status').className = "text-red-500 font-bold";
                 document.getElementById('link-text').innerText = "RETRYING...";
                 document.getElementById('link-text').className = "text-yellow-500 font-bold";
-                setTimeout(initWebSocket, 2000); // Auto Reconnect
-            };
-            
-            socket.onerror = (e) => console.log("WS Error", e);
+                setTimeout(initWebSocket, 2000);
+            });
+
+            socket.on('controller_data', (data) => {
+                updateXboxVisual(data.left_stick_x || 0, data.left_stick_y || 0, data.button_b || data.button_a || false);
+            });
         }
 
         function reconnectWS() {
@@ -586,6 +628,7 @@
             }
 
             // 3. Poll Gamepad
+            detectGamepad();
             pollGamepad();
 
             requestAnimationFrame(animationLoop);
@@ -660,9 +703,33 @@
         }
 
         // === Gamepad Logic ===
+        function detectGamepad() {
+            if (gamepadIndex !== null) {
+                const current = navigator.getGamepads()[gamepadIndex];
+                if (!current) {
+                    gamepadIndex = null;
+                    document.getElementById('gamepad-status').classList.remove('gamepad-connected');
+                    if (lastGamepadName) log(`Gamepad Disconnected: ${lastGamepadName}`);
+                    lastGamepadName = '';
+                }
+                return;
+            }
+
+            const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+            for (let i = 0; i < pads.length; i++) {
+                if (pads[i]) {
+                    gamepadIndex = pads[i].index;
+                    lastGamepadName = pads[i].id || '';
+                    document.getElementById('gamepad-status').classList.add('gamepad-connected');
+                    log(`Gamepad Connected: ${pads[i].id || 'Unknown Controller'}`);
+                    break;
+                }
+            }
+        }
+
         function pollGamepad() {
             if (gamepadIndex === null) return;
-            
+
             const gp = navigator.getGamepads()[gamepadIndex];
             if(!gp) return;
 
@@ -673,6 +740,7 @@
             // Axis 0: Left Stick X (Left/Right)
             const y = gp.axes[1];
             const x = gp.axes[0];
+            const stickPressed = gp.buttons[10] ? gp.buttons[10].pressed : false;
 
             let cmd = 'S'; // Default Stop
 
@@ -680,12 +748,16 @@
             else if (y > threshold) cmd = 'B';  // Backward
             else if (x < -threshold) cmd = 'L'; // Left
             else if (x > threshold) cmd = 'R';  // Right
+
+            if (stickPressed) cmd = 'S';        // Brake on stick press
             
             // Buttons
             // 0: A, 1: B, 2: X, 3: Y
             if (gp.buttons[0].pressed) toggleLight(); // A Button
             if (gp.buttons[2].pressed) cmd = 'S';     // X Button (Emergency Stop)
             if (gp.buttons[3].pressed) toggleAI();    // Y Button
+
+            updateXboxVisual(x, -y, stickPressed);
 
             // Only send if command changed to avoid flooding
             if (cmd !== lastGamepadCmd) {
@@ -698,9 +770,9 @@
         function sendCmd(cmd) {
             highlightKey(cmd);
             
-            // Try WS
-            if(wsConnected && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ cmd: cmd }));
+            // Try Socket.IO
+            if(wsConnected && socket && socket.connected) {
+                socket.emit('command', { cmd });
             } else {
                 // Fallback HTTP
                 fetch('/api/control', {
@@ -719,6 +791,17 @@
                 btn.classList.add('btn-active');
                 setTimeout(() => btn.classList.remove('btn-active'), 150);
             }
+        }
+
+        function updateXboxVisual(x, y, pressed) {
+            const stick = document.getElementById('xbox-stick');
+            if(!stick) return;
+            const clamp = (v) => Math.max(-1, Math.min(1, v));
+            const offset = 12;
+            const dx = clamp(x) * offset;
+            const dy = -clamp(y) * offset;
+            stick.style.transform = `translate(${dx}px, ${dy}px)`;
+            stick.classList.toggle('xbox-pulse', !!pressed);
         }
 
         // === Other Logic (Chart, Stats) ===
@@ -820,7 +903,11 @@
         
         function setManualIP() {
              const ip = document.getElementById('ip-input').value;
-             if(ip) fetch('/api/set_ip', { method: 'POST', body: JSON.stringify({ip}) });
+             if(ip) fetch('/api/set_ip', { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ip}) 
+             });
         }
         
         function applySettings() {

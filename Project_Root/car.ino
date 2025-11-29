@@ -56,6 +56,17 @@ void turnRight() {
   Serial.println("RIGHT");
 }
 
+void processCommand(char cmd) {
+  switch (cmd) {
+    case 'F': goForward(); break;
+    case 'B': goBackward(); break;
+    case 'L': turnLeft(); break;
+    case 'R': turnRight(); break;
+    case 'S': stopCar(); break;
+    default: break;
+  }
+}
+
 // ============= 網頁處理 =============
 void handleRoot() {
   String html = "<!DOCTYPE html><html><head><meta charset='utf-8'>";
@@ -92,13 +103,7 @@ void handleRoot() {
 void handleCommand() {
   if (server.hasArg("act")) {
     char cmd = server.arg("act").charAt(0);
-    switch (cmd) {
-      case 'F': goForward(); break;
-      case 'B': goBackward(); break;
-      case 'L': turnLeft(); break;
-      case 'R': turnRight(); break;
-      case 'S': stopCar(); break;
-    }
+    processCommand(cmd);
     server.send(200, "text/plain", "OK");
   } else {
     server.send(400, "text/plain", "Bad Request");
@@ -124,8 +129,10 @@ void setup() {
   }
 
   Serial.println("\n--- Connected! ---");
-  Serial.print("IP Address: "); 
+  Serial.print("IP Address: ");
   Serial.println(WiFi.localIP()); // 印出手機配給車子的 IP
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP()); // 讓 PC Web Server 自動抓取
 
   // 啟動 mDNS，網址設為 http://boebot.local
   if (MDNS.begin("boebot")) {
@@ -138,6 +145,11 @@ void setup() {
 }
 
 void loop() {
+  while (Serial.available() > 0) {
+    char incoming = Serial.read();
+    if (incoming == '\n' || incoming == '\r') continue;
+    processCommand(incoming);
+  }
   server.handleClient();
   MDNS.update(); // 處理 mDNS 查詢
 }
