@@ -6,15 +6,17 @@
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <WebServer.h>
-#include <HTTPClient.h>
+#include <esp_now.h>
+#include <WebSocketsServer.h>
 
 // ============= WiFi 設定 =============
 const char* ssid     = "Bk";
 const char* password = ".........";
 
 // ============= 遙控車設定 =============
-String carIP = "boebot.local";
-const int CAR_PORT = 80;
+// 👉 將下面的 MAC 換成 ESP8266/12F 車子的 WiFi MAC 位址
+uint8_t carPeerMac[] = {0x24, 0x6F, 0x28, 0x00, 0x00, 0x00};
+const int ESPNOW_CHANNEL = 0; // 0 = 跟隨目前 WiFi 頻道
 
 // ============= 超聲波腳位 =============
 #define SIG_PIN 21
@@ -38,7 +40,9 @@ const int CAR_PORT = 80;
 #define PCLK_GPIO_NUM     13
 
 WebServer server(81);
+WebSocketsServer controlSocket(82);
 bool isStreaming = false;
+bool espNowReady = false;
 
 // ============= [新增] 指令佇列 =============
 #define CMD_QUEUE_SIZE 10
@@ -57,6 +61,11 @@ CommandItem cmdQueue[CMD_QUEUE_SIZE];
 volatile int cmdQueueHead = 0;
 volatile int cmdQueueTail = 0;
 volatile uint16_t cmdSequence = 1;
+
+bool isValidCommand(char cmd) {
+  return cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' ||
+         cmd == 'W' || cmd == 'w';
+}
 
 // 將指令加入佇列（非阻塞）
 void queueCommand(char cmd) {
@@ -79,71 +88,75 @@ void popCommand() {
   cmdQueueTail = (cmdQueueTail + 1) % CMD_QUEUE_SIZE;
 }
 
-// ============= [修改] 獨立任務處理 HTTP 轉發 =============
+// ============= ESP-NOW 相關 =============
+void onEspNowSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.printf("[ESPNOW] Send status: %s\n", status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
+}
+
+bool sendEspNow(char cmd) {
+  if (!espNowReady) return false;
+  esp_err_t result = esp_now_send(carPeerMac, reinterpret_cast<uint8_t *>(&cmd), 1);
+  return result == ESP_OK;
+}
+
+void initEspNow() {
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("[ESPNOW] Init failed");
+    espNowReady = false;
+    return;
+  }
+
+  esp_now_register_send_cb(onEspNowSent);
+
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, carPeerMac, 6);
+  peerInfo.channel = ESPNOW_CHANNEL == 0 ? static_cast<uint8_t>(WiFi.channel()) : ESPNOW_CHANNEL;
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("[ESPNOW] Add peer failed");
+    espNowReady = false;
+    return;
+  }
+
+  espNowReady = true;
+  Serial.print("[ESPNOW] Ready on channel ");
+  Serial.println(peerInfo.channel);
+}
+
+// ============= [修改] 獨立任務處理指令轉發 =============
 void commandForwardTask(void *parameter) {
-  HTTPClient http;
-
   while (true) {
-    if (!hasPendingCommand()) {
-      vTaskDelay(10 / portTICK_PERIOD_MS);
-      continue;
+    char cmd = dequeueCommand();
+
+    if (cmd != 0) {
+      bool sent = sendEspNow(cmd);
+      Serial.printf("[FWD][ESPNOW] %s %c\n", sent ? "✓" : "✗", cmd);
     }
 
-    CommandItem &item = currentCommand();
+    vTaskDelay(10 / portTICK_PERIOD_MS); // 釋放 CPU
+  }
+}
 
-    // 若正在等待 ACK 且尚未超時，略過
-    if (item.awaitingResponse && (millis() - item.lastAttempt) < ACK_TIMEOUT) {
-      vTaskDelay(5 / portTICK_PERIOD_MS);
-      continue;
-    }
-
-    String url = "http://" + carIP + "/cmd?act=" + String(item.cmd) + "&seq=" + String(item.seq);
-
-    http.setTimeout(300); // 縮短超時時間
-    http.begin(url);
-
-    item.awaitingResponse = true;
-    item.lastAttempt = millis();
-
-    int httpCode = http.GET();
-    bool acked = false;
-
-    if (httpCode > 0) {
-      String payload = http.getString();
-      if (payload.startsWith("ACK:")) {
-        int firstSep = payload.indexOf(':', 4);
-        if (firstSep > 4) {
-          uint16_t ackSeq = payload.substring(4, firstSep).toInt();
-          char ackCmd = payload.charAt(firstSep + 1);
-          if (ackSeq == item.seq && ackCmd == item.cmd) {
-            acked = true;
-          }
+// ============= WebSocket 控制通道 =============
+void onWebSocketEvent(uint8_t clientNum, WStype_t type, uint8_t *payload, size_t length) {
+  switch (type) {
+    case WStype_DISCONNECTED:
+      Serial.printf("[WS] Client %u disconnected\n", clientNum);
+      break;
+    case WStype_CONNECTED:
+      Serial.printf("[WS] Client %u connected\n", clientNum);
+      break;
+    case WStype_TEXT:
+      if (length > 0) {
+        char cmd = static_cast<char>(payload[0]);
+        if (isValidCommand(cmd)) {
+          queueCommand(cmd);
         }
-      } else {
-        Serial.printf("[WARN] Unexpected response for seq=%u cmd=%c: %s\n", item.seq, item.cmd, payload.c_str());
       }
-    } else {
-      Serial.printf("[WARN] HTTP error for seq=%u cmd=%c: code=%d\n", item.seq, item.cmd, httpCode);
-    }
-
-    if (acked) {
-      Serial.printf("[ACK] seq=%u cmd=%c\n", item.seq, item.cmd);
-      popCommand();
-    } else {
-      item.retries++;
-      item.awaitingResponse = true;
-      item.lastAttempt = millis();
-
-      if (item.retries >= MAX_RETRIES) {
-        Serial.printf("[FWD] ✗ seq=%u cmd=%c\n", item.seq, item.cmd);
-        popCommand();
-      } else {
-        Serial.printf("[RETRY] seq=%u cmd=%c (%d/%d)\n", item.seq, item.cmd, item.retries, MAX_RETRIES);
-      }
-    }
-
-    http.end();
-    vTaskDelay(5 / portTICK_PERIOD_MS); // 釋放 CPU
+      break;
+    default:
+      break;
   }
 }
 
@@ -259,6 +272,22 @@ void handle_stream() {
   Serial.println("[STREAM] 串流結束");
 }
 
+// 保留 HTTP 控制端點以便相容與除錯
+void handle_cmd() {
+  if (!server.hasArg("act")) {
+    server.send(400, "text/plain", "Missing act");
+    return;
+  }
+
+  char cmd = server.arg("act").charAt(0);
+  if (isValidCommand(cmd)) {
+    queueCommand(cmd);
+    server.send(200, "text/plain", "Queued");
+  } else {
+    server.send(400, "text/plain", "Invalid cmd");
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
@@ -294,11 +323,17 @@ void setup() {
     Serial.println("\n[ERR] WiFi 連線失敗");
   }
 
+  initEspNow();
+
   server.on("/", handle_root);
   server.on("/capture", handle_capture);
   server.on("/stream", handle_stream);
+  server.on("/cmd", handle_cmd);
   server.begin();
-  
+
+  controlSocket.begin();
+  controlSocket.onEvent(onWebSocketEvent);
+
   // 啟動獨立的指令轉發任務
   xTaskCreatePinnedToCore(
     commandForwardTask,   // 任務函數
@@ -313,14 +348,14 @@ void setup() {
 
 void loop() {
   server.handleClient();
+  controlSocket.loop();
 
   // 處理 Serial 指令（非阻塞）
   while (Serial.available() > 0) {
     char cmd = Serial.read();
-    
+
     if (cmd != '\n' && cmd != '\r') {
-      if (cmd == 'F' || cmd == 'B' || cmd == 'L' || cmd == 'R' || cmd == 'S' || 
-          cmd == 'W' || cmd == 'w') {
+      if (isValidCommand(cmd)) {
         queueCommand(cmd); // 加入佇列，由獨立任務處理
       }
     }
