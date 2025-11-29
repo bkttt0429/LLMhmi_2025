@@ -104,7 +104,9 @@ void handleCommand() {
   if (server.hasArg("act")) {
     char cmd = server.arg("act").charAt(0);
     processCommand(cmd);
-    server.send(200, "text/plain", "OK");
+    uint16_t seq = server.hasArg("seq") ? server.arg("seq").toInt() : 0;
+    String ack = "ACK:" + String(seq) + ":" + String(cmd);
+    server.send(200, "text/plain", ack);
   } else {
     server.send(400, "text/plain", "Bad Request");
   }

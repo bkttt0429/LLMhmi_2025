@@ -144,11 +144,16 @@ def send_serial_command(cmd, source="HTTP"):
     # 嘗試所有 URL
     for url in target_urls:
         try:
-            resp = requests.get(f"{url}?act={cmd}", timeout=0.5)
+            resp = requests.get(f"{url}?act={cmd}", timeout=0.8)
             if resp.ok:
-                # add_log(f"[{source}] ✅ WiFi → {cmd}")  # 減少 log 頻率
-                return True, "Sent via WiFi"
-        except requests.exceptions.RequestException:
+                ack_text = resp.text.strip()
+                if ack_text:
+                    add_log(f"[{source}] ✅ {cmd} ({ack_text})")
+                else:
+                    add_log(f"[{source}] ✅ {cmd} (HTTP {resp.status_code})")
+                return True, ack_text or "Sent via WiFi"
+        except requests.exceptions.RequestException as exc:
+            add_log(f"[{source}] ⚠️ HTTP error to {url}: {exc}")
             continue
 
     # 方法2: 透過 Serial 轉發（備用，需要 ESP32-S3 CAM 韌體支援）

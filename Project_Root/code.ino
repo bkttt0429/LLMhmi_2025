@@ -42,52 +42,108 @@ bool isStreaming = false;
 
 // ============= [新增] 指令佇列 =============
 #define CMD_QUEUE_SIZE 10
-char cmdQueue[CMD_QUEUE_SIZE];
+const int MAX_RETRIES = 3;
+const unsigned long ACK_TIMEOUT = 250; // ms
+
+struct CommandItem {
+  char cmd;
+  uint16_t seq;
+  uint8_t retries;
+  unsigned long lastAttempt;
+  bool awaitingResponse;
+};
+
+CommandItem cmdQueue[CMD_QUEUE_SIZE];
 volatile int cmdQueueHead = 0;
 volatile int cmdQueueTail = 0;
+volatile uint16_t cmdSequence = 1;
 
 // 將指令加入佇列（非阻塞）
 void queueCommand(char cmd) {
   int next = (cmdQueueHead + 1) % CMD_QUEUE_SIZE;
   if (next != cmdQueueTail) {
-    cmdQueue[cmdQueueHead] = cmd;
+    cmdQueue[cmdQueueHead] = {cmd, cmdSequence++, 0, 0, false};
     cmdQueueHead = next;
   }
 }
 
-// 從佇列取出指令
-char dequeueCommand() {
-  if (cmdQueueHead == cmdQueueTail) return 0;
-  char cmd = cmdQueue[cmdQueueTail];
+bool hasPendingCommand() {
+  return cmdQueueHead != cmdQueueTail;
+}
+
+CommandItem &currentCommand() {
+  return cmdQueue[cmdQueueTail];
+}
+
+void popCommand() {
   cmdQueueTail = (cmdQueueTail + 1) % CMD_QUEUE_SIZE;
-  return cmd;
 }
 
 // ============= [修改] 獨立任務處理 HTTP 轉發 =============
 void commandForwardTask(void *parameter) {
   HTTPClient http;
-  
+
   while (true) {
-    char cmd = dequeueCommand();
-    
-    if (cmd != 0) {
-      String url = "http://" + carIP + "/cmd?act=" + String(cmd);
-      
-      http.setTimeout(300); // 縮短超時時間
-      http.begin(url);
-      
-      int httpCode = http.GET();
-      
-      if (httpCode > 0) {
-        Serial.printf("[FWD] ✓ %c\n", cmd);
-      } else {
-        Serial.printf("[FWD] ✗ %c\n", cmd);
-      }
-      
-      http.end();
+    if (!hasPendingCommand()) {
+      vTaskDelay(10 / portTICK_PERIOD_MS);
+      continue;
     }
-    
-    vTaskDelay(10 / portTICK_PERIOD_MS); // 釋放 CPU
+
+    CommandItem &item = currentCommand();
+
+    // 若正在等待 ACK 且尚未超時，略過
+    if (item.awaitingResponse && (millis() - item.lastAttempt) < ACK_TIMEOUT) {
+      vTaskDelay(5 / portTICK_PERIOD_MS);
+      continue;
+    }
+
+    String url = "http://" + carIP + "/cmd?act=" + String(item.cmd) + "&seq=" + String(item.seq);
+
+    http.setTimeout(300); // 縮短超時時間
+    http.begin(url);
+
+    item.awaitingResponse = true;
+    item.lastAttempt = millis();
+
+    int httpCode = http.GET();
+    bool acked = false;
+
+    if (httpCode > 0) {
+      String payload = http.getString();
+      if (payload.startsWith("ACK:")) {
+        int firstSep = payload.indexOf(':', 4);
+        if (firstSep > 4) {
+          uint16_t ackSeq = payload.substring(4, firstSep).toInt();
+          char ackCmd = payload.charAt(firstSep + 1);
+          if (ackSeq == item.seq && ackCmd == item.cmd) {
+            acked = true;
+          }
+        }
+      } else {
+        Serial.printf("[WARN] Unexpected response for seq=%u cmd=%c: %s\n", item.seq, item.cmd, payload.c_str());
+      }
+    } else {
+      Serial.printf("[WARN] HTTP error for seq=%u cmd=%c: code=%d\n", item.seq, item.cmd, httpCode);
+    }
+
+    if (acked) {
+      Serial.printf("[ACK] seq=%u cmd=%c\n", item.seq, item.cmd);
+      popCommand();
+    } else {
+      item.retries++;
+      item.awaitingResponse = true;
+      item.lastAttempt = millis();
+
+      if (item.retries >= MAX_RETRIES) {
+        Serial.printf("[FWD] ✗ seq=%u cmd=%c\n", item.seq, item.cmd);
+        popCommand();
+      } else {
+        Serial.printf("[RETRY] seq=%u cmd=%c (%d/%d)\n", item.seq, item.cmd, item.retries, MAX_RETRIES);
+      }
+    }
+
+    http.end();
+    vTaskDelay(5 / portTICK_PERIOD_MS); // 釋放 CPU
   }
 }
 
