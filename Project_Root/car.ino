@@ -6,7 +6,7 @@
 #include <WiFiUdp.h>
 
 // ============= WiFi 設定 =============
-const char* ssid     = "Bk";      // 請確認 WiFi 與相機一致
+const char* ssid     = "Bk";
 const char* password = ".........";
 
 // ============= 伺服馬達與腳位 =============
@@ -15,76 +15,106 @@ Servo rightServo;
 const int LEFT_PIN = 5;  // D1
 const int RIGHT_PIN = 4; // D2
 
-// ============= 速度設定 =============
-// 停止與全速
-const int STOP_VAL = 1500; 
-const int SPEED_FWD_L = 1700; 
-const int SPEED_BCK_L = 1300; 
-const int SPEED_FWD_R = 1300; // 右輪反向安裝，數值相反
+// ============= 速度設定 (平滑插值用) =============
+const int STOP_VAL = 1500;
+const int SPEED_FWD_L = 1700;
+const int SPEED_BCK_L = 1300;
+const int SPEED_FWD_R = 1300;
 const int SPEED_BCK_R = 1700;
 
-// 弧線轉彎 (差速) 設定
-// 數值越接近 1500 越慢，越遠越快
-const int ARC_INNER_FWD_L = 1550;   // 左輪內側慢速 (接近停止但微動)
-const int ARC_OUTER_FWD_L = 1700;   // 左輪外側全速
+// 弧線轉彎 (前進時)
+const int ARC_INNER_FWD_L = 1550;   // 內側慢速
+const int ARC_OUTER_FWD_L = 1700;   // 外側全速
+const int ARC_INNER_FWD_R = 1450;
+const int ARC_OUTER_FWD_R = 1300;
 
-const int ARC_INNER_FWD_R = 1450;   // 右輪內側慢速
-const int ARC_OUTER_FWD_R = 1300;   // 右輪外側全速
+// 弧線轉彎 (後退時) - 新增
+const int ARC_INNER_BCK_L = 1450;
+const int ARC_OUTER_BCK_L = 1300;
+const int ARC_INNER_BCK_R = 1550;
+const int ARC_OUTER_BCK_R = 1700;
+
+// ============= 平滑控制變數 =============
+int currentLeftSpeed = STOP_VAL;
+int currentRightSpeed = STOP_VAL;
+int targetLeftSpeed = STOP_VAL;
+int targetRightSpeed = STOP_VAL;
+const int SMOOTH_STEP = 20;  // 每次調整幅度 (越小越平滑但反應慢)
 
 // ============= 全域變數 =============
 ESP8266WebServer server(80);
 WiFiUDP udp;
 unsigned long lastCmdTime = 0;
-const unsigned long TIMEOUT_MS = 2000; // 2秒無指令自動停止
+const unsigned long TIMEOUT_MS = 2000;
 const uint16_t UDP_PORT = 4210;
 char lastCmd = '\0';
 
-// ============= 動作函式 =============
+// ============= 平滑速度更新 =============
+void smoothUpdate() {
+  // 平滑插值到目標速度
+  if (currentLeftSpeed < targetLeftSpeed) {
+    currentLeftSpeed = min(currentLeftSpeed + SMOOTH_STEP, targetLeftSpeed);
+  } else if (currentLeftSpeed > targetLeftSpeed) {
+    currentLeftSpeed = max(currentLeftSpeed - SMOOTH_STEP, targetLeftSpeed);
+  }
+  
+  if (currentRightSpeed < targetRightSpeed) {
+    currentRightSpeed = min(currentRightSpeed + SMOOTH_STEP, targetRightSpeed);
+  } else if (currentRightSpeed > targetRightSpeed) {
+    currentRightSpeed = max(currentRightSpeed - SMOOTH_STEP, targetRightSpeed);
+  }
+  
+  leftServo.writeMicroseconds(currentLeftSpeed);
+  rightServo.writeMicroseconds(currentRightSpeed);
+}
+
+// ============= 動作函式 (設定目標速度) =============
+void setSpeed(int leftTarget, int rightTarget) {
+  targetLeftSpeed = leftTarget;
+  targetRightSpeed = rightTarget;
+}
 
 void stopCar() {
-  leftServo.writeMicroseconds(STOP_VAL);
-  rightServo.writeMicroseconds(STOP_VAL);
+  setSpeed(STOP_VAL, STOP_VAL);
 }
 
 void goForward() {
-  leftServo.writeMicroseconds(SPEED_FWD_L);
-  rightServo.writeMicroseconds(SPEED_FWD_R);
+  setSpeed(SPEED_FWD_L, SPEED_FWD_R);
 }
 
 void goBackward() {
-  leftServo.writeMicroseconds(SPEED_BCK_L);
-  rightServo.writeMicroseconds(SPEED_BCK_R);
+  setSpeed(SPEED_BCK_L, SPEED_BCK_R);
 }
 
-// 原地旋轉 (坦克式)
 void turnLeft() {
-  leftServo.writeMicroseconds(SPEED_BCK_L);
-  rightServo.writeMicroseconds(SPEED_FWD_R);
+  setSpeed(SPEED_BCK_L, SPEED_FWD_R);
 }
 
 void turnRight() {
-  leftServo.writeMicroseconds(SPEED_FWD_L);
-  rightServo.writeMicroseconds(SPEED_BCK_R);
+  setSpeed(SPEED_FWD_L, SPEED_BCK_R);
 }
 
-// 弧線轉彎 (邊走邊轉)
 void arcTurnLeft() {
-  // 左轉時：左輪慢(內側)，右輪快(外側)
-  leftServo.writeMicroseconds(ARC_INNER_FWD_L);
-  rightServo.writeMicroseconds(ARC_OUTER_FWD_R);
+  setSpeed(ARC_INNER_FWD_L, ARC_OUTER_FWD_R);
 }
 
 void arcTurnRight() {
-  // 右轉時：左輪快(外側)，右輪慢(內側)
-  leftServo.writeMicroseconds(ARC_OUTER_FWD_L);
-  rightServo.writeMicroseconds(ARC_INNER_FWD_R);
+  setSpeed(ARC_OUTER_FWD_L, ARC_INNER_FWD_R);
+}
+
+// [新增] 後退弧線轉彎
+void arcTurnLeftBack() {
+  setSpeed(ARC_INNER_BCK_L, ARC_OUTER_BCK_R);
+}
+
+void arcTurnRightBack() {
+  setSpeed(ARC_OUTER_BCK_L, ARC_INNER_BCK_R);
 }
 
 // 處理接收到的指令
 void processCommand(char cmd) {
   lastCmdTime = millis();
   
-  // 避免重複刷新 Servo (節省 CPU)
   if (cmd == lastCmd) return;
   lastCmd = cmd;
   
@@ -93,10 +123,12 @@ void processCommand(char cmd) {
   switch (cmd) {
     case 'F': goForward(); break;
     case 'B': goBackward(); break;
-    case 'L': turnLeft(); break;       // 原地左轉
-    case 'R': turnRight(); break;      // 原地右轉
-    case 'Q': arcTurnLeft(); break;    // [新功能] 左前弧線
-    case 'E': arcTurnRight(); break;   // [新功能] 右前弧線
+    case 'L': turnLeft(); break;
+    case 'R': turnRight(); break;
+    case 'Q': arcTurnLeft(); break;       // W+A (前進左轉)
+    case 'E': arcTurnRight(); break;      // W+D (前進右轉)
+    case 'Z': arcTurnLeftBack(); break;   // S+A (後退左轉)
+    case 'C': arcTurnRightBack(); break;  // S+D (後退右轉)
     case 'S': stopCar(); break;
     default: stopCar(); break;
   }
@@ -139,18 +171,15 @@ void setup() {
   Serial.println("\n✓ Connected!");
   Serial.print("IP: "); Serial.println(WiFi.localIP());
 
-  // 啟動 mDNS
   if (MDNS.begin("boebot")) {
     Serial.println("mDNS started");
   }
 
-  // 啟動 UDP 監聽 (接收來自 PC 的指令)
   udp.begin(UDP_PORT);
   Serial.printf("UDP Listening on port %d\n", UDP_PORT);
 
   initEspNow();
   
-  // HTTP 備援控制
   server.on("/", [](){ server.send(200, "text/plain", "Car Ready"); });
   server.on("/cmd", [](){
     if(server.hasArg("act")) {
@@ -163,11 +192,10 @@ void setup() {
 }
 
 void loop() {
-  // 1. 處理 HTTP
   server.handleClient();
   MDNS.update();
   
-  // 2. 處理 UDP (最快)
+  // UDP 處理
   int packetSize = udp.parsePacket();
   if (packetSize) {
     char packetBuffer[255];
@@ -178,11 +206,16 @@ void loop() {
     }
   }
 
-  // 3. 安全機制：超時停車
+  // 平滑速度更新 (每次 loop 逐步接近目標)
+  smoothUpdate();
+
+  // 超時停車
   if (millis() - lastCmdTime > TIMEOUT_MS) {
     if (lastCmd != 'S') {
       stopCar();
       lastCmd = 'S';
     }
   }
+  
+  delay(10); // 100Hz 更新率
 }
