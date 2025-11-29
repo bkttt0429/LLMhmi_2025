@@ -25,10 +25,18 @@ const int RIGHT_PIN = 4; // D2
 const int STOP_VAL = 1500; 
 const int SPEED_FWD_L = 1700; 
 const int SPEED_BCK_L = 1300; 
-const int SPEED_FWD_R = 1300; 
-const int SPEED_BCK_R = 1700; 
+const int SPEED_FWD_R = 1300;
+const int SPEED_BCK_R = 1700;
 
 ESP8266WebServer server(80);
+
+// ============= 狀態追蹤 =============
+const unsigned long COMMAND_TIMEOUT_MS = 3000;      // 指令逾時 (毫秒)
+const unsigned long DUPLICATE_SUPPRESS_MS = 150;    // 同指令節流時間 (毫秒)
+unsigned long lastCommandReceivedMs = 0;            // 最後一次收到指令時間
+unsigned long lastCommandExecutedMs = 0;            // 最後一次執行指令時間
+char lastCommand = 'S';
+bool watchdogStopped = false;
 
 // ============= 動作邏輯 =============
 void stopCar() {
@@ -61,21 +69,40 @@ void turnRight() {
   Serial.println("RIGHT");
 }
 
-void processCommand(char cmd) {
+bool processCommand(char cmd) {
+  unsigned long now = millis();
+  lastCommandReceivedMs = now;
+  watchdogStopped = false;
+
+  bool isDuplicate = (cmd == lastCommand) && (now - lastCommandExecutedMs < DUPLICATE_SUPPRESS_MS);
+  if (isDuplicate) {
+    Serial.printf("[CMD] Skip duplicate %c (%lu ms since last)\n", cmd, now - lastCommandExecutedMs);
+    return false;
+  }
+
   switch (cmd) {
     case 'F': goForward(); break;
     case 'B': goBackward(); break;
     case 'L': turnLeft(); break;
     case 'R': turnRight(); break;
     case 'S': stopCar(); break;
-    default: break;
+    default: return false;
   }
+
+  lastCommand = cmd;
+  lastCommandExecutedMs = now;
+
+  Serial.printf("[CMD] Executed %c at %lu ms\n", cmd, now);
+  return true;
 }
 
 void onDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
   if (len == 0) return;
   char cmd = static_cast<char>(incomingData[0]);
-  processCommand(cmd);
+  bool ok = processCommand(cmd);
+  if (ok) {
+    Serial.printf("[ESPNOW] ACK %c\n", cmd);
+  }
 }
 
 void initEspNow() {
@@ -135,9 +162,12 @@ void handleRoot() {
 void handleCommand() {
   if (server.hasArg("act")) {
     char cmd = server.arg("act").charAt(0);
-    processCommand(cmd);
     uint16_t seq = server.hasArg("seq") ? server.arg("seq").toInt() : 0;
+    bool ok = processCommand(cmd);
     String ack = "ACK:" + String(seq) + ":" + String(cmd);
+    if (!ok) {
+      ack += ":IGNORED";
+    }
     server.send(200, "text/plain", ack);
   } else {
     server.send(400, "text/plain", "Bad Request");
@@ -178,6 +208,8 @@ void setup() {
   server.on("/", handleRoot);
   server.on("/cmd", handleCommand);
   server.begin();
+
+  lastCommandReceivedMs = millis();
 }
 
 void loop() {
@@ -188,4 +220,12 @@ void loop() {
   }
   server.handleClient();
   MDNS.update(); // 處理 mDNS 查詢
+
+  // 指令逾時自動煞停
+  unsigned long now = millis();
+  if (!watchdogStopped && (now - lastCommandReceivedMs > COMMAND_TIMEOUT_MS)) {
+    stopCar();
+    watchdogStopped = true;
+    Serial.printf("[WATCHDOG] No command for %lu ms, forced STOP\n", now - lastCommandReceivedMs);
+  }
 }
