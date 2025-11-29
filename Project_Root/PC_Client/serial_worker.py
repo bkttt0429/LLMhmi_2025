@@ -17,7 +17,16 @@ def prepare_sketch():
         if not os.path.exists(config.SKETCH_DIR):
             os.makedirs(config.SKETCH_DIR)
             print(f"[FLASH] Created directory: {config.SKETCH_DIR}")
-        
+
+        # 移除可能殘留的其他 .ino 檔案，以免 Arduino 將多個 sketch 合併編譯造成重複定義
+        for fname in os.listdir(config.SKETCH_DIR):
+            if fname.endswith(".ino") and fname != config.SKETCH_NAME:
+                try:
+                    os.remove(os.path.join(config.SKETCH_DIR, fname))
+                    print(f"[FLASH] Removed stale sketch: {fname}")
+                except Exception as e:
+                    return False, f"Failed to clean old sketch {fname}: {e}"
+
         # 複製 .ino 檔案
         target_ino = os.path.join(config.SKETCH_DIR, config.SKETCH_NAME)
         if os.path.exists(config.SOURCE_INO):
