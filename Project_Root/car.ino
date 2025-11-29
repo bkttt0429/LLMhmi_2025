@@ -2,11 +2,16 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h> // ⭐ 新增：讓你可以用網址連線
 #include <Servo.h>
+#include <espnow.h>
 
 
 // ============= 參數設定 =============
 const char* ssid     = "Bk";      // 請確認您的 WiFi 名稱
 const char* password = "........."; // 請確認您的 WiFi 密碼
+
+uint8_t controllerMac[] = {0x24, 0x6F, 0x28, 0xFF, 0xFF, 0xFF}; // 換成 ESP32-S3 的 MAC
+const uint8_t ESPNOW_CHANNEL = 0; // 0: 跟隨 WiFi 頻道
+bool espNowReady = false;
 
 // 定義伺服馬達物件
 Servo leftServo;
@@ -65,6 +70,33 @@ void processCommand(char cmd) {
     case 'S': stopCar(); break;
     default: break;
   }
+}
+
+void onDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
+  if (len == 0) return;
+  char cmd = static_cast<char>(incomingData[0]);
+  processCommand(cmd);
+}
+
+void initEspNow() {
+  if (esp_now_init() != 0) {
+    Serial.println("[ESPNOW] Init failed");
+    espNowReady = false;
+    return;
+  }
+
+  esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
+  esp_now_register_recv_cb(onDataRecv);
+
+  uint8_t channel = ESPNOW_CHANNEL == 0 ? WiFi.channel() : ESPNOW_CHANNEL;
+  if (esp_now_add_peer(controllerMac, ESP_NOW_ROLE_COMBO, channel, NULL, 0) != 0) {
+    Serial.println("[ESPNOW] Add peer failed");
+    espNowReady = false;
+    return;
+  }
+
+  espNowReady = true;
+  Serial.printf("[ESPNOW] Ready on channel %u\n", channel);
 }
 
 // ============= 網頁處理 =============
@@ -138,6 +170,8 @@ void setup() {
   if (MDNS.begin("boebot")) {
     Serial.println("mDNS responder started: http://boebot.local");
   }
+
+  initEspNow();
 
   server.on("/", handleRoot);
   server.on("/cmd", handleCommand);

@@ -456,6 +456,7 @@
         let sensorHistory = [];
         let socket;
         let wsConnected = false;
+        let lastLogs = [];
         
         // Canvas & Animation State
         const radarBlips = []; // { dist, angle, alpha, timestamp }
@@ -614,14 +615,18 @@
 
             // Logs
             if(data.logs) {
-                const box = document.getElementById('log-box');
-                box.innerHTML = "";
-                data.logs.forEach(l => {
-                    const d = document.createElement('div');
-                    d.innerText = l;
-                    box.appendChild(d);
-                });
-                box.scrollTop = box.scrollHeight;
+                const serialized = JSON.stringify(data.logs);
+                if (serialized !== JSON.stringify(lastLogs)) {
+                    lastLogs = data.logs.slice();
+                    const box = document.getElementById('log-box');
+                    box.innerHTML = "";
+                    data.logs.forEach(l => {
+                        const d = document.createElement('div');
+                        d.innerText = l;
+                        box.appendChild(d);
+                    });
+                    box.scrollTop = box.scrollHeight;
+                }
             }
         }
 
@@ -1011,7 +1016,7 @@
                 } catch (err) {
                     // ignore
                 }
-            }, 1000);
+            }, 300);
         }
 
         // === Firmware Flashing ===
