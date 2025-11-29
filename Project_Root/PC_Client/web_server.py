@@ -280,11 +280,7 @@ def handle_disconnect():
 @socketio.on('command')
 def handle_command(data):
     cmd = data.get('cmd')
-    if state.ser and state.ser.is_open:
-        try:
-            state.ser.write(cmd.encode())
-        except Exception as e:
-            print(f"Serial write failed: {e}")
+    send_serial_command(cmd, source="WS")
 
 @app.route('/api/status')
 def api_status():
@@ -296,6 +292,19 @@ def api_status():
         "logs": state.logs,
         "ai_status": state.ai_enabled
     })
+
+@app.route('/api/control', methods=['POST'])
+def api_control():
+    data = request.get_json(silent=True) or {}
+    cmd = (data.get('cmd') or '').strip()
+
+    if not cmd:
+        return jsonify({"status": "error", "msg": "Missing command"}), 400
+
+    success, msg = send_serial_command(cmd, source="API")
+    status = "ok" if success else "error"
+    code = 200 if success else 500
+    return jsonify({"status": status, "msg": msg, "cmd": cmd}), code
 
 @app.route('/api/flash', methods=['POST'])
 def api_flash():
@@ -419,3 +428,16 @@ if __name__ == '__main__':
     print("=" * 60)
 
     socketio.run(app, host=config.WEB_HOST, port=config.WEB_PORT, debug=False)
+# === 串口寫入輔助 ===
+def send_serial_command(cmd, source="HTTP"):
+    if not cmd:
+        return False, "Empty command"
+    if not state.ser or not state.ser.is_open:
+        add_log(f"[{source}] Serial unavailable")
+        return False, "Serial not ready"
+    try:
+        state.ser.write(cmd.encode())
+        return True, "Sent"
+    except Exception as e:
+        add_log(f"[{source}] Serial write failed: {e}")
+        return False, str(e)
