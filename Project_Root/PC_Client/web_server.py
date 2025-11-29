@@ -91,12 +91,18 @@ class XboxController:
             left_stick_y = 0.0
         button_a_pressed = self.joystick.get_button(BUTTON_A)
         button_b_pressed = self.joystick.get_button(BUTTON_B)
+        button_x_pressed = self.joystick.get_button(BUTTON_X)
+        button_y_pressed = self.joystick.get_button(BUTTON_Y)
+        stick_pressed = self.joystick.get_button(BUTTON_LEFT_STICK)
         hat_x, hat_y = self.joystick.get_hat(0)
         return {
             "left_stick_x": left_stick_x,
             "left_stick_y": -left_stick_y,
             "button_a": button_a_pressed,
             "button_b": button_b_pressed,
+            "button_x": button_x_pressed,
+            "button_y": button_y_pressed,
+            "stick_pressed": stick_pressed,
             "dpad_x": hat_x,
             "dpad_y": hat_y
         }
@@ -218,19 +224,23 @@ def serial_worker_thread():
                     line = state.ser.readline().decode(errors='ignore').strip()
                     if not line:
                         continue
-                        
+
+                    add_log(f"[SERIAL] {line}")
+
                     # 解析 IP 地址
-                    if "IP" in line and ("192." in line or "10." in line):
+                    if "IP" in line and ("192." in line or "10." in line or "172." in line):
                         ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', line)
                         if ip_match:
                             ip = ip_match.group()
-                            state.camera_ip = ip
-                            state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
-                            add_log(f"📹 Camera IP detected: {ip}")
+                            if state.camera_ip != ip:
+                                state.camera_ip = ip
+                                state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
+                                add_log(f"📹 Camera IP detected: {ip}")
+                                add_log(f"🎥 Stream URL updated: {state.video_url}")
                             # 如果還沒設定車子 IP，使用相同網段猜測
                             if not state.current_ip:
                                 add_log(f"💡 提示：請在 Settings 中設定車子的 IP 地址")
-                            
+
                     # 解析距離感測器數據
                     if "DIST:" in line:
                         try:
@@ -238,9 +248,7 @@ def serial_worker_thread():
                             state.radar_dist = float(parts[1].strip())
                         except:
                             pass
-                    elif "DIST" not in line:
-                        add_log(f"[ESP] {line}")
-                        
+
             except Exception as e:
                 print(f"[SERIAL] Read error: {e}")
                 if state.ser:
@@ -255,14 +263,37 @@ def xbox_controller_thread():
     if not controller.joystick:
         add_log("Xbox Controller not found.")
         return
-        
+
+    last_cmd = None
+    COMMAND_THRESHOLD = 0.4
+
     while state.is_running:
         controller_state = controller.get_input()
         if controller_state == "QUIT":
             state.is_running = False
             break
+
         if controller_state:
-            socketio.emit('controller_data', controller_state)
+            # 決定方向指令（優先判斷按鍵）
+            if controller_state.get("stick_pressed") or controller_state.get("button_x"):
+                cmd = "S"
+            else:
+                x = controller_state.get("left_stick_x", 0)
+                y = controller_state.get("left_stick_y", 0)
+                if abs(x) < COMMAND_THRESHOLD and abs(y) < COMMAND_THRESHOLD:
+                    cmd = "S"
+                elif abs(y) >= abs(x):
+                    cmd = "F" if y > 0 else "B"
+                else:
+                    cmd = "R" if x > 0 else "L"
+
+            if cmd != last_cmd:
+                send_serial_command(cmd, source="Xbox")
+                last_cmd = cmd
+
+            controller_state_with_cmd = dict(controller_state)
+            controller_state_with_cmd["cmd"] = cmd
+            socketio.emit('controller_data', controller_state_with_cmd)
         time.sleep(0.02)
         
     pygame.quit()
