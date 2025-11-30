@@ -396,9 +396,13 @@ def send_serial_command(cmd, source="HTTP"):
 
     return False, "Car unreachable"
 
-# === 影像串流執行緒（修復版）===
+"""
+修復版影像串流執行緒 - 完整容錯處理
+將此段替換到 web_server.py 的 video_stream_thread() 函數
+"""
+
 def video_stream_thread():
-    """專門負責從 ESP32 拉取影像的執行緒"""
+    """專門負責從 ESP32 拉取影像的執行緒 (防崩潰版)"""
     add_log("Video Stream Thread Started...")
     cap = None
     reader_thread = None
@@ -410,7 +414,10 @@ def video_stream_thread():
     candidate_index = 0
 
     def cleanup_capture():
+        """徹底清理 OpenCV 資源"""
         nonlocal cap, reader_thread, reader_stop_event, frame_queue
+        
+        # 1. 停止讀取執行緒
         if reader_stop_event:
             reader_stop_event.set()
         if reader_thread and reader_thread.is_alive():
@@ -418,72 +425,92 @@ def video_stream_thread():
         reader_thread = None
         reader_stop_event = None
         frame_queue = None
+        
+        # 2. 釋放 OpenCV 資源
         if cap:
-            cap.release()
+            try:
+                cap.release()
+            except:
+                pass
         cap = None
         state.stream_connected = False
+        add_log("[VIDEO] Cleanup completed")
 
     def start_frame_reader(current_cap):
+        """啟動獨立讀取執行緒 (隔離 OpenCV 崩潰)"""
         nonlocal reader_thread, reader_stop_event, frame_queue
         reader_stop_event = threading.Event()
         frame_queue = queue.Queue(maxsize=1)
 
         def _reader():
+            """讀取執行緒主邏輯"""
             while not reader_stop_event.is_set():
                 try:
+                    # ★ 關鍵: 使用 try-except 捕捉 OpenCV C++ 異常
                     success, frame = current_cap.read()
                 except cv2.error as e:
-                    add_log(f"[VIDEO] OpenCV crash detected: {e}")
-                    # 將失敗訊號放入佇列，讓外層立即重新啟動
+                    add_log(f"[VIDEO] OpenCV error: {e}")
+                    # 通知主執行緒立即重連
                     try:
                         frame_queue.put_nowait((False, None, time.time()))
                     except queue.Full:
                         pass
                     break
                 except Exception as e:
-                    add_log(f"[VIDEO] Reader exception: {e}")
+                    add_log(f"[VIDEO] Reader crash: {e}")
                     try:
                         frame_queue.put_nowait((False, None, time.time()))
                     except queue.Full:
                         pass
                     break
 
+                # 丟棄舊幀,只保留最新
                 if frame_queue.full():
                     try:
                         frame_queue.get_nowait()
                     except queue.Empty:
                         pass
+                
                 timestamp = time.time()
                 try:
                     frame_queue.put_nowait((success, frame, timestamp))
                 except queue.Full:
                     pass
+                
                 if not success:
                     time.sleep(0.05)
 
         reader_thread = threading.Thread(target=_reader, daemon=True)
         reader_thread.start()
+        add_log("[VIDEO] Reader thread started")
 
     while state.is_running:
+        # === 階段1: 取得串流候選清單 ===
         candidates = _get_stream_candidates()
+        
+        # ★ 修復: 過濾掉 .local 主機名
+        candidates = [(h, u) for h, u in candidates 
+                     if h and not h.endswith('.local') and _is_valid_ip(h)]
+        
         if not state.video_url and candidates:
             for idx, (host, url) in enumerate(candidates):
                 if not _is_host_resolvable(host):
                     continue
                 candidate_index = idx
                 state.camera_ip, state.video_url = host, url
-                add_log(f"[VIDEO] Priming stream target {state.video_url}")
+                add_log(f"[VIDEO] Priming stream: {state.video_url}")
                 break
 
-        # 檢查是否有可用的串流 URL
+        # 若無可用 URL,等待 Serial Worker 偵測
         if not state.video_url:
-            time.sleep(1)
+            add_log("[VIDEO] Waiting for camera IP...")
+            time.sleep(2)
             continue
 
-        # 嘗試連接串流
+        # === 階段2: 建立串流連線 ===
         if cap is None or not cap.isOpened():
             if retry_count >= max_retries:
-                add_log(f"[VIDEO] Max retries reached for {state.video_url}, rotating host...")
+                add_log(f"[VIDEO] Max retries, rotating host...")
                 if candidates:
                     tried = 0
                     while tried < len(candidates):
@@ -500,32 +527,24 @@ def video_stream_thread():
                 retry_count = 0
                 continue
 
-            add_log(f"[VIDEO] Connecting to {state.video_url} (attempt {retry_count + 1})")
+            add_log(f"[VIDEO] Connecting (attempt {retry_count + 1}/{max_retries})...")
             try:
-                cap = cv2.VideoCapture(state.video_url)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 減少緩衝延遲
-                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-
-                # 嘗試設定 FFmpeg 逾時（若可用）
-                open_timeout_prop = getattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC", None)
-                read_timeout_prop = getattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC", None)
-                if open_timeout_prop is not None:
-                    cap.set(open_timeout_prop, 3000)
-                if read_timeout_prop is not None:
-                    cap.set(read_timeout_prop, 3000)
-                if open_timeout_prop is None or read_timeout_prop is None:
-                    add_log("[VIDEO] FFmpeg timeout props not available, enabling watchdog reader")
-                else:
-                    add_log("[VIDEO] FFmpeg timeouts configured (open/read = 3000 ms)")
+                # 使用 FFMPEG 後端 (較穩定)
+                cap = cv2.VideoCapture(state.video_url, cv2.CAP_FFMPEG)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                
+                # 設定逾時 (需 OpenCV 4.5+)
+                if hasattr(cv2, 'CAP_PROP_OPEN_TIMEOUT_MSEC'):
+                    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+                if hasattr(cv2, 'CAP_PROP_READ_TIMEOUT_MSEC'):
+                    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
 
                 if cap.isOpened():
-                    add_log("[VIDEO] Stream connected!")
+                    add_log("[VIDEO] ✅ Stream connected!")
                     state.stream_connected = True
                     retry_count = 0
-                    host_from_url = state.video_url.split("//")[-1].split("/")[0].split(":")[0]
-                    if host_from_url:
-                        state.camera_ip = host_from_url
-
+                    
+                    # 啟動獨立讀取執行緒
                     start_frame_reader(cap)
                     last_success_time = time.time()
                 else:
@@ -534,6 +553,7 @@ def video_stream_thread():
                     retry_count += 1
                     time.sleep(2)
                     continue
+                    
             except Exception as e:
                 add_log(f"[VIDEO] Connection error: {e}")
                 cleanup_capture()
@@ -541,57 +561,61 @@ def video_stream_thread():
                 time.sleep(2)
                 continue
 
-        # 讀取影像
+        # === 階段3: 讀取影像 ===
         try:
+            # 檢查讀取執行緒是否還活著
             if frame_queue is None or (reader_thread and not reader_thread.is_alive()):
-                add_log("[VIDEO] Reader stopped unexpectedly, forcing reconnect...")
+                add_log("[VIDEO] Reader died, forcing reconnect...")
                 cleanup_capture()
                 retry_count += 1
                 time.sleep(1)
                 continue
 
+            # 從佇列取得最新幀 (帶逾時)
             try:
                 success, frame, frame_ts = frame_queue.get(timeout=0.5)
             except queue.Empty:
+                # Watchdog: 若超過 3 秒沒收到幀,強制重連
                 if time.time() - last_success_time > 3:
-                    add_log("[VIDEO] Read watchdog timeout (blocking read), reconnecting...")
+                    add_log("[VIDEO] Watchdog timeout, reconnecting...")
                     cleanup_capture()
                     retry_count += 1
                 continue
 
-            if success:
+            if success and frame is not None:
                 last_success_time = frame_ts
                 retry_count = 0
 
-                # AI 處理
+                # AI 處理 (可選)
                 if state.ai_enabled and state.detector and state.detector.enabled:
                     try:
                         result = state.detector.detect(frame)
                         if isinstance(result, tuple) and len(result) == 3:
                             frame, detections, control_cmd = result
                     except Exception as e:
-                        add_log(f"[AI] Processing error: {e}")
+                        add_log(f"[AI] Error: {e}")
 
                 # 儲存到緩衝區
                 with state.frame_lock:
                     state.frame_buffer = frame.copy()
 
             else:
+                # 讀取失敗,檢查是否逾時
                 if time.time() - last_success_time > 3:
-                    add_log("[VIDEO] Read watchdog timeout (no frames), reconnecting...")
+                    add_log("[VIDEO] Read timeout, reconnecting...")
                     cleanup_capture()
                     retry_count += 1
                 time.sleep(0.1)
 
         except Exception as e:
-            add_log(f"[VIDEO] Read error: {e}")
+            add_log(f"[VIDEO] Loop error: {e}")
             cleanup_capture()
             retry_count += 1
             time.sleep(1)
 
+    # 清理並退出
     cleanup_capture()
     add_log("Video Stream Thread Stopped")
-
 def generate_frames():
     """Flask 串流產生器（從緩衝區讀取）"""
     no_signal_frame = None

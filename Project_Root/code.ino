@@ -127,7 +127,7 @@ bool init_camera() {
     s->set_exposure_ctrl(s, 1);
     s->set_aec2(s, 0);
     s->set_gain_ctrl(s, 1);
-    s->set_agc(s, 0);
+    //s->set_agc(s, 0);
     s->set_wpc(s, 1);
     s->set_raw_gma(s, 1);
     s->set_lenc(s, 1);
@@ -272,35 +272,120 @@ void setup() {
   Serial.println("系統就緒！畫面 3 秒內自動出現");
 }
 
+// ============= 在 loop() 中替換串流邏輯 =============
 void loop() {
   server.handleClient();
 
-  // 串流主邏輯
-  if (streamActive && streamClient.connected()) {
+  // ★ 串流主邏輯 (防崩潰版)
+  if (streamActive) {
+    // 檢查客戶端是否還連線
+    if (!streamClient || !streamClient.connected()) {
+      streamActive = false;
+      if (streamClient) {
+        streamClient.stop();
+      }
+      Serial.println("[STREAM] Client disconnected");
+      return;
+    }
+
     unsigned long now = millis();
     if (now - lastStreamFrame >= TARGET_FPS_INTERVAL_MS) {
       lastStreamFrame = now;
+      
       camera_fb_t *fb = esp_camera_fb_get();
-      if (fb) {
-        streamClient.printf("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n", fb->len);
-        streamClient.write(fb->buf, fb->len);
-        streamClient.print("\r\n");
-        esp_camera_fb_return(fb);
+      
+      // ★ 防呆: 檢查 framebuffer 有效性
+      if (!fb) {
+        Serial.println("[STREAM] Frame capture failed");
+        return;
       }
+      
+      if (fb->len == 0 || fb->buf == NULL) {
+        Serial.println("[STREAM] Invalid frame");
+        esp_camera_fb_return(fb);
+        return;
+      }
+
+      // ★ 發送 MIME header
+      streamClient.printf("--frame\r\n");
+      streamClient.printf("Content-Type: image/jpeg\r\n");
+      streamClient.printf("Content-Length: %u\r\n\r\n", fb->len);
+      
+      // ★ 分段傳輸 (防止緩衝區溢出)
+      size_t sent = 0;
+      const size_t chunk_size = 1024;  // 每次傳 1KB
+      bool send_success = true;
+      
+      while (sent < fb->len && streamClient.connected()) {
+        size_t to_send = min(chunk_size, fb->len - sent);
+        size_t written = streamClient.write(fb->buf + sent, to_send);
+        
+        if (written != to_send) {
+          Serial.println("[STREAM] Send failed");
+          send_success = false;
+          break;
+        }
+        sent += written;
+      }
+      
+      if (send_success) {
+        streamClient.print("\r\n");
+      } else {
+        // 傳輸失敗,關閉串流
+        streamActive = false;
+        streamClient.stop();
+        Serial.println("[STREAM] Transmission error, closing");
+      }
+      
+      esp_camera_fb_return(fb);
     }
-  } else if (streamActive) {
-    streamActive = false;
-    Serial.println("[STREAM] Client 斷線");
   }
 
-  // 超聲波
+  // 超聲波邏輯保持不變
   static unsigned long lastDist = 0;
   if (millis() - lastDist > 200) {
     lastDist = millis();
     float d = get_distance();
-    if (d > 2 && d < 400) Serial.printf("DIST:%.1f\n", d);
+    if (d > 2 && d < 400) {
+      Serial.printf("DIST:%.1f\n", d);
+    }
   }
 
-  // 持續廣播 IP（每 1 秒 UDP + 每 8 秒 Serial）
+  // UDP 廣播 IP (每 1 秒)
   announce_ip();
+}
+
+// ============= 補充: handle_stream 也需要加強 =============
+void handle_stream() {
+  // 如果已有客戶端在串流,先關閉舊的
+  if (streamActive && streamClient) {
+    streamClient.stop();
+    streamActive = false;
+    Serial.println("[STREAM] Closing old client");
+    delay(100);  // 給時間清理
+  }
+  
+  streamClient = server.client();
+  
+  if (!streamClient || !streamClient.connected()) {
+    Serial.println("[STREAM] Client connection failed");
+    return;
+  }
+  
+  // 設定 TCP 參數
+  streamClient.setNoDelay(true);  // 禁用 Nagle 演算法
+  streamClient.setTimeout(3000);  // 3 秒逾時
+  
+  // 發送 HTTP header
+  streamClient.println("HTTP/1.1 200 OK");
+  streamClient.println("Content-Type: multipart/x-mixed-replace; boundary=frame");
+  streamClient.println("Access-Control-Allow-Origin: *");
+  streamClient.println("Connection: close");
+  streamClient.println();
+  
+  streamActive = true;
+  lastStreamFrame = millis();
+  
+  Serial.printf("[STREAM] Client connected from %s\n", 
+                streamClient.remoteIP().toString().c_str());
 }
