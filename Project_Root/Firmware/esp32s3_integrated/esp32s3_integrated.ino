@@ -7,7 +7,7 @@
  *   [Camera]     (Standard ESP32-S3-CAM)
  *   [Ultrasonic] GPIO 21
  *   [Servo Left] GPIO 14
- *   [Servo Right] GPIO 2
+ *   [Servo Right] GPIO 2 (or 47 depending on board)
  *   [LED]        GPIO 48
  *
  * Network:
@@ -20,7 +20,6 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <WebServer.h>
-#include <ESP32Servo.h>
 
 // ============= WiFi AP Settings =============
 const char* ssid_ap     = "ESP32_Car";
@@ -53,7 +52,14 @@ IPAddress subnet(255, 255, 255, 0);
 // ============= Hardware Pins (Peripherals) =============
 #define US_SIG_PIN        21
 #define SERVO_LEFT_PIN    14
-#define SERVO_RIGHT_PIN   2
+#define SERVO_RIGHT_PIN   2   // Change to 47 if needed
+
+// ============= PWM Settings (No Library) =============
+// Use high channels to avoid conflict with Camera (usually uses Ch 0/1)
+#define PWM_FREQ          50
+#define PWM_RES           16   // 16-bit resolution (0-65535)
+#define LEFT_CHANNEL      2
+#define RIGHT_CHANNEL     3
 
 // ============= Globals =============
 WebServer server(80); // Combined server on Port 80
@@ -63,12 +69,8 @@ bool streamActive = false;
 unsigned long lastStreamFrame = 0;
 const uint16_t TARGET_FPS_INTERVAL_MS = 40;  // ~25 FPS
 
-// ============= Servo / Motor Globals =============
-Servo leftServo;
-Servo rightServo;
-
 const int STOP_VAL = 1500;
-// Speed Constants (From esp8266_car.ino)
+// Speed Constants
 const int SPEED_FWD_L = 1700;
 const int SPEED_BCK_L = 1300;
 const int SPEED_FWD_R = 1300;
@@ -96,12 +98,13 @@ unsigned long lastCmdTime = 0;
 const unsigned long CMD_TIMEOUT_MS = 2000;
 
 // ============= Function Declarations =============
-void init_camera();
+bool init_camera();      // Fixed return type
 void init_ultrasonic();
 float get_distance();
 void init_servos();
 void setSpeed(int l, int r);
 void stopCar();
+void writeServo(int channel, int us);
 
 // ============= Ultrasonic =============
 void init_ultrasonic() {
@@ -122,21 +125,33 @@ float get_distance() {
   return duration * 0.034 / 2.0;
 }
 
-// ============= Servo Logic =============
+// ============= Servo Logic (Native LEDC) =============
+void writeServo(int channel, int us) {
+  // 50Hz = 20ms = 20000us
+  // Resolution 16-bit = 65536 steps
+  // Duty = (us / 20000) * 65536
+  uint32_t duty = (us * 65536) / 20000;
+  ledcWrite(channel, duty);
+}
+
 void init_servos() {
-    // Allow allocation of timers (Skip Timer 0 which is used by Camera)
-    ESP32Servo::allocateTimer(1);
-    ESP32Servo::allocateTimer(2);
-    ESP32Servo::allocateTimer(3);
+    // Setup PWM channels
+    // Note: ledcSetup is for ESP32 Arduino Core v2.x.
+    // If using v3.x, APIs changed (ledcAttach).
+    // We try to support v2.x as it's most common for Camera examples.
 
-    leftServo.setPeriodHertz(50);
-    rightServo.setPeriodHertz(50);
-
-    leftServo.attach(SERVO_LEFT_PIN, 500, 2400);
-    rightServo.attach(SERVO_RIGHT_PIN, 500, 2400);
+    #if ESP_ARDUINO_VERSION_MAJOR >= 3
+      ledcAttach(SERVO_LEFT_PIN, PWM_FREQ, PWM_RES);
+      ledcAttach(SERVO_RIGHT_PIN, PWM_FREQ, PWM_RES);
+    #else
+      ledcSetup(LEFT_CHANNEL, PWM_FREQ, PWM_RES);
+      ledcSetup(RIGHT_CHANNEL, PWM_FREQ, PWM_RES);
+      ledcAttachPin(SERVO_LEFT_PIN, LEFT_CHANNEL);
+      ledcAttachPin(SERVO_RIGHT_PIN, RIGHT_CHANNEL);
+    #endif
 
     stopCar();
-    Serial.println("[OK] Servos Init");
+    Serial.println("[OK] Servos Init (Native PWM)");
 }
 
 void setSpeed(int leftTarget, int rightTarget) {
@@ -157,8 +172,26 @@ void smoothUpdate() {
   if (currentRightSpeed < targetRightSpeed) currentRightSpeed = min(currentRightSpeed + SMOOTH_STEP, targetRightSpeed);
   else if (currentRightSpeed > targetRightSpeed) currentRightSpeed = max(currentRightSpeed - SMOOTH_STEP, targetRightSpeed);
 
-  leftServo.writeMicroseconds(currentLeftSpeed);
-  rightServo.writeMicroseconds(currentRightSpeed);
+  // Update Motor Hardware
+  #if ESP_ARDUINO_VERSION_MAJOR >= 3
+    // For v3, ledcWrite takes pin, not channel? No, usually ledcWrite(pin, duty)
+    // Actually v3 API: ledcWrite(pin, duty).
+    // We need to check if user is on v3. For safety, we abstracted `writeServo` but implementation differs.
+    // Let's implement writeServo logic inline or separate.
+
+    // Actually, ledcWrite in v3 takes (pin, value). In v2 it takes (channel, value).
+    // This makes helper tricky. Let's do this:
+
+    uint32_t dutyL = (currentLeftSpeed * 65536) / 20000;
+    uint32_t dutyR = (currentRightSpeed * 65536) / 20000;
+
+    ledcWrite(SERVO_LEFT_PIN, dutyL);
+    ledcWrite(SERVO_RIGHT_PIN, dutyR);
+
+  #else
+    writeServo(LEFT_CHANNEL, currentLeftSpeed);
+    writeServo(RIGHT_CHANNEL, currentRightSpeed);
+  #endif
 }
 
 void processCommand(String cmd) {
@@ -196,7 +229,7 @@ void processCommand(String cmd) {
 // ============= Camera Logic =============
 bool init_camera() {
   camera_config_t config;
-  config.ledc_channel = LEDC_CHANNEL_0; // Careful, Servo uses timers too. ESP32Servo usually manages this.
+  config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer   = LEDC_TIMER_0;
   config.pin_d0 = Y2_GPIO_NUM;
   config.pin_d1 = Y3_GPIO_NUM;
