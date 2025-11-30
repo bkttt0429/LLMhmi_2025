@@ -100,13 +100,13 @@ bool init_camera() {
   if (psramFound()) {
     config.frame_size = FRAMESIZE_VGA;
     config.jpeg_quality = 20;
-    config.fb_count = 2;
+    config.fb_count = 2;  // 雙緩衝，穩定又低延遲
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_LATEST;
   } else {
     config.frame_size = FRAMESIZE_QVGA;
     config.jpeg_quality = 20;
-    config.fb_count = 1;
+    config.fb_count = 2;  // 維持雙緩衝，避免撕裂
     config.fb_location = CAMERA_FB_IN_DRAM;
   }
 
@@ -266,7 +266,7 @@ void setup() {
   // 閃三下表示準備好
   for (int i = 0; i < 3; i++) {
     digitalWrite(LED_PIN, HIGH); delay(100);
-    digitalWrite(LED_PIN, LOW);  delay(delay(100);
+    digitalWrite(LED_PIN, LOW);  delay(100);
   }
 
   Serial.println("系統就緒！畫面 3 秒內自動出現");

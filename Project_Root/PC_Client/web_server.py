@@ -432,21 +432,34 @@ def video_stream_thread():
             while not reader_stop_event.is_set():
                 try:
                     success, frame = current_cap.read()
-                    if frame_queue.full():
-                        try:
-                            frame_queue.get_nowait()
-                        except queue.Empty:
-                            pass
-                    timestamp = time.time()
+                except cv2.error as e:
+                    add_log(f"[VIDEO] OpenCV crash detected: {e}")
+                    # 將失敗訊號放入佇列，讓外層立即重新啟動
                     try:
-                        frame_queue.put_nowait((success, frame, timestamp))
+                        frame_queue.put_nowait((False, None, time.time()))
                     except queue.Full:
                         pass
-                    if not success:
-                        time.sleep(0.05)
+                    break
                 except Exception as e:
                     add_log(f"[VIDEO] Reader exception: {e}")
+                    try:
+                        frame_queue.put_nowait((False, None, time.time()))
+                    except queue.Full:
+                        pass
                     break
+
+                if frame_queue.full():
+                    try:
+                        frame_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                timestamp = time.time()
+                try:
+                    frame_queue.put_nowait((success, frame, timestamp))
+                except queue.Full:
+                    pass
+                if not success:
+                    time.sleep(0.05)
 
         reader_thread = threading.Thread(target=_reader, daemon=True)
         reader_thread.start()
@@ -530,8 +543,8 @@ def video_stream_thread():
 
         # 讀取影像
         try:
-            if frame_queue is None:
-                add_log("[VIDEO] Reader not initialized, forcing reconnect...")
+            if frame_queue is None or (reader_thread and not reader_thread.is_alive()):
+                add_log("[VIDEO] Reader stopped unexpectedly, forcing reconnect...")
                 cleanup_capture()
                 retry_count += 1
                 time.sleep(1)
