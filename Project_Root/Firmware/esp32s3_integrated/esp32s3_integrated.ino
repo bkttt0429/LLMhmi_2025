@@ -1,13 +1,10 @@
 /**
- * ESP32-S3 Integrated Firmware (Camera + Car Control)
+ * ESP32-S3 Integrated Firmware (Camera + Proxy to ESP8266)
  * Hardware: ESP32-S3 (e.g., N16R8)
- * Mode: AP Mode (Single Chip Solution)
+ * Mode: AP Mode (Proxy)
  *
  * Pinout:
  *   [Camera]     (Standard ESP32-S3-CAM)
- *   [Ultrasonic] GPIO 21
- *   [Servo Left] GPIO 14
- *   [Servo Right] GPIO 2 (or 47 depending on board)
  *   [LED]        GPIO 48
  *
  * Network:
@@ -49,26 +46,31 @@ IPAddress subnet(255, 255, 255, 0);
 #define PCLK_GPIO_NUM     13
 #define LED_PIN           48
 
-// ============= Hardware Pins (Peripherals) =============
-#define US_SIG_PIN        21
-#define SERVO_LEFT_PIN    14
-#define SERVO_RIGHT_PIN   2   // Change to 47 if needed
+// ============= Hardware Pins (Peripherals - Commented Out) =============
+//#define US_SIG_PIN        21
+//#define SERVO_LEFT_PIN    14
+//#define SERVO_RIGHT_PIN   2   // Change to 47 if needed
 
-// ============= PWM Settings (No Library) =============
-// Use high channels to avoid conflict with Camera (usually uses Ch 0/1)
-#define PWM_FREQ          50
-#define PWM_RES           16   // 16-bit resolution (0-65535)
-#define LEFT_CHANNEL      2
-#define RIGHT_CHANNEL     3
+// ============= PWM Settings (No Library - Commented Out) =============
+//#define PWM_FREQ          50
+//#define PWM_RES           16   // 16-bit resolution (0-65535)
+//#define LEFT_CHANNEL      2
+//#define RIGHT_CHANNEL     3
 
 // ============= Globals =============
 WebServer server(80); // Combined server on Port 80
 WiFiClient streamClient;
+WiFiUDP udp;
+
+const uint16_t UDP_CMD_PORT = 4210;   // Send to Car
+const uint16_t UDP_DIST_PORT = 4211;  // Listen from Car
+const char* CAR_BROADCAST_IP = "192.168.4.255";
 
 bool streamActive = false;
 unsigned long lastStreamFrame = 0;
 const uint16_t TARGET_FPS_INTERVAL_MS = 40;  // ~25 FPS
 
+/*
 const int STOP_VAL = 1500;
 // Speed Constants
 const int SPEED_FWD_L = 1700;
@@ -96,17 +98,21 @@ const int SMOOTH_STEP = 20;
 
 unsigned long lastCmdTime = 0;
 const unsigned long CMD_TIMEOUT_MS = 2000;
+*/
+
+float lastDistance = 0.0;
 
 // ============= Function Declarations =============
 bool init_camera();      // Fixed return type
-void init_ultrasonic();
-float get_distance();
-void init_servos();
-void setSpeed(int l, int r);
-void stopCar();
-void writeServo(int channel, int us);
+//void init_ultrasonic();
+//float get_distance();
+//void init_servos();
+//void setSpeed(int l, int r);
+//void stopCar();
+//void writeServo(int channel, int us);
 
-// ============= Ultrasonic =============
+// ============= Ultrasonic (Commented Out) =============
+/*
 void init_ultrasonic() {
   pinMode(US_SIG_PIN, INPUT_PULLDOWN);
   Serial.println("[OK] Ultrasonic Init");
@@ -124,8 +130,10 @@ float get_distance() {
   if (duration == 0) return -1.0;
   return duration * 0.034 / 2.0;
 }
+*/
 
-// ============= Servo Logic (Native LEDC) =============
+// ============= Servo Logic (Native LEDC - Commented Out) =============
+/*
 void writeServo(int channel, int us) {
   // 50Hz = 20ms = 20000us
   // Resolution 16-bit = 65536 steps
@@ -193,11 +201,21 @@ void smoothUpdate() {
     writeServo(RIGHT_CHANNEL, currentRightSpeed);
   #endif
 }
+*/
+
+void sendUdpCommand(String cmd) {
+  udp.beginPacket(CAR_BROADCAST_IP, UDP_CMD_PORT);
+  udp.print(cmd);
+  udp.endPacket();
+}
 
 void processCommand(String cmd) {
   if (cmd.length() == 0) return;
-  Serial.println("CMD: " + cmd);
+  Serial.println("CMD Proxy: " + cmd);
 
+  sendUdpCommand(cmd);
+
+  /*
   // New format: v{left}:{right}
   if (cmd.startsWith("v") || cmd.startsWith("V")) {
     int sep = cmd.indexOf(':');
@@ -224,6 +242,7 @@ void processCommand(String cmd) {
     case 'S': stopCar(); break;
     default: stopCar(); break;
   }
+  */
 }
 
 // ============= Camera Logic =============
@@ -304,7 +323,8 @@ void handle_cmd() {
 }
 
 void handle_dist() {
-  float d = get_distance();
+  // float d = get_distance();
+  float d = lastDistance;
   server.send(200, "text/plain", String(d));
 }
 
@@ -317,7 +337,7 @@ void handle_light() {
 }
 
 void handle_root() {
-  server.send(200, "text/html", "<h1>ESP32-S3 Integrated (AP Mode)</h1><p>Stream: /stream</p><p>CMD: /cmd?act=F</p>");
+  server.send(200, "text/html", "<h1>ESP32-S3 Proxy (AP Mode)</h1><p>Stream: /stream</p><p>CMD: /cmd?act=F (Proxied to UDP)</p>");
 }
 
 // ============= Setup =============
@@ -325,8 +345,8 @@ void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
 
-  init_ultrasonic();
-  init_servos();
+  //init_ultrasonic();
+  //init_servos();
 
   if (!init_camera()) {
     Serial.println("Camera Init Failed");
@@ -338,6 +358,9 @@ void setup() {
   WiFi.softAP(ssid_ap, password_ap);
 
   Serial.print("AP IP: "); Serial.println(WiFi.softAPIP());
+
+  udp.begin(UDP_DIST_PORT); // Listen for distance
+  Serial.printf("UDP Listening on port %d for Distance\n", UDP_DIST_PORT);
 
   server.on("/", handle_root);
   server.on("/stream", handle_stream);
@@ -353,11 +376,24 @@ void setup() {
 // ============= Loop =============
 void loop() {
   server.handleClient();
-  smoothUpdate(); // Update servos
+  //smoothUpdate(); // Update servos (Removed)
 
+  /*
   // Auto-stop safety
   if (millis() - lastCmdTime > CMD_TIMEOUT_MS && (targetLeftSpeed != STOP_VAL || targetRightSpeed != STOP_VAL)) {
     stopCar();
+  }
+  */
+
+  // Listen for Distance updates via UDP
+  int packetSize = udp.parsePacket();
+  if (packetSize) {
+     char buff[32];
+     int len = udp.read(buff, 31);
+     if (len > 0) {
+       buff[len] = 0;
+       lastDistance = atof(buff);
+     }
   }
 
   // Stream logic
