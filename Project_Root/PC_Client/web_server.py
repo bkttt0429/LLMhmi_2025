@@ -34,6 +34,22 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 BRIDGE_CACHE_FILE = Path(BASE_DIR) / ".last_bridge_host"
 
+
+def _unique_hosts(hosts):
+    seen = set()
+    ordered = []
+    for host in hosts:
+        if host and host not in seen:
+            ordered.append(host)
+            seen.add(host)
+    return ordered
+
+
+def _build_stream_url(host: str | None):
+    if not host:
+        return ""
+    return f"http://{host}:{config.DEFAULT_STREAM_PORT}/stream"
+
 def _load_cached_bridge_host():
     try:
         content = BRIDGE_CACHE_FILE.read_text(encoding="utf-8").strip()
@@ -55,22 +71,29 @@ def _persist_bridge_host(host: str):
 class SystemState:
     def __init__(self):
         cached_bridge = _load_cached_bridge_host()
+        default_stream_hosts = getattr(config, "DEFAULT_STREAM_HOSTS", [])
+        default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
+
         self.car_ip = getattr(config, "DEFAULT_CAR_IP", "boebot.local")
         self.current_ip = self.car_ip
-        self.bridge_ip = cached_bridge or getattr(config, "DEFAULT_STREAM_IP", "") or getattr(config, "DEFAULT_CAR_IP", "")
-        self.camera_ip = ""
+        self.bridge_ip = cached_bridge or default_stream_ip or getattr(config, "DEFAULT_CAR_IP", "")
+
+        self.stream_hosts = _unique_hosts([
+            cached_bridge,
+            default_stream_ip,
+            *default_stream_hosts,
+            self.bridge_ip,
+        ])
+
+        self.camera_ip = self.stream_hosts[0] if self.stream_hosts else ""
         self.serial_port = None
         self.preferred_port = None
         self.ser = None
         self.ws_connected = False
-        
+
         # 初始化影像串流 URL（修復）
-        default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
-        if default_stream_ip:
-            self.video_url = f"http://{default_stream_ip}:{config.DEFAULT_STREAM_PORT}/stream"
-        else:
-            self.video_url = ""
-            
+        self.video_url = _build_stream_url(self.camera_ip)
+
         self.radar_dist = 0.0
         self.logs = []
         self.is_running = True
@@ -202,6 +225,21 @@ def _build_ws_url(host: str | None = None):
     if not host:
         return None
     return f"ws://{host}:82/ws"
+
+
+def _get_stream_candidates():
+    defaults = getattr(config, "DEFAULT_STREAM_HOSTS", [])
+    default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
+
+    hosts = _unique_hosts([
+        state.camera_ip,
+        state.bridge_ip,
+        default_stream_ip,
+        *defaults,
+        *getattr(state, "stream_hosts", []),
+    ])
+    return [(host, _build_stream_url(host)) for host in hosts if host]
+
 
 def _is_host_resolvable(host: str) -> bool:
     if not host:
@@ -339,21 +377,44 @@ def video_stream_thread():
     retry_count = 0
     max_retries = 3
     last_success_time = 0
-    
+    candidate_index = 0
+
     while state.is_running:
+        candidates = _get_stream_candidates()
+        if not state.video_url and candidates:
+            for idx, (host, url) in enumerate(candidates):
+                if not _is_host_resolvable(host):
+                    continue
+                candidate_index = idx
+                state.camera_ip, state.video_url = host, url
+                add_log(f"[VIDEO] Priming stream target {state.video_url}")
+                break
+
         # 檢查是否有可用的串流 URL
         if not state.video_url:
             time.sleep(1)
             continue
-            
+
         # 嘗試連接串流
         if cap is None or not cap.isOpened():
             if retry_count >= max_retries:
-                add_log(f"[VIDEO] Max retries reached for {state.video_url}, waiting 5s...")
-                time.sleep(5)
+                add_log(f"[VIDEO] Max retries reached for {state.video_url}, rotating host...")
+                if candidates:
+                    tried = 0
+                    while tried < len(candidates):
+                        candidate_index = (candidate_index + 1) % len(candidates)
+                        next_host, next_url = candidates[candidate_index]
+                        tried += 1
+                        if not _is_host_resolvable(next_host):
+                            continue
+                        state.camera_ip = next_host
+                        state.video_url = next_url
+                        add_log(f"[VIDEO] Switching to {state.video_url}")
+                        break
+                time.sleep(2)
                 retry_count = 0
                 continue
-                
+
             add_log(f"[VIDEO] Connecting to {state.video_url} (attempt {retry_count + 1})")
             try:
                 cap = cv2.VideoCapture(state.video_url)
@@ -364,6 +425,9 @@ def video_stream_thread():
                     add_log("[VIDEO] Stream connected!")
                     state.stream_connected = True
                     retry_count = 0
+                    host_from_url = state.video_url.split("//")[-1].split("/")[0].split(":")[0]
+                    if host_from_url:
+                        state.camera_ip = host_from_url
                 else:
                     add_log("[VIDEO] Failed to open stream")
                     cap = None
