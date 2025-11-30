@@ -263,27 +263,6 @@ def _is_valid_ip(host: str) -> bool:
     parts = host.split('.')
     return all(0 <= int(p) <= 255 for p in parts)
 
-
-def _apply_camera_ip(ip: str, stream_url: str | None = None, log_prefix: str = ""):
-    if not _is_valid_ip(ip):
-        return
-
-    stream_url = stream_url or f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
-
-    if state.camera_ip != ip:
-        state.camera_ip = ip
-        state.video_url = stream_url
-        add_log(f"{log_prefix}📹 Camera IP detected: {ip}")
-        add_log(f"{log_prefix}🎥 Stream URL: {stream_url}")
-    elif state.video_url != stream_url:
-        state.video_url = stream_url
-        add_log(f"{log_prefix}🎥 Stream URL: {stream_url}")
-
-    if not state.bridge_ip or state.bridge_ip.endswith('.local') or state.bridge_ip != ip:
-        state.bridge_ip = ip
-        _persist_bridge_host(ip)
-        add_log(f"{log_prefix}🔄 Bridge host updated to {ip}")
-
 def websocket_bridge_thread():
     add_log("WebSocket Bridge Thread Started...")
     last_unresolved_log = 0.0
@@ -414,12 +393,14 @@ def video_stream_thread():
     candidate_index = 0
 
     while state.is_running:
-        candidates = [(h, u) for h, u in _get_stream_candidates() if _is_valid_ip(h)]
+        candidates = _get_stream_candidates()
         if not state.video_url and candidates:
             for idx, (host, url) in enumerate(candidates):
+                if not _is_host_resolvable(host):
+                    continue
                 candidate_index = idx
                 state.camera_ip, state.video_url = host, url
-                add_log(f"[VIDEO] Using IP stream target {state.video_url}")
+                add_log(f"[VIDEO] Priming stream target {state.video_url}")
                 break
 
         # 檢查是否有可用的串流 URL
@@ -437,7 +418,7 @@ def video_stream_thread():
                         candidate_index = (candidate_index + 1) % len(candidates)
                         next_host, next_url = candidates[candidate_index]
                         tried += 1
-                        if not _is_valid_ip(next_host):
+                        if not _is_host_resolvable(next_host):
                             continue
                         state.camera_ip = next_host
                         state.video_url = next_url
@@ -645,7 +626,16 @@ def serial_worker_thread():
                     ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', line)
                     if ip_match and _is_valid_ip(ip_match.group()):
                         ip = ip_match.group()
-                        _apply_camera_ip(ip)
+                        if state.camera_ip != ip:
+                            state.camera_ip = ip
+                            state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
+                            add_log(f"📹 Camera IP detected: {ip}")
+                            add_log(f"🎥 Stream URL: {state.video_url}")
+
+                        if not state.bridge_ip or state.bridge_ip.endswith('.local') or state.bridge_ip != ip:
+                            state.bridge_ip = ip
+                            _persist_bridge_host(ip)
+                            add_log(f"🔄 Bridge host updated to {ip}")
 
                     # 解析距離
                     if "DIST:" in line:
