@@ -665,6 +665,31 @@ def udp_discovery_thread():
 
         _apply_camera_ip(ip, stream_url, "[UDP] ")
 
+def status_push_thread():
+    """Background thread to push system status via WebSocket"""
+    add_log("Status Push Thread Started...")
+    while state.is_running:
+        try:
+            status_data = {
+                "ip": state.current_ip,
+                "car_ip": state.car_ip,
+                "bridge_ip": state.bridge_ip,
+                "camera_ip": state.camera_ip,
+                "video_url": state.video_url,
+                "port": state.serial_port or "DISCONNECTED",
+                "preferred_port": state.preferred_port,
+                "dist": state.radar_dist,
+                "logs": state.logs[-30:],
+                "ws_connected": state.ws_connected,
+                "stream_connected": state.stream_connected,
+                "ai_status": state.ai_enabled
+            }
+            socketio.emit('status_update', status_data)
+        except Exception as e:
+            print(f"[STATUS] Push error: {e}")
+
+        time.sleep(2)  # Push every 2 seconds
+
 def serial_worker_thread():
     add_log("Serial Worker Started...")
     while state.is_running:
@@ -887,6 +912,7 @@ if __name__ == '__main__':
     threading.Thread(target=xbox_controller_thread, daemon=True).start()
     threading.Thread(target=websocket_bridge_thread, daemon=True).start()
     threading.Thread(target=video_stream_thread, daemon=True).start()
+    threading.Thread(target=status_push_thread, daemon=True).start()
 
     print("=" * 60)
     print(f"🚀 Web Server: http://127.0.0.1:{config.WEB_PORT}")
