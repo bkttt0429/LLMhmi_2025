@@ -269,6 +269,7 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                      <button onclick="toggleAI()" id="ai-toggle-btn" class="btn-cy py-2 rounded text-xs sm:text-sm">ACTIVATE AI HUD</button>
                      <button onclick="exportLogs()" class="btn-cy py-2 rounded text-xs sm:text-sm">EXPORT SYSTEM LOGS</button>
+                     <button onclick="showNetInfo()" class="btn-cy py-2 rounded text-xs sm:text-sm text-blue-300 border-blue-500">SHOW NET INFO</button>
                 </div>
             </div>
             
@@ -504,6 +505,39 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url; a.download = 'system_logs.txt'; a.click();
+        }
+
+        async function showNetInfo() {
+            try {
+                const res = await fetch('/netinfo');
+                const data = await res.json();
+                let msg = "=== NETWORK INTERFACES ===\n\n";
+
+                if(data.camera_net) {
+                    msg += `[CAMERA NET] (ESP32)\nName: ${data.camera_net.name}\nIP: ${data.camera_net.ip}\nMAC: ${data.camera_net.mac}\n\n`;
+                } else {
+                    msg += `[CAMERA NET] Not Detected\n\n`;
+                }
+
+                if(data.internet_net) {
+                    msg += `[INTERNET/CAR NET]\nName: ${data.internet_net.name}\nIP: ${data.internet_net.ip}\nMAC: ${data.internet_net.mac}\n\n`;
+                } else {
+                    msg += `[INTERNET/CAR NET] Not Detected\n\n`;
+                }
+
+                msg += "--- Other Interfaces ---\n";
+                data.all_ifaces.forEach(iface => {
+                    if ((!data.camera_net || iface.name !== data.camera_net.name) &&
+                        (!data.internet_net || iface.name !== data.internet_net.name)) {
+                        msg += `${iface.name}: ${iface.ip}\n`;
+                    }
+                });
+
+                alert(msg);
+                log("Network Info retrieved.");
+            } catch(e) {
+                alert("Failed to fetch network info");
+            }
         }
 
         function switchView(view) {
