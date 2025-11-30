@@ -250,6 +250,18 @@ def _is_host_resolvable(host: str) -> bool:
     except socket.gaierror:
         return False
 
+
+def _is_valid_ip(host: str) -> bool:
+    if not host:
+        return False
+    if host.endswith('.local'):
+        return False
+    pattern = r'^(?:\d{1,3}\.){3}\d{1,3}$'
+    if not re.match(pattern, host):
+        return False
+    parts = host.split('.')
+    return all(0 <= int(p) <= 255 for p in parts)
+
 def websocket_bridge_thread():
     add_log("WebSocket Bridge Thread Started...")
     last_unresolved_log = 0.0
@@ -570,18 +582,19 @@ def serial_worker_thread():
                         continue
 
                     # 解析 IP
-                    if ("IP:" in line or "Stream" in line) and ("192." in line or "10." in line or "172." in line):
-                        ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', line)
-                        if ip_match:
-                            ip = ip_match.group()
-                            if state.camera_ip != ip:
-                                state.camera_ip = ip
-                                state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
-                                add_log(f"📹 Camera IP detected: {ip}")
-                                add_log(f"🎥 Stream URL: {state.video_url}")
-                                if not state.bridge_ip:
-                                    state.bridge_ip = ip
-                                    _persist_bridge_host(ip)
+                    ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', line)
+                    if ip_match and _is_valid_ip(ip_match.group()):
+                        ip = ip_match.group()
+                        if state.camera_ip != ip:
+                            state.camera_ip = ip
+                            state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
+                            add_log(f"📹 Camera IP detected: {ip}")
+                            add_log(f"🎥 Stream URL: {state.video_url}")
+
+                        if not state.bridge_ip or state.bridge_ip.endswith('.local') or state.bridge_ip != ip:
+                            state.bridge_ip = ip
+                            _persist_bridge_host(ip)
+                            add_log(f"🔄 Bridge host updated to {ip}")
 
                     # 解析距離
                     if "DIST:" in line:
