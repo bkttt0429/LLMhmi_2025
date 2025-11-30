@@ -3,6 +3,7 @@ import os
 # ========= 系統參數 =========
 # ESP32-S3 CAM 串流的預設 Port
 DEFAULT_STREAM_PORT = 81
+CAMERA_DISCOVERY_PORT = 4211
 
 # ========= 🚗 車子控制設定 (ESP8266) =========
 # 方法 1: 使用 mDNS（推薦，如果網路支援）

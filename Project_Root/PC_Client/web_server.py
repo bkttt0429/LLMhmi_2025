@@ -34,6 +34,22 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 BRIDGE_CACHE_FILE = Path(BASE_DIR) / ".last_bridge_host"
 
+
+def _unique_hosts(hosts):
+    seen = set()
+    ordered = []
+    for host in hosts:
+        if host and host not in seen:
+            ordered.append(host)
+            seen.add(host)
+    return ordered
+
+
+def _build_stream_url(host: str | None):
+    if not host:
+        return ""
+    return f"http://{host}:{config.DEFAULT_STREAM_PORT}/stream"
+
 def _load_cached_bridge_host():
     try:
         content = BRIDGE_CACHE_FILE.read_text(encoding="utf-8").strip()
@@ -55,22 +71,45 @@ def _persist_bridge_host(host: str):
 class SystemState:
     def __init__(self):
         cached_bridge = _load_cached_bridge_host()
+        default_stream_hosts = getattr(config, "DEFAULT_STREAM_HOSTS", [])
+        default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
+
+        def _init_valid_ip(host: str) -> bool:
+            if not host or host.endswith(".local"):
+                return False
+            pattern = r"^(?:\d{1,3}\.){3}\d{1,3}$"
+            if not re.match(pattern, host):
+                return False
+            parts = host.split(".")
+            return all(0 <= int(p) <= 255 for p in parts)
+
         self.car_ip = getattr(config, "DEFAULT_CAR_IP", "boebot.local")
         self.current_ip = self.car_ip
-        self.bridge_ip = cached_bridge or getattr(config, "DEFAULT_STREAM_IP", "") or getattr(config, "DEFAULT_CAR_IP", "")
-        self.camera_ip = ""
+        self.bridge_ip = next(
+            (
+                ip
+                for ip in [cached_bridge, default_stream_ip, getattr(config, "DEFAULT_CAR_IP", "")]
+                if _init_valid_ip(ip)
+            ),
+            "",
+        )
+
+        self.stream_hosts = _unique_hosts([
+            cached_bridge,
+            default_stream_ip,
+            *default_stream_hosts,
+            self.bridge_ip,
+        ])
+
+        self.camera_ip = next((ip for ip in self.stream_hosts if _init_valid_ip(ip)), "")
         self.serial_port = None
         self.preferred_port = None
         self.ser = None
         self.ws_connected = False
-        
+
         # 初始化影像串流 URL（修復）
-        default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
-        if default_stream_ip:
-            self.video_url = f"http://{default_stream_ip}:{config.DEFAULT_STREAM_PORT}/stream"
-        else:
-            self.video_url = ""
-            
+        self.video_url = _build_stream_url(self.camera_ip) if self.camera_ip else ""
+
         self.radar_dist = 0.0
         self.logs = []
         self.is_running = True
@@ -89,6 +128,7 @@ state = SystemState()
 ws_outbox: "SimpleQueue[str]" = SimpleQueue()
 browser_controller_state = {"data": None, "timestamp": 0.0}
 UDP_PORT = 4210
+CAMERA_DISCOVERY_PORT = getattr(config, "CAMERA_DISCOVERY_PORT", 4211)
 udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 udp_sock.settimeout(0.3)
 
@@ -203,6 +243,21 @@ def _build_ws_url(host: str | None = None):
         return None
     return f"ws://{host}:82/ws"
 
+
+def _get_stream_candidates():
+    defaults = getattr(config, "DEFAULT_STREAM_HOSTS", [])
+    default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
+
+    hosts = _unique_hosts([
+        state.camera_ip,
+        state.bridge_ip,
+        default_stream_ip,
+        *defaults,
+        *getattr(state, "stream_hosts", []),
+    ])
+    return [(host, _build_stream_url(host)) for host in hosts if host]
+
+
 def _is_host_resolvable(host: str) -> bool:
     if not host:
         return False
@@ -212,25 +267,68 @@ def _is_host_resolvable(host: str) -> bool:
     except socket.gaierror:
         return False
 
+
+def _is_valid_ip(host: str) -> bool:
+    if not host:
+        return False
+    if host.endswith('.local'):
+        return False
+    pattern = r'^(?:\d{1,3}\.){3}\d{1,3}$'
+    if not re.match(pattern, host):
+        return False
+    parts = host.split('.')
+    return all(0 <= int(p) <= 255 for p in parts)
+
+
+def _extract_host_from_url(url: str | None) -> str:
+    if not url:
+        return ""
+    without_proto = url.split("//", 1)[-1]
+    host_part = without_proto.split("/")[0]
+    return host_part.split(":")[0]
+
+
+def _apply_camera_ip(ip: str, stream_url: str | None = None, log_prefix: str = ""):
+    if not _is_valid_ip(ip):
+        return
+
+    stream_url = stream_url or f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
+
+    if state.camera_ip != ip:
+        state.camera_ip = ip
+        state.video_url = stream_url
+        add_log(f"{log_prefix}📹 Camera IP detected: {ip}")
+        add_log(f"{log_prefix}🎥 Stream URL: {stream_url}")
+    elif state.video_url != stream_url:
+        state.video_url = stream_url
+        add_log(f"{log_prefix}🎥 Stream URL: {stream_url}")
+
+    if not state.bridge_ip or state.bridge_ip.endswith('.local') or state.bridge_ip != ip:
+        state.bridge_ip = ip
+        _persist_bridge_host(ip)
+        add_log(f"{log_prefix}🔄 Bridge host updated to {ip}")
+
 def websocket_bridge_thread():
     add_log("WebSocket Bridge Thread Started...")
     last_unresolved_log = 0.0
     default_host = getattr(config, "DEFAULT_CAR_IP", "boebot.local")
     while state.is_running:
-        candidates = [state.bridge_ip, state.camera_ip, state.current_ip]
-        host = next((h for h in candidates if h), None)
-        url = _build_ws_url(host)
-        if not host or not url:
+        base_candidates = [state.bridge_ip, state.camera_ip, state.current_ip]
+        stream_hosts = [h for h, _ in _get_stream_candidates()]
+        candidates = _unique_hosts([h for h in (*base_candidates, *stream_hosts) if h])
+
+        host = next((h for h in candidates if _is_valid_ip(h) or _is_host_resolvable(h)), None)
+        if not host:
             state.ws_connected = False
             time.sleep(0.5)
             continue
 
-        if not _is_host_resolvable(host):
-            alternative = next((h for h in candidates if h and h != host and _is_host_resolvable(h)), None)
-            if alternative:
-                host = alternative
-                url = _build_ws_url(host)
-            
+        url = _build_ws_url(host)
+        if not url:
+            state.ws_connected = False
+            time.sleep(0.5)
+            continue
+
         if not _is_host_resolvable(host):
             now = time.time()
             if host == default_host:
@@ -339,21 +437,47 @@ def video_stream_thread():
     retry_count = 0
     max_retries = 3
     last_success_time = 0
-    
+    candidate_index = 0
+
     while state.is_running:
+        current_host = _extract_host_from_url(state.video_url)
+        if state.video_url and not _is_valid_ip(current_host):
+            add_log(f"[VIDEO] Clearing unresolved host target: {current_host}")
+            state.video_url = ""
+
+        candidates = [(h, u) for h, u in _get_stream_candidates() if _is_valid_ip(h)]
+        if not state.video_url and candidates:
+            for idx, (host, url) in enumerate(candidates):
+                candidate_index = idx
+                state.camera_ip, state.video_url = host, url
+                add_log(f"[VIDEO] Using IP stream target {state.video_url}")
+                break
+
         # 檢查是否有可用的串流 URL
         if not state.video_url:
             time.sleep(1)
             continue
-            
+
         # 嘗試連接串流
         if cap is None or not cap.isOpened():
             if retry_count >= max_retries:
-                add_log(f"[VIDEO] Max retries reached for {state.video_url}, waiting 5s...")
-                time.sleep(5)
+                add_log(f"[VIDEO] Max retries reached for {state.video_url}, rotating host...")
+                if candidates:
+                    tried = 0
+                    while tried < len(candidates):
+                        candidate_index = (candidate_index + 1) % len(candidates)
+                        next_host, next_url = candidates[candidate_index]
+                        tried += 1
+                        if not _is_valid_ip(next_host):
+                            continue
+                        state.camera_ip = next_host
+                        state.video_url = next_url
+                        add_log(f"[VIDEO] Switching to {state.video_url}")
+                        break
+                time.sleep(2)
                 retry_count = 0
                 continue
-                
+
             add_log(f"[VIDEO] Connecting to {state.video_url} (attempt {retry_count + 1})")
             try:
                 cap = cv2.VideoCapture(state.video_url)
@@ -364,6 +488,9 @@ def video_stream_thread():
                     add_log("[VIDEO] Stream connected!")
                     state.stream_connected = True
                     retry_count = 0
+                    host_from_url = state.video_url.split("//")[-1].split("/")[0].split(":")[0]
+                    if host_from_url:
+                        state.camera_ip = host_from_url
                 else:
                     add_log("[VIDEO] Failed to open stream")
                     cap = None
@@ -456,11 +583,51 @@ def create_no_signal_frame():
     """建立 NO SIGNAL 畫面"""
     import numpy as np
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    cv2.putText(frame, "NO SIGNAL", (180, 240), 
+    cv2.putText(frame, "NO SIGNAL", (180, 240),
                 cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
-    cv2.putText(frame, "Check ESP32-S3 Camera", (140, 300), 
+    cv2.putText(frame, "Check ESP32-S3 Camera", (140, 300),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
     return frame
+
+
+def udp_discovery_thread():
+    add_log("UDP Discovery Thread Started...")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("", CAMERA_DISCOVERY_PORT))
+    except Exception as e:
+        add_log(f"[UDP DISCOVERY] Bind failed: {e}")
+        return
+
+    sock.settimeout(1.0)
+
+    while state.is_running:
+        try:
+            data, addr = sock.recvfrom(1024)
+        except socket.timeout:
+            continue
+        except Exception as e:
+            add_log(f"[UDP DISCOVERY] Error: {e}")
+            time.sleep(1)
+            continue
+
+        message = data.decode(errors="ignore")
+        ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', message)
+        if not ip_match:
+            continue
+
+        ip = ip_match.group()
+        if not _is_valid_ip(ip):
+            continue
+
+        stream_url = None
+        stream_match = re.search(r'STREAM:([^;\s]+)', message)
+        if stream_match:
+            stream_url = stream_match.group(1).strip()
+
+        _apply_camera_ip(ip, stream_url, "[UDP] ")
+
 
 # === Serial Worker Thread ===
 def serial_worker_thread():
@@ -506,18 +673,10 @@ def serial_worker_thread():
                         continue
 
                     # 解析 IP
-                    if ("IP:" in line or "Stream" in line) and ("192." in line or "10." in line or "172." in line):
-                        ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', line)
-                        if ip_match:
-                            ip = ip_match.group()
-                            if state.camera_ip != ip:
-                                state.camera_ip = ip
-                                state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
-                                add_log(f"📹 Camera IP detected: {ip}")
-                                add_log(f"🎥 Stream URL: {state.video_url}")
-                                if not state.bridge_ip:
-                                    state.bridge_ip = ip
-                                    _persist_bridge_host(ip)
+                    ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', line)
+                    if ip_match and _is_valid_ip(ip_match.group()):
+                        ip = ip_match.group()
+                        _apply_camera_ip(ip)
 
                     # 解析距離
                     if "DIST:" in line:
@@ -702,6 +861,7 @@ def api_set_ip():
 if __name__ == '__main__':
     # 啟動所有執行緒
     threading.Thread(target=serial_worker_thread, daemon=True).start()
+    threading.Thread(target=udp_discovery_thread, daemon=True).start()
     threading.Thread(target=xbox_controller_thread, daemon=True).start()
     threading.Thread(target=websocket_bridge_thread, daemon=True).start()
     threading.Thread(target=video_stream_thread, daemon=True).start()  # 新增影像執行緒
