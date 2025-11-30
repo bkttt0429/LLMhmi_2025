@@ -47,7 +47,7 @@ WiFiUDP udp;
 unsigned long lastCmdTime = 0;
 const unsigned long TIMEOUT_MS = 2000;
 const uint16_t UDP_PORT = 4210;
-char lastCmd = '\0';
+String lastCmd = "";
 
 // ============= 平滑速度更新 =============
 void smoothUpdate() {
@@ -112,15 +112,34 @@ void arcTurnRightBack() {
 }
 
 // 處理接收到的指令
-void processCommand(char cmd) {
+void processCommand(const String& cmd) {
+  if (cmd.length() == 0) return;
+
   lastCmdTime = millis();
-  
+
   if (cmd == lastCmd) return;
   lastCmd = cmd;
-  
-  Serial.printf("[CMD] Recv: %c\n", cmd);
-  
-  switch (cmd) {
+
+  // 新格式：v{left}:{right}
+  if (cmd.charAt(0) == 'v' || cmd.charAt(0) == 'V') {
+    int separator = cmd.indexOf(':');
+    if (separator > 1) {
+      int leftVal = cmd.substring(1, separator).toInt();
+      int rightVal = cmd.substring(separator + 1).toInt();
+
+      leftVal = constrain(leftVal, 1000, 2000);
+      rightVal = constrain(rightVal, 1000, 2000);
+
+      Serial.printf("[CMD] PWM L:%d R:%d\n", leftVal, rightVal);
+      setSpeed(leftVal, rightVal);
+      return;
+    }
+  }
+
+  char c = cmd.charAt(0);
+  Serial.printf("[CMD] Recv: %c\n", c);
+
+  switch (c) {
     case 'F': goForward(); break;
     case 'B': goBackward(); break;
     case 'L': turnLeft(); break;
@@ -137,7 +156,8 @@ void processCommand(char cmd) {
 // ESP-NOW 接收回調
 void onDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
   if (len > 0) {
-    processCommand((char)incomingData[0]);
+    String cmd = String((char*)incomingData).substring(0, len);
+    processCommand(cmd);
   }
 }
 
@@ -183,7 +203,7 @@ void setup() {
   server.on("/", [](){ server.send(200, "text/plain", "Car Ready"); });
   server.on("/cmd", [](){
     if(server.hasArg("act")) {
-      char cmd = server.arg("act").charAt(0);
+      String cmd = server.arg("act");
       processCommand(cmd);
       server.send(200, "text/plain", "OK");
     } else server.send(400, "text/plain", "Bad Request");
@@ -202,7 +222,7 @@ void loop() {
     int len = udp.read(packetBuffer, 255);
     if (len > 0) {
       packetBuffer[len] = 0;
-      processCommand(packetBuffer[0]);
+      processCommand(String(packetBuffer));
     }
   }
 
@@ -211,9 +231,9 @@ void loop() {
 
   // 超時停車
   if (millis() - lastCmdTime > TIMEOUT_MS) {
-    if (lastCmd != 'S') {
+    if (lastCmd != "S") {
       stopCar();
-      lastCmd = 'S';
+      lastCmd = "S";
     }
   }
   
