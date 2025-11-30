@@ -268,20 +268,22 @@ def websocket_bridge_thread():
     last_unresolved_log = 0.0
     default_host = getattr(config, "DEFAULT_CAR_IP", "boebot.local")
     while state.is_running:
-        candidates = [state.bridge_ip, state.camera_ip, state.current_ip]
-        host = next((h for h in candidates if h), None)
-        url = _build_ws_url(host)
-        if not host or not url:
+        base_candidates = [state.bridge_ip, state.camera_ip, state.current_ip]
+        stream_hosts = [h for h, _ in _get_stream_candidates()]
+        candidates = _unique_hosts([h for h in (*base_candidates, *stream_hosts) if h])
+
+        host = next((h for h in candidates if _is_valid_ip(h) or _is_host_resolvable(h)), None)
+        if not host:
             state.ws_connected = False
             time.sleep(0.5)
             continue
 
-        if not _is_host_resolvable(host):
-            alternative = next((h for h in candidates if h and h != host and _is_host_resolvable(h)), None)
-            if alternative:
-                host = alternative
-                url = _build_ws_url(host)
-            
+        url = _build_ws_url(host)
+        if not url:
+            state.ws_connected = False
+            time.sleep(0.5)
+            continue
+
         if not _is_host_resolvable(host):
             now = time.time()
             if host == default_host:
