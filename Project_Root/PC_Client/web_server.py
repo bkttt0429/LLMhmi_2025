@@ -112,6 +112,7 @@ state = SystemState()
 ws_outbox: "SimpleQueue[str]" = SimpleQueue()
 browser_controller_state = {"data": None, "timestamp": 0.0}
 UDP_PORT = 4210
+CAMERA_DISCOVERY_PORT = getattr(config, "CAMERA_DISCOVERY_PORT", 4211)
 udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 udp_sock.settimeout(0.3)
 
@@ -532,11 +533,51 @@ def create_no_signal_frame():
     """建立 NO SIGNAL 畫面"""
     import numpy as np
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    cv2.putText(frame, "NO SIGNAL", (180, 240), 
+    cv2.putText(frame, "NO SIGNAL", (180, 240),
                 cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
-    cv2.putText(frame, "Check ESP32-S3 Camera", (140, 300), 
+    cv2.putText(frame, "Check ESP32-S3 Camera", (140, 300),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
     return frame
+
+
+def udp_discovery_thread():
+    add_log("UDP Discovery Thread Started...")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("", CAMERA_DISCOVERY_PORT))
+    except Exception as e:
+        add_log(f"[UDP DISCOVERY] Bind failed: {e}")
+        return
+
+    sock.settimeout(1.0)
+
+    while state.is_running:
+        try:
+            data, addr = sock.recvfrom(1024)
+        except socket.timeout:
+            continue
+        except Exception as e:
+            add_log(f"[UDP DISCOVERY] Error: {e}")
+            time.sleep(1)
+            continue
+
+        message = data.decode(errors="ignore")
+        ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', message)
+        if not ip_match:
+            continue
+
+        ip = ip_match.group()
+        if not _is_valid_ip(ip):
+            continue
+
+        stream_url = None
+        stream_match = re.search(r'STREAM:([^;\s]+)', message)
+        if stream_match:
+            stream_url = stream_match.group(1).strip()
+
+        _apply_camera_ip(ip, stream_url, "[UDP] ")
+
 
 # === Serial Worker Thread ===
 def serial_worker_thread():
@@ -779,6 +820,7 @@ def api_set_ip():
 if __name__ == '__main__':
     # 啟動所有執行緒
     threading.Thread(target=serial_worker_thread, daemon=True).start()
+    threading.Thread(target=udp_discovery_thread, daemon=True).start()
     threading.Thread(target=xbox_controller_thread, daemon=True).start()
     threading.Thread(target=websocket_bridge_thread, daemon=True).start()
     threading.Thread(target=video_stream_thread, daemon=True).start()  # 新增影像執行緒

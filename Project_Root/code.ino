@@ -5,6 +5,7 @@
 
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <WebServer.h>
 #include <esp_now.h>
 
@@ -35,10 +36,16 @@ const char* password = ".........";
 // ============= 全域變數 =============
 WebServer server(81);
 WiFiClient streamClient;
+WiFiUDP udp;
 bool streamActive = false;
 unsigned long lastStreamFrame = 0;
 const uint16_t TARGET_FPS_INTERVAL_MS = 50; // 20 FPS
 uint8_t car_mac[6] = {0}; // 車子的 MAC 地址
+const uint16_t IP_BROADCAST_PORT = 4211;
+unsigned long lastIPSerialBroadcast = 0;
+unsigned long lastIPUdpBroadcast = 0;
+unsigned long lastReconnectAttempt = 0;
+bool wifiWasConnected = false;
 
 // ============= 超聲波 =============
 void init_ultrasonic() {
@@ -231,6 +238,36 @@ void handle_light() {
   }
 }
 
+void broadcast_ip_udp() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  IPAddress broadcastIp(255, 255, 255, 255);
+  udp.beginPacket(broadcastIp, IP_BROADCAST_PORT);
+  udp.print("ESP32S3CAM_IP:");
+  udp.print(WiFi.localIP().toString());
+  udp.print(";STREAM:http://");
+  udp.print(WiFi.localIP().toString());
+  udp.print(":81/stream");
+  udp.endPacket();
+}
+
+void announce_ip(bool force = false) {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  unsigned long now = millis();
+
+  if (force || now - lastIPSerialBroadcast >= 5000) {
+    lastIPSerialBroadcast = now;
+    Serial.printf("IP:%s\n", WiFi.localIP().toString().c_str());
+    Serial.printf("📹 Stream URL: http://%s:81/stream\n", WiFi.localIP().toString().c_str());
+  }
+
+  if (force || now - lastIPUdpBroadcast >= 5000) {
+    lastIPUdpBroadcast = now;
+    broadcast_ip_udp();
+  }
+}
+
 // ============= Setup & Loop =============
 void setup() {
   Serial.begin(115200);
@@ -276,6 +313,9 @@ void setup() {
   Serial.printf("📡 IP Address: %s\n", WiFi.localIP().toString().c_str());
   Serial.printf("📡 MAC Address: %s\n", WiFi.macAddress().c_str());
   Serial.printf("📹 Stream URL: http://%s:81/stream\n", WiFi.localIP().toString().c_str());
+  udp.begin(IP_BROADCAST_PORT);
+  announce_ip(true);
+  wifiWasConnected = true;
 
   // 初始化 ESP-NOW（用於與車子通訊）
   if (esp_now_init() == ESP_OK) {
@@ -305,6 +345,39 @@ void setup() {
 
 void loop() {
   server.handleClient();
+
+  // WiFi 健康檢查與重連
+  if (WiFi.status() != WL_CONNECTED) {
+    if (wifiWasConnected) {
+      wifiWasConnected = false;
+      if (streamActive) {
+        streamActive = false;
+        streamClient.stop();
+      }
+      Serial.println("[WiFi] Connection lost, reconnecting...");
+    }
+
+    unsigned long now = millis();
+    if (now - lastReconnectAttempt >= 2000) {
+      lastReconnectAttempt = now;
+      WiFi.disconnect();
+      WiFi.begin(ssid, password);
+      Serial.println("[WiFi] Reconnect attempt...");
+    }
+
+    // 快速閃爍 LED 提示離線狀態
+    digitalWrite(LED_PIN, (millis() / 200) % 2);
+  } else if (!wifiWasConnected) {
+    wifiWasConnected = true;
+    digitalWrite(LED_PIN, LOW);
+    udp.begin(IP_BROADCAST_PORT);
+    Serial.println("[WiFi] Reconnected");
+    Serial.printf("📡 IP Address: %s\n", WiFi.localIP().toString().c_str());
+    Serial.printf("📹 Stream URL: http://%s:81/stream\n", WiFi.localIP().toString().c_str());
+    announce_ip(true);
+  } else {
+    digitalWrite(LED_PIN, LOW);
+  }
 
   // 處理串流
   if (streamActive) {
@@ -351,10 +424,6 @@ void loop() {
     }
   }
 
-  // 定期廣播 IP（方便 PC 端自動偵測）
-  static unsigned long lastIPBroadcast = 0;
-  if (millis() - lastIPBroadcast >= 5000) {
-    lastIPBroadcast = millis();
-    Serial.printf("IP:%s\n", WiFi.localIP().toString().c_str());
-  }
+  // 定期廣播 IP（串列 + UDP）
+  announce_ip();
 }
