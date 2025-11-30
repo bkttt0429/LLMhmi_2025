@@ -6,6 +6,7 @@ import threading
 import re
 import socket
 import math
+import psutil  # Added for NIC detection
 from pathlib import Path
 import queue
 import requests
@@ -35,6 +36,54 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 BRIDGE_CACHE_FILE = Path(BASE_DIR) / ".last_bridge_host"
 
+# === 雙網卡自動偵測邏輯 ===
+def get_network_info():
+    """偵測所有網卡並自動分類為 Camera Net 或 Internet Net"""
+    info = {
+        "all_ifaces": [],
+        "camera_net": None,
+        "internet_net": None
+    }
+
+    try:
+        # 取得所有網卡狀態
+        stats = psutil.net_if_stats()
+        # 取得所有網卡位址
+        addrs = psutil.net_if_addrs()
+
+        for iface_name, iface_addrs in addrs.items():
+            # 過濾未啟用網卡
+            if iface_name in stats and not stats[iface_name].isup:
+                continue
+
+            ip_info = None
+            mac_info = None
+
+            for addr in iface_addrs:
+                if addr.family == socket.AF_INET:
+                    ip_info = addr.address
+                elif addr.family == psutil.AF_LINK:
+                    mac_info = addr.address
+
+            if ip_info and ip_info != "127.0.0.1":
+                iface_data = {
+                    "name": iface_name,
+                    "ip": ip_info,
+                    "mac": mac_info
+                }
+                info["all_ifaces"].append(iface_data)
+
+                # 分類規則
+                if ip_info.startswith("192.168.4."):
+                    if info["camera_net"] is None: # 優先選第一個
+                        info["camera_net"] = iface_data
+                elif info["internet_net"] is None: # 非 192.168.4.x 的第一個視為 Internet/Car Net
+                    info["internet_net"] = iface_data
+
+    except Exception as e:
+        print(f"[NET] Detection Error: {e}")
+
+    return info
 
 def _unique_hosts(hosts):
     seen = set()
@@ -82,28 +131,48 @@ def _persist_bridge_host(host: str):
 # === 全域狀態 ===
 class SystemState:
     def __init__(self):
+        # 1. 執行網卡偵測
+        self.net_info = get_network_info()
+        self.print_network_summary()
+
         cached_bridge = _load_cached_bridge_host()
         default_stream_hosts = getattr(config, "DEFAULT_STREAM_HOSTS", [])
         default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
 
+        # 2. 自動設定 IP
+        # 預設 Camera IP: 若有偵測到 camera_net，假設相機為 192.168.4.1
+        # 若無，則使用設定檔或快取
+        if self.net_info["camera_net"]:
+            self.camera_ip = "192.168.4.1"
+            print(f"[INIT] Auto-selected Camera IP: {self.camera_ip} (via {self.net_info['camera_net']['name']})")
+        else:
+            self.camera_ip = getattr(config, "DEFAULT_STREAM_IP", "") or \
+                             (cached_bridge if cached_bridge else "")
+
+        # 車子 IP 設定
         self.car_ip = getattr(config, "DEFAULT_CAR_IP", "boebot.local")
         self.current_ip = self.car_ip
+
         self.bridge_ip = cached_bridge or default_stream_ip or getattr(config, "DEFAULT_CAR_IP", "")
 
         self.stream_hosts = _unique_hosts([
+            self.camera_ip, # 優先
             cached_bridge,
             default_stream_ip,
             *default_stream_hosts,
             self.bridge_ip,
         ])
 
-        self.camera_ip = self.stream_hosts[0] if self.stream_hosts else ""
+        # 確保 camera_ip 有值
+        if not self.camera_ip and self.stream_hosts:
+            self.camera_ip = self.stream_hosts[0]
+
         self.serial_port = None
         self.preferred_port = None
         self.ser = None
         self.ws_connected = False
 
-        # 初始化影像串流 URL（修復）
+        # 初始化影像串流 URL
         self.video_url = _build_stream_url(self.camera_ip)
 
         self.radar_dist = 0.0
@@ -119,6 +188,29 @@ class SystemState:
         self.frame_buffer = None
         self.frame_lock = threading.Lock()
         self.stream_connected = False
+
+    def print_network_summary(self):
+        print("="*60)
+        print("🌐 Network Interface Detection Summary")
+        print("-" * 30)
+        if self.net_info['camera_net']:
+            n = self.net_info['camera_net']
+            print(f"📷 CAMERA NET  : {n['name']} | {n['ip']} | {n['mac']}")
+        else:
+            print("📷 CAMERA NET  : Not Detected (Is WiFi connected to ESP32CAM?)")
+
+        if self.net_info['internet_net']:
+            n = self.net_info['internet_net']
+            print(f"🌍 INTERNET NET: {n['name']} | {n['ip']} | {n['mac']}")
+        else:
+            print("🌍 INTERNET NET: Not Detected")
+
+        print("-" * 30)
+        print("Other Interfaces:")
+        for iface in self.net_info['all_ifaces']:
+            if iface != self.net_info['camera_net'] and iface != self.net_info['internet_net']:
+                print(f" - {iface['name']}: {iface['ip']}")
+        print("="*60)
 
 state = SystemState()
 ws_outbox: "SimpleQueue[str]" = SimpleQueue()
@@ -244,6 +336,7 @@ def _get_stream_candidates():
     defaults = getattr(config, "DEFAULT_STREAM_HOSTS", [])
     default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
 
+    # 確保自動偵測到的 IP 在清單最前面
     hosts = _unique_hosts([
         state.camera_ip,
         state.bridge_ip,
@@ -398,7 +491,6 @@ def send_serial_command(cmd, source="HTTP"):
 
 """
 修復版影像串流執行緒 - 完整容錯處理
-將此段替換到 web_server.py 的 video_stream_thread() 函數
 """
 
 def video_stream_thread():
@@ -412,24 +504,21 @@ def video_stream_thread():
     max_retries = 3
     last_success_time = 0
     candidate_index = 0
-    cleanup_lock = threading.Lock()  # ★ 新增鎖保護清理操作
+    cleanup_lock = threading.Lock()
 
     def cleanup_capture():
         """徹底清理 OpenCV 資源 (線程安全版)"""
         nonlocal cap, reader_thread, reader_stop_event, frame_queue
         
-        with cleanup_lock:  # ★ 使用鎖保護
-            # 1. 先通知執行緒停止
+        with cleanup_lock:
             if reader_stop_event:
                 reader_stop_event.set()
             
-            # 2. 等待執行緒結束
             if reader_thread and reader_thread.is_alive():
                 reader_thread.join(timeout=1.0)
                 if reader_thread.is_alive():
                     add_log("[VIDEO] Warning: Reader thread still alive")
             
-            # 3. 清空佇列
             if frame_queue:
                 try:
                     while not frame_queue.empty():
@@ -437,12 +526,10 @@ def video_stream_thread():
                 except:
                     pass
             
-            # 4. 清空引用
             reader_thread = None
             reader_stop_event = None
             frame_queue = None
             
-            # 5. 釋放 OpenCV
             if cap:
                 try:
                     cap.release()
@@ -460,17 +547,15 @@ def video_stream_thread():
 
         def _reader():
             """讀取執行緒主邏輯 (防競態版)"""
-            local_queue = frame_queue  # ★ 複製引用,防止被主執行緒清空
+            local_queue = frame_queue
             local_stop = reader_stop_event
             
             while not local_stop.is_set():
                 try:
-                    # ★ 關鍵: 使用 try-except 捕捉 OpenCV C++ 異常
                     success, frame = current_cap.read()
                 except cv2.error as e:
                     add_log(f"[VIDEO] OpenCV error: {e}")
-                    # 通知主執行緒立即重連
-                    if local_queue:  # ★ 防止 None 錯誤
+                    if local_queue:
                         try:
                             local_queue.put_nowait((False, None, time.time()))
                         except (queue.Full, AttributeError):
@@ -478,14 +563,13 @@ def video_stream_thread():
                     break
                 except Exception as e:
                     add_log(f"[VIDEO] Reader crash: {e}")
-                    if local_queue:  # ★ 防止 None 錯誤
+                    if local_queue:
                         try:
                             local_queue.put_nowait((False, None, time.time()))
                         except (queue.Full, AttributeError):
                             pass
                     break
 
-                # 丟棄舊幀,只保留最新
                 if local_queue and local_queue.full():
                     try:
                         local_queue.get_nowait()
@@ -493,7 +577,7 @@ def video_stream_thread():
                         pass
                 
                 timestamp = time.time()
-                if local_queue:  # ★ 防止 None 錯誤
+                if local_queue:
                     try:
                         local_queue.put_nowait((success, frame, timestamp))
                     except (queue.Full, AttributeError):
@@ -507,10 +591,9 @@ def video_stream_thread():
         add_log("[VIDEO] Reader thread started")
 
     while state.is_running:
-        # === 階段1: 取得串流候選清單 ===
         candidates = _get_stream_candidates()
         
-        # ★ 修復: 過濾掉 .local 主機名
+        # 過濾掉 .local 主機名，優先嘗試 192.168.4.1 或已偵測到的 IP
         candidates = [(h, u) for h, u in candidates 
                      if h and not h.endswith('.local') and _is_valid_ip(h)]
         
@@ -523,13 +606,11 @@ def video_stream_thread():
                 add_log(f"[VIDEO] Priming stream: {state.video_url}")
                 break
 
-        # 若無可用 URL,等待 Serial Worker 偵測
         if not state.video_url:
             add_log("[VIDEO] Waiting for camera IP...")
             time.sleep(2)
             continue
 
-        # === 階段2: 建立串流連線 ===
         if cap is None or not cap.isOpened():
             if retry_count >= max_retries:
                 add_log(f"[VIDEO] Max retries, rotating host...")
@@ -549,13 +630,11 @@ def video_stream_thread():
                 retry_count = 0
                 continue
 
-            add_log(f"[VIDEO] Connecting (attempt {retry_count + 1}/{max_retries})...")
+            add_log(f"[VIDEO] Connecting to {state.video_url}...")
             try:
-                # 使用 FFMPEG 後端 (較穩定)
                 cap = cv2.VideoCapture(state.video_url, cv2.CAP_FFMPEG)
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 
-                # 設定逾時 (需 OpenCV 4.5+)
                 if hasattr(cv2, 'CAP_PROP_OPEN_TIMEOUT_MSEC'):
                     cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
                 if hasattr(cv2, 'CAP_PROP_READ_TIMEOUT_MSEC'):
@@ -566,7 +645,6 @@ def video_stream_thread():
                     state.stream_connected = True
                     retry_count = 0
                     
-                    # 啟動獨立讀取執行緒
                     start_frame_reader(cap)
                     last_success_time = time.time()
                 else:
@@ -583,9 +661,7 @@ def video_stream_thread():
                 time.sleep(2)
                 continue
 
-        # === 階段3: 讀取影像 ===
         try:
-            # 檢查讀取執行緒是否還活著
             if frame_queue is None or (reader_thread and not reader_thread.is_alive()):
                 add_log("[VIDEO] Reader died, forcing reconnect...")
                 cleanup_capture()
@@ -593,11 +669,9 @@ def video_stream_thread():
                 time.sleep(1)
                 continue
 
-            # 從佇列取得最新幀 (帶逾時)
             try:
                 success, frame, frame_ts = frame_queue.get(timeout=0.5)
             except queue.Empty:
-                # Watchdog: 若超過 3 秒沒收到幀,強制重連
                 if time.time() - last_success_time > 3:
                     add_log("[VIDEO] Watchdog timeout, reconnecting...")
                     cleanup_capture()
@@ -608,7 +682,6 @@ def video_stream_thread():
                 last_success_time = frame_ts
                 retry_count = 0
 
-                # AI 處理 (可選)
                 if state.ai_enabled and state.detector and state.detector.enabled:
                     try:
                         result = state.detector.detect(frame)
@@ -617,12 +690,10 @@ def video_stream_thread():
                     except Exception as e:
                         add_log(f"[AI] Error: {e}")
 
-                # 儲存到緩衝區
                 with state.frame_lock:
                     state.frame_buffer = frame.copy()
 
             else:
-                # 讀取失敗,檢查是否逾時
                 if time.time() - last_success_time > 3:
                     add_log("[VIDEO] Read timeout, reconnecting...")
                     cleanup_capture()
@@ -635,230 +706,15 @@ def video_stream_thread():
             retry_count += 1
             time.sleep(1)
 
-    # 清理並退出
     cleanup_capture()
     add_log("Video Stream Thread Stopped")
-    """專門負責從 ESP32 拉取影像的執行緒 (防崩潰版)"""
-    add_log("Video Stream Thread Started...")
-    cap = None
-    reader_thread = None
-    reader_stop_event = None
-    frame_queue = None
-    retry_count = 0
-    max_retries = 3
-    last_success_time = 0
-    candidate_index = 0
 
-    def cleanup_capture():
-        """徹底清理 OpenCV 資源"""
-        nonlocal cap, reader_thread, reader_stop_event, frame_queue
-        
-        # 1. 停止讀取執行緒
-        if reader_stop_event:
-            reader_stop_event.set()
-        if reader_thread and reader_thread.is_alive():
-            reader_thread.join(timeout=0.5)
-        reader_thread = None
-        reader_stop_event = None
-        frame_queue = None
-        
-        # 2. 釋放 OpenCV 資源
-        if cap:
-            try:
-                cap.release()
-            except:
-                pass
-        cap = None
-        state.stream_connected = False
-        add_log("[VIDEO] Cleanup completed")
-
-    def start_frame_reader(current_cap):
-        """啟動獨立讀取執行緒 (隔離 OpenCV 崩潰)"""
-        nonlocal reader_thread, reader_stop_event, frame_queue
-        reader_stop_event = threading.Event()
-        frame_queue = queue.Queue(maxsize=1)
-
-        def _reader():
-            """讀取執行緒主邏輯"""
-            while not reader_stop_event.is_set():
-                try:
-                    # ★ 關鍵: 使用 try-except 捕捉 OpenCV C++ 異常
-                    success, frame = current_cap.read()
-                except cv2.error as e:
-                    add_log(f"[VIDEO] OpenCV error: {e}")
-                    # 通知主執行緒立即重連
-                    try:
-                        frame_queue.put_nowait((False, None, time.time()))
-                    except queue.Full:
-                        pass
-                    break
-                except Exception as e:
-                    add_log(f"[VIDEO] Reader crash: {e}")
-                    try:
-                        frame_queue.put_nowait((False, None, time.time()))
-                    except queue.Full:
-                        pass
-                    break
-
-                # 丟棄舊幀,只保留最新
-                if frame_queue.full():
-                    try:
-                        frame_queue.get_nowait()
-                    except queue.Empty:
-                        pass
-                
-                timestamp = time.time()
-                try:
-                    frame_queue.put_nowait((success, frame, timestamp))
-                except queue.Full:
-                    pass
-                
-                if not success:
-                    time.sleep(0.05)
-
-        reader_thread = threading.Thread(target=_reader, daemon=True)
-        reader_thread.start()
-        add_log("[VIDEO] Reader thread started")
-
-    while state.is_running:
-        # === 階段1: 取得串流候選清單 ===
-        candidates = _get_stream_candidates()
-        
-        # ★ 修復: 過濾掉 .local 主機名
-        candidates = [(h, u) for h, u in candidates 
-                     if h and not h.endswith('.local') and _is_valid_ip(h)]
-        
-        if not state.video_url and candidates:
-            for idx, (host, url) in enumerate(candidates):
-                if not _is_host_resolvable(host):
-                    continue
-                candidate_index = idx
-                state.camera_ip, state.video_url = host, url
-                add_log(f"[VIDEO] Priming stream: {state.video_url}")
-                break
-
-        # 若無可用 URL,等待 Serial Worker 偵測
-        if not state.video_url:
-            add_log("[VIDEO] Waiting for camera IP...")
-            time.sleep(2)
-            continue
-
-        # === 階段2: 建立串流連線 ===
-        if cap is None or not cap.isOpened():
-            if retry_count >= max_retries:
-                add_log(f"[VIDEO] Max retries, rotating host...")
-                if candidates:
-                    tried = 0
-                    while tried < len(candidates):
-                        candidate_index = (candidate_index + 1) % len(candidates)
-                        next_host, next_url = candidates[candidate_index]
-                        tried += 1
-                        if not _is_host_resolvable(next_host):
-                            continue
-                        state.camera_ip = next_host
-                        state.video_url = next_url
-                        add_log(f"[VIDEO] Switching to {state.video_url}")
-                        break
-                time.sleep(2)
-                retry_count = 0
-                continue
-
-            add_log(f"[VIDEO] Connecting (attempt {retry_count + 1}/{max_retries})...")
-            try:
-                # 使用 FFMPEG 後端 (較穩定)
-                cap = cv2.VideoCapture(state.video_url, cv2.CAP_FFMPEG)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                
-                # 設定逾時 (需 OpenCV 4.5+)
-                if hasattr(cv2, 'CAP_PROP_OPEN_TIMEOUT_MSEC'):
-                    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
-                if hasattr(cv2, 'CAP_PROP_READ_TIMEOUT_MSEC'):
-                    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
-
-                if cap.isOpened():
-                    add_log("[VIDEO] ✅ Stream connected!")
-                    state.stream_connected = True
-                    retry_count = 0
-                    
-                    # 啟動獨立讀取執行緒
-                    start_frame_reader(cap)
-                    last_success_time = time.time()
-                else:
-                    add_log("[VIDEO] Failed to open stream")
-                    cleanup_capture()
-                    retry_count += 1
-                    time.sleep(2)
-                    continue
-                    
-            except Exception as e:
-                add_log(f"[VIDEO] Connection error: {e}")
-                cleanup_capture()
-                retry_count += 1
-                time.sleep(2)
-                continue
-
-        # === 階段3: 讀取影像 ===
-        try:
-            # 檢查讀取執行緒是否還活著
-            if frame_queue is None or (reader_thread and not reader_thread.is_alive()):
-                add_log("[VIDEO] Reader died, forcing reconnect...")
-                cleanup_capture()
-                retry_count += 1
-                time.sleep(1)
-                continue
-
-            # 從佇列取得最新幀 (帶逾時)
-            try:
-                success, frame, frame_ts = frame_queue.get(timeout=0.5)
-            except queue.Empty:
-                # Watchdog: 若超過 3 秒沒收到幀,強制重連
-                if time.time() - last_success_time > 3:
-                    add_log("[VIDEO] Watchdog timeout, reconnecting...")
-                    cleanup_capture()
-                    retry_count += 1
-                continue
-
-            if success and frame is not None:
-                last_success_time = frame_ts
-                retry_count = 0
-
-                # AI 處理 (可選)
-                if state.ai_enabled and state.detector and state.detector.enabled:
-                    try:
-                        result = state.detector.detect(frame)
-                        if isinstance(result, tuple) and len(result) == 3:
-                            frame, detections, control_cmd = result
-                    except Exception as e:
-                        add_log(f"[AI] Error: {e}")
-
-                # 儲存到緩衝區
-                with state.frame_lock:
-                    state.frame_buffer = frame.copy()
-
-            else:
-                # 讀取失敗,檢查是否逾時
-                if time.time() - last_success_time > 3:
-                    add_log("[VIDEO] Read timeout, reconnecting...")
-                    cleanup_capture()
-                    retry_count += 1
-                time.sleep(0.1)
-
-        except Exception as e:
-            add_log(f"[VIDEO] Loop error: {e}")
-            cleanup_capture()
-            retry_count += 1
-            time.sleep(1)
-
-    # 清理並退出
-    cleanup_capture()
-    add_log("Video Stream Thread Stopped")
 def generate_frames():
     """Flask 串流產生器（從緩衝區讀取）"""
     no_signal_frame = None
     last_frame_time = 0
     
     while state.is_running:
-        # 從緩衝區取得最新影像
         with state.frame_lock:
             if state.frame_buffer is not None:
                 frame = state.frame_buffer.copy()
@@ -866,13 +722,11 @@ def generate_frames():
             else:
                 frame = None
         
-        # 如果沒有影像，顯示 NO SIGNAL
         if frame is None:
             if no_signal_frame is None:
                 no_signal_frame = create_no_signal_frame()
             frame = no_signal_frame
         
-        # 編碼並發送
         try:
             ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             if ret:
@@ -882,7 +736,7 @@ def generate_frames():
         except Exception as e:
             print(f"[VIDEO] Encode error: {e}")
         
-        time.sleep(0.03)  # ~30 FPS
+        time.sleep(0.03)
 
 def create_no_signal_frame():
     """建立 NO SIGNAL 畫面"""
@@ -1108,7 +962,7 @@ def api_status():
         "port": state.serial_port or "DISCONNECTED",
         "preferred_port": state.preferred_port,
         "dist": state.radar_dist,
-        "logs": state.logs[-30:],  # 只回傳最近 30 條
+        "logs": state.logs[-30:],
         "ws_connected": state.ws_connected,
         "stream_connected": state.stream_connected,
         "ai_status": state.ai_enabled
@@ -1152,7 +1006,6 @@ def toggle_ai():
 def api_set_ip():
     data = request.get_json(silent=True) or {}
     
-    # 支援兩種格式
     car_ip = data.get('car_ip')
     cam_ip = data.get('cam_ip')
     
@@ -1172,19 +1025,29 @@ def api_set_ip():
     
     return jsonify({"status": "ok", "car_ip": car_ip, "cam_ip": cam_ip})
 
+# === 新增：網卡資訊 API ===
+@app.route('/netinfo')
+def api_netinfo():
+    """提供詳細的網卡資訊，供除錯與驗證"""
+    return jsonify(state.net_info)
+
 if __name__ == '__main__':
     # 啟動所有執行緒
     threading.Thread(target=serial_worker_thread, daemon=True).start()
     threading.Thread(target=udp_discovery_thread, daemon=True).start()
     threading.Thread(target=xbox_controller_thread, daemon=True).start()
     threading.Thread(target=websocket_bridge_thread, daemon=True).start()
-    threading.Thread(target=video_stream_thread, daemon=True).start()  # 新增影像執行緒
+    threading.Thread(target=video_stream_thread, daemon=True).start()
 
     print("=" * 60)
     print(f"🚀 Web Server: http://127.0.0.1:{config.WEB_PORT}")
     print(f"📦 YOLO: {YOLO_AVAILABLE}")
     print(f"🔧 Serial Auto-Detection: ACTIVE")
     print(f"🎮 Xbox: {'ACTIVE' if pygame.joystick.get_count() > 0 else 'NOT FOUND'}")
+
+    # 印出網卡偵測摘要
+    state.print_network_summary()
+
     if state.video_url:
         print(f"🎥 Stream URL: {state.video_url}")
     print("=" * 60)
