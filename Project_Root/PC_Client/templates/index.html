@@ -303,7 +303,7 @@
             initWebSocket();
             resizeCanvas();
             requestAnimationFrame(animationLoop);
-            startStatusPolling(); // 自動輪詢 IP 狀態
+            // Removed startStatusPolling(); replaced with SocketIO events
             log("System Initialized. Dual-Link Mode Active.");
         };
 
@@ -322,6 +322,11 @@
             socket.on('connect', () => { wsConnected = true; log("WS Connected"); });
             socket.on('disconnect', () => { wsConnected = false; log("WS Disconnected"); });
             
+            // Handle status updates pushed from server (replaces polling)
+            socket.on('status_update', (data) => {
+                updateUI(data);
+            });
+
             socket.on('controller_data', (data) => {
                 controllerLinked = true;
                 lastXboxUpdate = Date.now();
@@ -335,63 +340,60 @@
             });
         }
 
-        // === Data Handling (Polling Status) ===
-        function startStatusPolling() {
-            setInterval(async () => {
-                try {
-                    const res = await fetch('/api/status');
-                    const data = await res.json();
-                    
-                    // 更新 header 的 IP 顯示
-                    const carIpDisplay = document.getElementById('car-ip-display');
-                    const camIpDisplay = document.getElementById('cam-ip-display');
-                    
-                    if(data.car_ip) {
-                        carIpDisplay.innerText = data.car_ip;
-                        carIpDisplay.className = "text-green-400 font-bold font-mono";
-                        // 同步更新 Settings 欄位
-                        const setCar = document.getElementById('settings-car-ip');
-                        if(setCar && !setCar.value) setCar.value = data.car_ip;
-                    }
-                    
-                    if(data.camera_ip) {
-                        camIpDisplay.innerText = data.camera_ip;
-                        camIpDisplay.className = "text-blue-400 font-bold font-mono";
-                        // 同步更新 Settings 欄位
-                        const setCam = document.getElementById('settings-cam-ip');
-                        if(setCam && !setCam.value) setCam.value = data.camera_ip;
-                    }
-                    
-                    // 更新 AI 狀態
-                    const aiStatus = document.getElementById('ai-status');
-                    if(data.ai_status) {
-                        aiStatus.innerText = "AI: ACTIVE";
-                        aiStatus.className = "text-green-400 font-bold animate-pulse";
-                        document.getElementById('ai-toggle-btn').innerText = "DEACTIVATE AI";
-                    } else {
-                        aiStatus.innerText = "AI: STANDBY";
-                        aiStatus.className = "text-gray-500";
-                        document.getElementById('ai-toggle-btn').innerText = "ACTIVATE AI HUD";
-                    }
+        function updateUI(data) {
+            // 更新 header 的 IP 顯示
+            const carIpDisplay = document.getElementById('car-ip-display');
+            const camIpDisplay = document.getElementById('cam-ip-display');
 
-                    // Logs
-                    if(data.logs) {
-                        const serialized = JSON.stringify(data.logs);
-                        if (serialized !== JSON.stringify(lastLogs)) {
-                            lastLogs = data.logs.slice();
-                            const box = document.getElementById('log-box');
-                            box.innerHTML = "";
-                            data.logs.forEach(l => {
-                                const d = document.createElement('div');
-                                d.innerText = l;
-                                box.appendChild(d);
-                            });
-                            box.scrollTop = box.scrollHeight;
-                        }
-                    }
+            if(data.car_ip) {
+                carIpDisplay.innerText = data.car_ip;
+                carIpDisplay.className = "text-green-400 font-bold font-mono";
+                // 同步更新 Settings 欄位
+                const setCar = document.getElementById('settings-car-ip');
+                if(setCar && !setCar.value) setCar.value = data.car_ip;
+            }
 
-                } catch (err) { /* ignore */ }
-            }, 1000);
+            if(data.camera_ip) {
+                camIpDisplay.innerText = data.camera_ip;
+                camIpDisplay.className = "text-blue-400 font-bold font-mono";
+                // 同步更新 Settings 欄位
+                const setCam = document.getElementById('settings-cam-ip');
+                if(setCam && !setCam.value) setCam.value = data.camera_ip;
+            }
+
+            // 更新 AI 狀態
+            const aiStatus = document.getElementById('ai-status');
+            if(data.ai_status) {
+                aiStatus.innerText = "AI: ACTIVE";
+                aiStatus.className = "text-green-400 font-bold animate-pulse";
+                document.getElementById('ai-toggle-btn').innerText = "DEACTIVATE AI";
+            } else {
+                aiStatus.innerText = "AI: STANDBY";
+                aiStatus.className = "text-gray-500";
+                document.getElementById('ai-toggle-btn').innerText = "ACTIVATE AI HUD";
+            }
+
+            // 更新距離
+            const distVal = document.getElementById('dist-val');
+            if(data.dist !== undefined) {
+                distVal.innerText = data.dist.toFixed(2) + " CM";
+            }
+
+            // Logs
+            if(data.logs) {
+                const serialized = JSON.stringify(data.logs);
+                if (serialized !== JSON.stringify(lastLogs)) {
+                    lastLogs = data.logs.slice();
+                    const box = document.getElementById('log-box');
+                    box.innerHTML = "";
+                    data.logs.forEach(l => {
+                        const d = document.createElement('div');
+                        d.innerText = l;
+                        box.appendChild(d);
+                    });
+                    box.scrollTop = box.scrollHeight;
+                }
+            }
         }
 
         function applySettings() {

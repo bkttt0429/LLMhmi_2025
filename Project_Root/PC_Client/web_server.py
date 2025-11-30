@@ -468,7 +468,8 @@ def send_serial_command(cmd, source="HTTP"):
     for url in target_urls:
         try:
             # 使用 state.control_session 確保從正確網卡送出
-            resp = state.control_session.get(f"{url}?act={cmd}", timeout=0.8)
+            # [Optimization] Reduced timeout to 0.2s for fail-fast
+            resp = state.control_session.get(f"{url}?act={cmd}", timeout=0.2)
             if resp.ok:
                 return True, "Sent via WiFi"
         except requests.exceptions.RequestException:
@@ -664,6 +665,31 @@ def udp_discovery_thread():
 
         _apply_camera_ip(ip, stream_url, "[UDP] ")
 
+def status_push_thread():
+    """Background thread to push system status via WebSocket"""
+    add_log("Status Push Thread Started...")
+    while state.is_running:
+        try:
+            status_data = {
+                "ip": state.current_ip,
+                "car_ip": state.car_ip,
+                "bridge_ip": state.bridge_ip,
+                "camera_ip": state.camera_ip,
+                "video_url": state.video_url,
+                "port": state.serial_port or "DISCONNECTED",
+                "preferred_port": state.preferred_port,
+                "dist": state.radar_dist,
+                "logs": state.logs[-30:],
+                "ws_connected": state.ws_connected,
+                "stream_connected": state.stream_connected,
+                "ai_status": state.ai_enabled
+            }
+            socketio.emit('status_update', status_data)
+        except Exception as e:
+            print(f"[STATUS] Push error: {e}")
+
+        time.sleep(2)  # Push every 2 seconds
+
 def serial_worker_thread():
     add_log("Serial Worker Started...")
     while state.is_running:
@@ -827,10 +853,15 @@ def api_control():
     cmd = (data.get('cmd') or '').strip()
     if not cmd:
         return jsonify({"status": "error", "msg": "Missing command"}), 400
-    success, msg = send_serial_command(cmd, source="API")
-    status = "ok" if success else "error"
-    code = 200 if success else 500
-    return jsonify({"status": status, "msg": msg, "cmd": cmd}), code
+
+    # [Optimization] Fire-and-forget logic using thread
+    # Immediate response to client to prevent UI blocking
+    def background_send(command):
+        send_serial_command(command, source="API")
+
+    threading.Thread(target=background_send, args=(cmd,), daemon=True).start()
+
+    return jsonify({"status": "ok", "msg": "Command queued", "cmd": cmd}), 200
 
 @app.route('/api/toggle_ai', methods=['POST'])
 def toggle_ai():
@@ -881,6 +912,7 @@ if __name__ == '__main__':
     threading.Thread(target=xbox_controller_thread, daemon=True).start()
     threading.Thread(target=websocket_bridge_thread, daemon=True).start()
     threading.Thread(target=video_stream_thread, daemon=True).start()
+    threading.Thread(target=status_push_thread, daemon=True).start()
 
     print("=" * 60)
     print(f"🚀 Web Server: http://127.0.0.1:{config.WEB_PORT}")
