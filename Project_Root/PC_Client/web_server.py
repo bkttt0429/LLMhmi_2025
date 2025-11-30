@@ -44,6 +44,17 @@ def _unique_hosts(hosts):
             seen.add(host)
     return ordered
 
+def _apply_camera_ip(ip, stream_url=None, prefix=""):
+    if state.camera_ip != ip:
+        state.camera_ip = ip
+        state.video_url = stream_url or f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
+        add_log(f"{prefix}Camera IP detected: {ip}")
+        add_log(f"{prefix}Stream URL: {state.video_url}")
+    
+    if not state.bridge_ip or state.bridge_ip.endswith('.local') or state.bridge_ip != ip:
+        state.bridge_ip = ip
+        _persist_bridge_host(ip)
+        add_log(f"{prefix}Bridge host updated to {ip}")
 
 def _build_stream_url(host: str | None):
     if not host:
