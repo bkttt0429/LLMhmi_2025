@@ -6,7 +6,7 @@ import threading
 import re
 import socket
 import math
-import psutil  # Added for NIC detection
+import psutil
 from pathlib import Path
 import queue
 import requests
@@ -29,6 +29,10 @@ from serial_worker import serial_worker, prepare_sketch, compile_and_upload
 # 導入 AI 模組
 from ai_detector import ObjectDetector, YOLO_AVAILABLE
 
+# 導入自訂網卡綁定模組
+from network_utils import SourceAddressAdapter
+from mjpeg_reader import MJPEGStreamReader
+
 # 初始化 Flask 和 SocketIO
 template_dir = os.path.join(BASE_DIR, 'templates')
 app = Flask(__name__, template_folder=template_dir, static_folder=template_dir)
@@ -46,13 +50,10 @@ def get_network_info():
     }
 
     try:
-        # 取得所有網卡狀態
         stats = psutil.net_if_stats()
-        # 取得所有網卡位址
         addrs = psutil.net_if_addrs()
 
         for iface_name, iface_addrs in addrs.items():
-            # 過濾未啟用網卡
             if iface_name in stats and not stats[iface_name].isup:
                 continue
 
@@ -75,9 +76,10 @@ def get_network_info():
 
                 # 分類規則
                 if ip_info.startswith("192.168.4."):
-                    if info["camera_net"] is None: # 優先選第一個
+                    if info["camera_net"] is None:
                         info["camera_net"] = iface_data
-                elif info["internet_net"] is None: # 非 192.168.4.x 的第一個視為 Internet/Car Net
+                elif info["internet_net"] is None:
+                    # 假設第一個非相機網段的介面為 Internet/Car Control 網段
                     info["internet_net"] = iface_data
 
     except Exception as e:
@@ -134,14 +136,16 @@ class SystemState:
         # 1. 執行網卡偵測
         self.net_info = get_network_info()
         self.print_network_summary()
+        
+        # 記錄對應介面的 Source IP
+        self.camera_net_ip = self.net_info["camera_net"]["ip"] if self.net_info["camera_net"] else None
+        self.internet_net_ip = self.net_info["internet_net"]["ip"] if self.net_info["internet_net"] else None
 
         cached_bridge = _load_cached_bridge_host()
         default_stream_hosts = getattr(config, "DEFAULT_STREAM_HOSTS", [])
         default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
 
         # 2. 自動設定 IP
-        # 預設 Camera IP: 若有偵測到 camera_net，假設相機為 192.168.4.1
-        # 若無，則使用設定檔或快取
         if self.net_info["camera_net"]:
             self.camera_ip = "192.168.4.1"
             print(f"[INIT] Auto-selected Camera IP: {self.camera_ip} (via {self.net_info['camera_net']['name']})")
@@ -149,21 +153,18 @@ class SystemState:
             self.camera_ip = getattr(config, "DEFAULT_STREAM_IP", "") or \
                              (cached_bridge if cached_bridge else "")
 
-        # 車子 IP 設定
         self.car_ip = getattr(config, "DEFAULT_CAR_IP", "boebot.local")
         self.current_ip = self.car_ip
-
         self.bridge_ip = cached_bridge or default_stream_ip or getattr(config, "DEFAULT_CAR_IP", "")
 
         self.stream_hosts = _unique_hosts([
-            self.camera_ip, # 優先
+            self.camera_ip,
             cached_bridge,
             default_stream_ip,
             *default_stream_hosts,
             self.bridge_ip,
         ])
 
-        # 確保 camera_ip 有值
         if not self.camera_ip and self.stream_hosts:
             self.camera_ip = self.stream_hosts[0]
 
@@ -171,10 +172,7 @@ class SystemState:
         self.preferred_port = None
         self.ser = None
         self.ws_connected = False
-
-        # 初始化影像串流 URL
         self.video_url = _build_stream_url(self.camera_ip)
-
         self.radar_dist = 0.0
         self.logs = []
         self.is_running = True
@@ -184,10 +182,17 @@ class SystemState:
         self.flash_lock = threading.Lock()
         self.add_log = None
         
-        # 影像串流相關
         self.frame_buffer = None
         self.frame_lock = threading.Lock()
         self.stream_connected = False
+        
+        # 建立一個綁定到 Control/Internet Interface 的 session 用於發送 HTTP 指令
+        self.control_session = requests.Session()
+        if self.internet_net_ip:
+            adapter = SourceAddressAdapter(self.internet_net_ip)
+            self.control_session.mount('http://', adapter)
+            self.control_session.mount('https://', adapter)
+            print(f"[INIT] Control HTTP Session bound to {self.internet_net_ip}")
 
     def print_network_summary(self):
         print("="*60)
@@ -217,8 +222,8 @@ ws_outbox: "SimpleQueue[str]" = SimpleQueue()
 browser_controller_state = {"data": None, "timestamp": 0.0}
 UDP_PORT = 4210
 CAMERA_DISCOVERY_PORT = getattr(config, "CAMERA_DISCOVERY_PORT", 4211)
-udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-udp_sock.settimeout(0.3)
+
+# 注意：我們現在不使用單一的全域 udp_sock，而是根據需求綁定到正確介面
 
 # Xbox 手把設定
 AXIS_LEFT_STICK_X = 0
@@ -283,7 +288,6 @@ class XboxController:
             "dpad_y": hat_y
         }
 
-# === 輔助函式 ===
 def add_log(msg):
     timestamp = time.strftime("%H:%M:%S")
     log_entry = f"[{timestamp}] {msg}"
@@ -296,32 +300,22 @@ def add_log(msg):
 state.add_log = add_log
 
 def _mix_pwm_from_sticks(x: float, y: float) -> tuple[int, int]:
-    """將搖桿輸入轉換為左右輪 PWM 值"""
-    throttle = y  # 前後
-    turn = x      # 左右
-
+    throttle = y
+    turn = x
     left = max(min(throttle + turn, 1.0), -1.0)
     right = max(min(throttle - turn, 1.0), -1.0)
-
     left_pwm = int(PWM_CENTER + left * PWM_RANGE)
-    right_pwm = int(PWM_CENTER - right * PWM_RANGE)  # 右輪方向相反
+    right_pwm = int(PWM_CENTER - right * PWM_RANGE)
     return left_pwm, right_pwm
 
-
 def _build_cmd_from_state(controller_state: dict) -> str:
-    """
-    線性搖桿速度控制，直接輸出 PWM 值
-    """
     if controller_state.get("stick_pressed") or controller_state.get("button_x"):
         return "S"
-
     x = controller_state.get("left_stick_x", 0)
     y = controller_state.get("left_stick_y", 0)
-
     magnitude = math.sqrt(x**2 + y**2)
     if magnitude < 0.05:
         return "S"
-
     left_pwm, right_pwm = _mix_pwm_from_sticks(x, y)
     return f"v{left_pwm}:{right_pwm}"
 
@@ -331,12 +325,9 @@ def _build_ws_url(host: str | None = None):
         return None
     return f"ws://{host}:82/ws"
 
-
 def _get_stream_candidates():
     defaults = getattr(config, "DEFAULT_STREAM_HOSTS", [])
     default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
-
-    # 確保自動偵測到的 IP 在清單最前面
     hosts = _unique_hosts([
         state.camera_ip,
         state.bridge_ip,
@@ -346,7 +337,6 @@ def _get_stream_candidates():
     ])
     return [(host, _build_stream_url(host)) for host in hosts if host]
 
-
 def _is_host_resolvable(host: str) -> bool:
     if not host:
         return False
@@ -355,7 +345,6 @@ def _is_host_resolvable(host: str) -> bool:
         return True
     except socket.gaierror:
         return False
-
 
 def _is_valid_ip(host: str) -> bool:
     if not host:
@@ -419,16 +408,13 @@ def websocket_bridge_thread():
                 except Exception as send_err:
                     add_log(f"[WS] Send error: {send_err}")
                     break
-
         except Exception as e:
             state.ws_connected = False
             time.sleep(0.5)
         finally:
             if ws:
-                try:
-                    ws.close()
-                except Exception:
-                    pass
+                try: ws.close()
+                except Exception: pass
             state.ws_connected = False
 
 def send_udp_command(cmd: str):
@@ -437,10 +423,22 @@ def send_udp_command(cmd: str):
     target_ip = state.car_ip or state.current_ip
     if not target_ip:
         return False
+        
     try:
-        udp_sock.sendto(cmd.encode(), (target_ip, UDP_PORT))
+        # 每次發送都建立新的 Socket 並綁定到正確的網卡介面 (Internet Net)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(0.1)
+        
+        # 如果我們知道要用哪張網卡發送控制訊號，就綁定它
+        if state.internet_net_ip:
+            # 綁定 source IP, port 0 (OS assign)
+            sock.bind((state.internet_net_ip, 0))
+            
+        sock.sendto(cmd.encode(), (target_ip, UDP_PORT))
+        sock.close()
         return True
-    except OSError:
+    except OSError as e:
+        print(f"[UDP] Send error: {e}")
         return False
 
 def send_serial_command(cmd, source="HTTP"):
@@ -457,7 +455,7 @@ def send_serial_command(cmd, source="HTTP"):
         ws_outbox.put(cmd)
         return True, "Sent via WebSocket"
 
-    # 方法2: HTTP
+    # 方法2: HTTP (使用已綁定的 Session)
     target_urls = []
     if state.car_ip:
         target_urls.append(f"http://{state.car_ip}/cmd")
@@ -469,7 +467,8 @@ def send_serial_command(cmd, source="HTTP"):
 
     for url in target_urls:
         try:
-            resp = requests.get(f"{url}?act={cmd}", timeout=0.8)
+            # 使用 state.control_session 確保從正確網卡送出
+            resp = state.control_session.get(f"{url}?act={cmd}", timeout=0.8)
             if resp.ok:
                 return True, "Sent via WiFi"
         except requests.exceptions.RequestException:
@@ -489,114 +488,21 @@ def send_serial_command(cmd, source="HTTP"):
 
     return False, "Car unreachable"
 
-"""
-修復版影像串流執行緒 - 完整容錯處理
-"""
-
 def video_stream_thread():
-    """專門負責從 ESP32 拉取影像的執行緒 (防崩潰版 v2)"""
-    add_log("Video Stream Thread Started...")
-    cap = None
-    reader_thread = None
-    reader_stop_event = None
-    frame_queue = None
+    """使用 MJPEGStreamReader (requests based) 替代 OpenCV VideoCapture"""
+    add_log("Video Stream Thread Started (MJPEG Mode)...")
+    
+    stream_reader = None
     retry_count = 0
     max_retries = 3
-    last_success_time = 0
     candidate_index = 0
-    cleanup_lock = threading.Lock()
-
-    def cleanup_capture():
-        """徹底清理 OpenCV 資源 (線程安全版)"""
-        nonlocal cap, reader_thread, reader_stop_event, frame_queue
-        
-        with cleanup_lock:
-            if reader_stop_event:
-                reader_stop_event.set()
-            
-            if reader_thread and reader_thread.is_alive():
-                reader_thread.join(timeout=1.0)
-                if reader_thread.is_alive():
-                    add_log("[VIDEO] Warning: Reader thread still alive")
-            
-            if frame_queue:
-                try:
-                    while not frame_queue.empty():
-                        frame_queue.get_nowait()
-                except:
-                    pass
-            
-            reader_thread = None
-            reader_stop_event = None
-            frame_queue = None
-            
-            if cap:
-                try:
-                    cap.release()
-                except:
-                    pass
-            cap = None
-            state.stream_connected = False
-            add_log("[VIDEO] Cleanup completed")
-
-    def start_frame_reader(current_cap):
-        """啟動獨立讀取執行緒 (隔離 OpenCV 崩潰)"""
-        nonlocal reader_thread, reader_stop_event, frame_queue
-        reader_stop_event = threading.Event()
-        frame_queue = queue.Queue(maxsize=1)
-
-        def _reader():
-            """讀取執行緒主邏輯 (防競態版)"""
-            local_queue = frame_queue
-            local_stop = reader_stop_event
-            
-            while not local_stop.is_set():
-                try:
-                    success, frame = current_cap.read()
-                except cv2.error as e:
-                    add_log(f"[VIDEO] OpenCV error: {e}")
-                    if local_queue:
-                        try:
-                            local_queue.put_nowait((False, None, time.time()))
-                        except (queue.Full, AttributeError):
-                            pass
-                    break
-                except Exception as e:
-                    add_log(f"[VIDEO] Reader crash: {e}")
-                    if local_queue:
-                        try:
-                            local_queue.put_nowait((False, None, time.time()))
-                        except (queue.Full, AttributeError):
-                            pass
-                    break
-
-                if local_queue and local_queue.full():
-                    try:
-                        local_queue.get_nowait()
-                    except queue.Empty:
-                        pass
-                
-                timestamp = time.time()
-                if local_queue:
-                    try:
-                        local_queue.put_nowait((success, frame, timestamp))
-                    except (queue.Full, AttributeError):
-                        pass
-                
-                if not success:
-                    time.sleep(0.05)
-
-        reader_thread = threading.Thread(target=_reader, daemon=True)
-        reader_thread.start()
-        add_log("[VIDEO] Reader thread started")
 
     while state.is_running:
         candidates = _get_stream_candidates()
-        
-        # 過濾掉 .local 主機名，優先嘗試 192.168.4.1 或已偵測到的 IP
         candidates = [(h, u) for h, u in candidates 
                      if h and not h.endswith('.local') and _is_valid_ip(h)]
         
+        # 尋找候選 IP
         if not state.video_url and candidates:
             for idx, (host, url) in enumerate(candidates):
                 if not _is_host_resolvable(host):
@@ -611,7 +517,8 @@ def video_stream_thread():
             time.sleep(2)
             continue
 
-        if cap is None or not cap.isOpened():
+        # 初始化或重連 Stream Reader
+        if stream_reader is None or not stream_reader.is_connected():
             if retry_count >= max_retries:
                 add_log(f"[VIDEO] Max retries, rotating host...")
                 if candidates:
@@ -628,97 +535,69 @@ def video_stream_thread():
                         break
                 time.sleep(2)
                 retry_count = 0
+                if stream_reader:
+                    stream_reader.stop()
+                    stream_reader = None
                 continue
 
-            add_log(f"[VIDEO] Connecting to {state.video_url}...")
-            try:
-                cap = cv2.VideoCapture(state.video_url, cv2.CAP_FFMPEG)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                
-                if hasattr(cv2, 'CAP_PROP_OPEN_TIMEOUT_MSEC'):
-                    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
-                if hasattr(cv2, 'CAP_PROP_READ_TIMEOUT_MSEC'):
-                    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
+            if stream_reader:
+                stream_reader.stop()
+            
+            # 使用 MJPEGStreamReader 並指定 Source IP (Camera Net)
+            add_log(f"[VIDEO] Connecting to {state.video_url} via {state.camera_net_ip}...")
+            stream_reader = MJPEGStreamReader(
+                state.video_url, 
+                source_ip=state.camera_net_ip
+            )
+            stream_reader.start()
+            
+            # 給一點時間連線
+            start_wait = time.time()
+            while not stream_reader.is_connected() and time.time() - start_wait < 3.0:
+                time.sleep(0.1)
 
-                if cap.isOpened():
-                    add_log("[VIDEO] ✅ Stream connected!")
-                    state.stream_connected = True
-                    retry_count = 0
-                    
-                    start_frame_reader(cap)
-                    last_success_time = time.time()
-                else:
-                    add_log("[VIDEO] Failed to open stream")
-                    cleanup_capture()
-                    retry_count += 1
-                    time.sleep(2)
-                    continue
-                    
-            except Exception as e:
-                add_log(f"[VIDEO] Connection error: {e}")
-                cleanup_capture()
+            if stream_reader.is_connected():
+                add_log("[VIDEO] ✅ Stream connected!")
+                state.stream_connected = True
+                retry_count = 0
+            else:
+                add_log("[VIDEO] Failed to open stream")
                 retry_count += 1
                 time.sleep(2)
                 continue
 
-        try:
-            if frame_queue is None or (reader_thread and not reader_thread.is_alive()):
-                add_log("[VIDEO] Reader died, forcing reconnect...")
-                cleanup_capture()
-                retry_count += 1
-                time.sleep(1)
-                continue
+        # 讀取 Frame
+        frame, frame_ts = stream_reader.get_frame()
+        if frame is not None:
+            # 處理 AI 偵測
+            if state.ai_enabled and state.detector and state.detector.enabled:
+                try:
+                    result = state.detector.detect(frame)
+                    if isinstance(result, tuple) and len(result) == 3:
+                        frame, detections, control_cmd = result
+                except Exception as e:
+                    add_log(f"[AI] Error: {e}")
 
-            try:
-                success, frame, frame_ts = frame_queue.get(timeout=0.5)
-            except queue.Empty:
-                if time.time() - last_success_time > 3:
-                    add_log("[VIDEO] Watchdog timeout, reconnecting...")
-                    cleanup_capture()
-                    retry_count += 1
-                continue
+            with state.frame_lock:
+                state.frame_buffer = frame.copy()
+            
+            # 簡單流速控制，避免 CPU 滿載
+            time.sleep(0.01)
+        else:
+            time.sleep(0.1)
 
-            if success and frame is not None:
-                last_success_time = frame_ts
-                retry_count = 0
-
-                if state.ai_enabled and state.detector and state.detector.enabled:
-                    try:
-                        result = state.detector.detect(frame)
-                        if isinstance(result, tuple) and len(result) == 3:
-                            frame, detections, control_cmd = result
-                    except Exception as e:
-                        add_log(f"[AI] Error: {e}")
-
-                with state.frame_lock:
-                    state.frame_buffer = frame.copy()
-
-            else:
-                if time.time() - last_success_time > 3:
-                    add_log("[VIDEO] Read timeout, reconnecting...")
-                    cleanup_capture()
-                    retry_count += 1
-                time.sleep(0.1)
-
-        except Exception as e:
-            add_log(f"[VIDEO] Loop error: {e}")
-            cleanup_capture()
-            retry_count += 1
-            time.sleep(1)
-
-    cleanup_capture()
+    if stream_reader:
+        stream_reader.stop()
     add_log("Video Stream Thread Stopped")
 
 def generate_frames():
     """Flask 串流產生器（從緩衝區讀取）"""
     no_signal_frame = None
-    last_frame_time = 0
     
     while state.is_running:
         with state.frame_lock:
             if state.frame_buffer is not None:
                 frame = state.frame_buffer.copy()
-                last_frame_time = time.time()
             else:
                 frame = None
         
@@ -739,7 +618,6 @@ def generate_frames():
         time.sleep(0.03)
 
 def create_no_signal_frame():
-    """建立 NO SIGNAL 畫面"""
     import numpy as np
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
     cv2.putText(frame, "NO SIGNAL", (180, 240),
@@ -747,7 +625,6 @@ def create_no_signal_frame():
     cv2.putText(frame, "Check ESP32-S3 Camera", (140, 300),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
     return frame
-
 
 def udp_discovery_thread():
     add_log("UDP Discovery Thread Started...")
@@ -787,8 +664,6 @@ def udp_discovery_thread():
 
         _apply_camera_ip(ip, stream_url, "[UDP] ")
 
-
-# === Serial Worker Thread ===
 def serial_worker_thread():
     add_log("Serial Worker Started...")
     while state.is_running:
@@ -830,8 +705,6 @@ def serial_worker_thread():
                     line = state.ser.readline().decode(errors='ignore').strip()
                     if not line:
                         continue
-
-                    # 解析 IP
                     ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', line)
                     if ip_match and _is_valid_ip(ip_match.group()):
                         ip = ip_match.group()
@@ -840,90 +713,70 @@ def serial_worker_thread():
                             state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
                             add_log(f"📹 Camera IP detected: {ip}")
                             add_log(f"🎥 Stream URL: {state.video_url}")
-
                         if not state.bridge_ip or state.bridge_ip.endswith('.local') or state.bridge_ip != ip:
                             state.bridge_ip = ip
                             _persist_bridge_host(ip)
                             add_log(f"🔄 Bridge host updated to {ip}")
 
-                    # 解析距離
                     if "DIST:" in line:
                         try:
                             parts = line.split(":")
                             state.radar_dist = float(parts[1].strip())
-                        except:
-                            pass
-
+                        except: pass
             except Exception as e:
                 if state.ser:
                     state.ser.close()
                 state.ser = None
-                
         time.sleep(0.01)
 
-# === Xbox Controller Thread ===
 def xbox_controller_thread():
     add_log("Xbox Controller Thread Started...")
     controller = XboxController()
     if not controller.joystick:
         add_log("Xbox Controller not found. Waiting...")
-
     last_cmd = None
     last_missing_log = 0
     controller_ready = controller.joystick is not None
     using_browser_stream = False
     paused_for_flash = False
-
     while state.is_running:
         if state.is_flashing:
-            if not paused_for_flash:
-                paused_for_flash = True
+            if not paused_for_flash: paused_for_flash = True
             time.sleep(0.5)
             continue
         elif paused_for_flash:
             paused_for_flash = False
-
         controller_state = controller.get_input()
         source = "hardware"
-
         if controller_state == "QUIT":
             state.is_running = False
             break
-
         if not controller_state:
             recent_browser_input = browser_controller_state["data"]
             if recent_browser_input and time.time() - browser_controller_state["timestamp"] < 1.0:
                 controller_state = recent_browser_input
                 source = "browser"
-                if not using_browser_stream:
-                    using_browser_stream = True
+                if not using_browser_stream: using_browser_stream = True
             else:
                 using_browser_stream = False
-                if controller_ready:
-                    controller_ready = False
+                if controller_ready: controller_ready = False
                 if time.time() - last_missing_log > 3:
                     last_missing_log = time.time()
                 time.sleep(0.1)
                 continue
-
         if not controller_ready and source == "hardware":
             controller_ready = True
-
         cmd = _build_cmd_from_state(controller_state)
-
         if cmd != last_cmd:
             send_serial_command(cmd, source="Xbox")
             last_cmd = cmd
-
         controller_state_with_cmd = dict(controller_state)
         controller_state_with_cmd["cmd"] = cmd
         controller_state_with_cmd["source"] = source
         socketio.emit('controller_data', controller_state_with_cmd)
         time.sleep(0.02)
-        
     pygame.quit()
 
-# === Flask 路由 ===
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -983,9 +836,7 @@ def api_control():
 def toggle_ai():
     if not YOLO_AVAILABLE:
         return jsonify({"status": "error", "msg": "AI Library Missing"})
-    
     state.ai_enabled = not state.ai_enabled
-    
     if state.ai_enabled and state.detector is None:
         try:
             state.detector = ObjectDetector()
@@ -997,7 +848,6 @@ def toggle_ai():
             state.ai_enabled = False
             state.detector = None
             return jsonify({"status": "error", "msg": str(e)})
-    
     status_str = "ACTIVATED" if state.ai_enabled else "DEACTIVATED"
     add_log(f"AI HUD {status_str}")
     return jsonify({"status": "ok", "ai_enabled": state.ai_enabled})
@@ -1005,15 +855,12 @@ def toggle_ai():
 @app.route('/api/set_ip', methods=['POST'])
 def api_set_ip():
     data = request.get_json(silent=True) or {}
-    
     car_ip = data.get('car_ip')
     cam_ip = data.get('cam_ip')
-    
     if car_ip:
         state.car_ip = car_ip
         state.current_ip = car_ip
         add_log(f"🚗 Car IP Set: {car_ip}")
-    
     if cam_ip:
         state.camera_ip = cam_ip
         state.video_url = f"http://{cam_ip}:{config.DEFAULT_STREAM_PORT}/stream"
@@ -1022,17 +869,13 @@ def api_set_ip():
         if not state.bridge_ip:
             state.bridge_ip = cam_ip
             _persist_bridge_host(cam_ip)
-    
     return jsonify({"status": "ok", "car_ip": car_ip, "cam_ip": cam_ip})
 
-# === 新增：網卡資訊 API ===
 @app.route('/netinfo')
 def api_netinfo():
-    """提供詳細的網卡資訊，供除錯與驗證"""
     return jsonify(state.net_info)
 
 if __name__ == '__main__':
-    # 啟動所有執行緒
     threading.Thread(target=serial_worker_thread, daemon=True).start()
     threading.Thread(target=udp_discovery_thread, daemon=True).start()
     threading.Thread(target=xbox_controller_thread, daemon=True).start()
@@ -1044,10 +887,7 @@ if __name__ == '__main__':
     print(f"📦 YOLO: {YOLO_AVAILABLE}")
     print(f"🔧 Serial Auto-Detection: ACTIVE")
     print(f"🎮 Xbox: {'ACTIVE' if pygame.joystick.get_count() > 0 else 'NOT FOUND'}")
-
-    # 印出網卡偵測摘要
     state.print_network_summary()
-
     if state.video_url:
         print(f"🎥 Stream URL: {state.video_url}")
     print("=" * 60)
