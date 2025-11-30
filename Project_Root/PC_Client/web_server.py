@@ -7,6 +7,7 @@ import re
 import socket
 import math
 from pathlib import Path
+import queue
 import requests
 import serial
 import pygame
@@ -400,10 +401,55 @@ def video_stream_thread():
     """專門負責從 ESP32 拉取影像的執行緒"""
     add_log("Video Stream Thread Started...")
     cap = None
+    reader_thread = None
+    reader_stop_event = None
+    frame_queue = None
     retry_count = 0
     max_retries = 3
     last_success_time = 0
     candidate_index = 0
+
+    def cleanup_capture():
+        nonlocal cap, reader_thread, reader_stop_event, frame_queue
+        if reader_stop_event:
+            reader_stop_event.set()
+        if reader_thread and reader_thread.is_alive():
+            reader_thread.join(timeout=0.5)
+        reader_thread = None
+        reader_stop_event = None
+        frame_queue = None
+        if cap:
+            cap.release()
+        cap = None
+        state.stream_connected = False
+
+    def start_frame_reader(current_cap):
+        nonlocal reader_thread, reader_stop_event, frame_queue
+        reader_stop_event = threading.Event()
+        frame_queue = queue.Queue(maxsize=1)
+
+        def _reader():
+            while not reader_stop_event.is_set():
+                try:
+                    success, frame = current_cap.read()
+                    if frame_queue.full():
+                        try:
+                            frame_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                    timestamp = time.time()
+                    try:
+                        frame_queue.put_nowait((success, frame, timestamp))
+                    except queue.Full:
+                        pass
+                    if not success:
+                        time.sleep(0.05)
+                except Exception as e:
+                    add_log(f"[VIDEO] Reader exception: {e}")
+                    break
+
+        reader_thread = threading.Thread(target=_reader, daemon=True)
+        reader_thread.start()
 
     while state.is_running:
         candidates = _get_stream_candidates()
@@ -446,7 +492,19 @@ def video_stream_thread():
                 cap = cv2.VideoCapture(state.video_url)
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 減少緩衝延遲
                 cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-                
+
+                # 嘗試設定 FFmpeg 逾時（若可用）
+                open_timeout_prop = getattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC", None)
+                read_timeout_prop = getattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC", None)
+                if open_timeout_prop is not None:
+                    cap.set(open_timeout_prop, 3000)
+                if read_timeout_prop is not None:
+                    cap.set(read_timeout_prop, 3000)
+                if open_timeout_prop is None or read_timeout_prop is None:
+                    add_log("[VIDEO] FFmpeg timeout props not available, enabling watchdog reader")
+                else:
+                    add_log("[VIDEO] FFmpeg timeouts configured (open/read = 3000 ms)")
+
                 if cap.isOpened():
                     add_log("[VIDEO] Stream connected!")
                     state.stream_connected = True
@@ -454,26 +512,44 @@ def video_stream_thread():
                     host_from_url = state.video_url.split("//")[-1].split("/")[0].split(":")[0]
                     if host_from_url:
                         state.camera_ip = host_from_url
+
+                    start_frame_reader(cap)
+                    last_success_time = time.time()
                 else:
                     add_log("[VIDEO] Failed to open stream")
-                    cap = None
+                    cleanup_capture()
                     retry_count += 1
                     time.sleep(2)
                     continue
             except Exception as e:
                 add_log(f"[VIDEO] Connection error: {e}")
-                cap = None
+                cleanup_capture()
                 retry_count += 1
                 time.sleep(2)
                 continue
-        
+
         # 讀取影像
         try:
-            success, frame = cap.read()
+            if frame_queue is None:
+                add_log("[VIDEO] Reader not initialized, forcing reconnect...")
+                cleanup_capture()
+                retry_count += 1
+                time.sleep(1)
+                continue
+
+            try:
+                success, frame, frame_ts = frame_queue.get(timeout=0.5)
+            except queue.Empty:
+                if time.time() - last_success_time > 3:
+                    add_log("[VIDEO] Read watchdog timeout (blocking read), reconnecting...")
+                    cleanup_capture()
+                    retry_count += 1
+                continue
+
             if success:
-                last_success_time = time.time()
+                last_success_time = frame_ts
                 retry_count = 0
-                
+
                 # AI 處理
                 if state.ai_enabled and state.detector and state.detector.enabled:
                     try:
@@ -482,32 +558,25 @@ def video_stream_thread():
                             frame, detections, control_cmd = result
                     except Exception as e:
                         add_log(f"[AI] Processing error: {e}")
-                
+
                 # 儲存到緩衝區
                 with state.frame_lock:
                     state.frame_buffer = frame.copy()
-                
+
             else:
-                # 檢查是否超過 3 秒沒有成功讀取
                 if time.time() - last_success_time > 3:
-                    add_log("[VIDEO] Stream timeout, reconnecting...")
-                    cap.release()
-                    cap = None
-                    state.stream_connected = False
+                    add_log("[VIDEO] Read watchdog timeout (no frames), reconnecting...")
+                    cleanup_capture()
                     retry_count += 1
                 time.sleep(0.1)
-                
+
         except Exception as e:
             add_log(f"[VIDEO] Read error: {e}")
-            if cap:
-                cap.release()
-            cap = None
-            state.stream_connected = False
+            cleanup_capture()
             retry_count += 1
             time.sleep(1)
-    
-    if cap:
-        cap.release()
+
+    cleanup_capture()
     add_log("Video Stream Thread Stopped")
 
 def generate_frames():
