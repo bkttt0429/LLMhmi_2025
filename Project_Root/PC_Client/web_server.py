@@ -17,6 +17,7 @@ from queue import SimpleQueue, Empty
 from serial.tools import list_ports
 from flask import Flask, render_template, Response, request, jsonify
 from flask_socketio import SocketIO, emit
+from multiprocessing import Process, Queue
 
 # 路徑設定
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,11 +28,14 @@ import config
 from serial_worker import serial_worker, prepare_sketch, compile_and_upload
 
 # 導入 AI 模組
-from ai_detector import ObjectDetector, YOLO_AVAILABLE
+from ai_detector import YOLO_AVAILABLE
+
+# 導入 Video Process
+from video_process import video_process_target, CMD_SET_URL, CMD_SET_AI, CMD_EXIT
 
 # 導入自訂網卡綁定模組
 from network_utils import SourceAddressAdapter
-from mjpeg_reader import MJPEGStreamReader
+# We don't import MJPEGStreamReader here anymore, it's used in video_process
 
 # 初始化 Flask 和 SocketIO
 template_dir = os.path.join(BASE_DIR, 'templates')
@@ -97,9 +101,11 @@ def _unique_hosts(hosts):
     return ordered
 
 def _apply_camera_ip(ip, stream_url=None, prefix=""):
+    updated = False
     if state.camera_ip != ip:
         state.camera_ip = ip
         state.video_url = stream_url or f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
+        updated = True
         add_log(f"{prefix}Camera IP detected: {ip}")
         add_log(f"{prefix}Stream URL: {state.video_url}")
     
@@ -107,6 +113,13 @@ def _apply_camera_ip(ip, stream_url=None, prefix=""):
         state.bridge_ip = ip
         _persist_bridge_host(ip)
         add_log(f"{prefix}Bridge host updated to {ip}")
+
+    # Notify Video Process if updated
+    if updated and video_cmd_queue:
+        video_cmd_queue.put((CMD_SET_URL, {
+            'url': state.video_url,
+            'source_ip': state.camera_net_ip
+        }))
 
 def _build_stream_url(host: str | None):
     if not host:
@@ -177,12 +190,11 @@ class SystemState:
         self.logs = []
         self.is_running = True
         self.ai_enabled = False
-        self.detector = None
         self.is_flashing = False
         self.flash_lock = threading.Lock()
         self.add_log = None
         
-        self.frame_buffer = None
+        self.frame_buffer = None # Now stores JPEG bytes directly
         self.frame_lock = threading.Lock()
         self.stream_connected = False
         
@@ -223,7 +235,10 @@ browser_controller_state = {"data": None, "timestamp": 0.0}
 UDP_PORT = 4210
 CAMERA_DISCOVERY_PORT = getattr(config, "CAMERA_DISCOVERY_PORT", 4211)
 
-# 注意：我們現在不使用單一的全域 udp_sock，而是根據需求綁定到正確介面
+# Multiprocessing Queues (initialized in main)
+video_cmd_queue = None
+video_frame_queue = None
+video_log_queue = None
 
 # Xbox 手把設定
 AXIS_LEFT_STICK_X = 0
@@ -489,132 +504,79 @@ def send_serial_command(cmd, source="HTTP"):
 
     return False, "Car unreachable"
 
-def video_stream_thread():
-    """使用 MJPEGStreamReader (requests based) 替代 OpenCV VideoCapture"""
-    add_log("Video Stream Thread Started (MJPEG Mode)...")
+def video_manager_thread():
+    """Manages the video stream status and reads frames from the video process."""
+    add_log("Video Manager Thread Started...")
     
-    stream_reader = None
-    retry_count = 0
-    max_retries = 3
-    candidate_index = 0
+    # 1. Send initial config to video process
+    initial_config = {
+        'video_url': state.video_url,
+        'camera_net_ip': state.camera_net_ip
+    }
+    video_cmd_queue.put((CMD_SET_URL, initial_config))
 
     while state.is_running:
-        candidates = _get_stream_candidates()
-        candidates = [(h, u) for h, u in candidates 
-                     if h and not h.endswith('.local') and _is_valid_ip(h)]
+        # Check IP candidates if not set (similar to old logic)
+        # But for now we rely on explicit IP setting or serial/UDP discovery to set the URL
+        # and push it to the video process.
         
-        # 尋找候選 IP
-        if not state.video_url and candidates:
-            for idx, (host, url) in enumerate(candidates):
-                if not _is_host_resolvable(host):
-                    continue
-                candidate_index = idx
-                state.camera_ip, state.video_url = host, url
-                add_log(f"[VIDEO] Priming stream: {state.video_url}")
-                break
+        # In this simplified manager, we mainly check if we have recent frames
+        # to determine "connected" status.
 
-        if not state.video_url:
-            add_log("[VIDEO] Waiting for camera IP...")
-            time.sleep(2)
-            continue
-
-        # 初始化或重連 Stream Reader
-        if stream_reader is None or not stream_reader.is_connected():
-            if retry_count >= max_retries:
-                add_log(f"[VIDEO] Max retries, rotating host...")
-                if candidates:
-                    tried = 0
-                    while tried < len(candidates):
-                        candidate_index = (candidate_index + 1) % len(candidates)
-                        next_host, next_url = candidates[candidate_index]
-                        tried += 1
-                        if not _is_host_resolvable(next_host):
-                            continue
-                        state.camera_ip = next_host
-                        state.video_url = next_url
-                        add_log(f"[VIDEO] Switching to {state.video_url}")
-                        break
-                time.sleep(2)
-                retry_count = 0
-                if stream_reader:
-                    stream_reader.stop()
-                    stream_reader = None
-                continue
-
-            if stream_reader:
-                stream_reader.stop()
+        # Log consumption
+        try:
+            while not video_log_queue.empty():
+                msg = video_log_queue.get_nowait()
+                add_log(msg)
+        except:
+            pass
             
-            # 使用 MJPEGStreamReader 並指定 Source IP (Camera Net)
-            add_log(f"[VIDEO] Connecting to {state.video_url} via {state.camera_net_ip}...")
-            stream_reader = MJPEGStreamReader(
-                state.video_url, 
-                source_ip=state.camera_net_ip
-            )
-            stream_reader.start()
+        # We don't need to poll frames here, that's done in frame_receiver_thread
+        # or we can combine them. Let's combine for simplicity but reading queue should be fast.
+        # Actually separate frame receiver is better to avoid blocking management logic if any.
+
+        time.sleep(0.5)
+
+    video_cmd_queue.put((CMD_EXIT, None))
+    add_log("Video Manager Stopped")
+
+def frame_receiver_thread():
+    """Reads JPEG bytes from the video process queue."""
+    while state.is_running:
+        try:
+            # Block slightly to wait for frame
+            frame_bytes = video_frame_queue.get(timeout=0.1)
             
-            # 給一點時間連線
-            start_wait = time.time()
-            while not stream_reader.is_connected() and time.time() - start_wait < 3.0:
-                time.sleep(0.1)
-
-            if stream_reader.is_connected():
-                add_log("[VIDEO] ✅ Stream connected!")
-                state.stream_connected = True
-                retry_count = 0
-            else:
-                add_log("[VIDEO] Failed to open stream")
-                retry_count += 1
-                time.sleep(2)
-                continue
-
-        # 讀取 Frame
-        frame, frame_ts = stream_reader.get_frame()
-        if frame is not None:
-            # 處理 AI 偵測
-            if state.ai_enabled and state.detector and state.detector.enabled:
-                try:
-                    result = state.detector.detect(frame)
-                    if isinstance(result, tuple) and len(result) == 3:
-                        frame, detections, control_cmd = result
-                except Exception as e:
-                    add_log(f"[AI] Error: {e}")
-
             with state.frame_lock:
-                state.frame_buffer = frame.copy()
-            
-            # 簡單流速控制，避免 CPU 滿載
-            time.sleep(0.01)
-        else:
-            time.sleep(0.1)
-
-    if stream_reader:
-        stream_reader.stop()
-    add_log("Video Stream Thread Stopped")
+                state.frame_buffer = frame_bytes
+                state.stream_connected = True
+        except queue.Empty:
+            # No frame received recently
+            pass
+        except Exception as e:
+            print(f"Frame Receive Error: {e}")
 
 def generate_frames():
-    """Flask 串流產生器（從緩衝區讀取）"""
-    no_signal_frame = None
+    """Flask Stream Generator (reads raw JPEG bytes from buffer)"""
+    no_signal_frame_bytes = None
     
     while state.is_running:
+        frame_bytes = None
         with state.frame_lock:
             if state.frame_buffer is not None:
-                frame = state.frame_buffer.copy()
-            else:
-                frame = None
+                frame_bytes = state.frame_buffer # This is already bytes
         
-        if frame is None:
-            if no_signal_frame is None:
+        if frame_bytes is None:
+            if no_signal_frame_bytes is None:
                 no_signal_frame = create_no_signal_frame()
-            frame = no_signal_frame
+                ret, buffer = cv2.imencode('.jpg', no_signal_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                if ret:
+                    no_signal_frame_bytes = buffer.tobytes()
+            frame_bytes = no_signal_frame_bytes
         
-        try:
-            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            if ret:
-                frame_bytes = buffer.tobytes()
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        except Exception as e:
-            print(f"[VIDEO] Encode error: {e}")
+        if frame_bytes:
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         
         time.sleep(0.03)
 
@@ -734,15 +696,10 @@ def serial_worker_thread():
                     ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', line)
                     if ip_match and _is_valid_ip(ip_match.group()):
                         ip = ip_match.group()
+
+                        # Only update if changed
                         if state.camera_ip != ip:
-                            state.camera_ip = ip
-                            state.video_url = f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
-                            add_log(f"📹 Camera IP detected: {ip}")
-                            add_log(f"🎥 Stream URL: {state.video_url}")
-                        if not state.bridge_ip or state.bridge_ip.endswith('.local') or state.bridge_ip != ip:
-                            state.bridge_ip = ip
-                            _persist_bridge_host(ip)
-                            add_log(f"🔄 Bridge host updated to {ip}")
+                            _apply_camera_ip(ip, prefix="[SERIAL] ")
 
                     if "DIST:" in line:
                         try:
@@ -867,18 +824,13 @@ def api_control():
 def toggle_ai():
     if not YOLO_AVAILABLE:
         return jsonify({"status": "error", "msg": "AI Library Missing"})
+
     state.ai_enabled = not state.ai_enabled
-    if state.ai_enabled and state.detector is None:
-        try:
-            state.detector = ObjectDetector()
-            if not state.detector.enabled:
-                state.ai_enabled = False
-                state.detector = None
-                return jsonify({"status": "error", "msg": "AI Init Failed"})
-        except Exception as e:
-            state.ai_enabled = False
-            state.detector = None
-            return jsonify({"status": "error", "msg": str(e)})
+
+    # Notify Process
+    if video_cmd_queue:
+        video_cmd_queue.put((CMD_SET_AI, state.ai_enabled))
+
     status_str = "ACTIVATED" if state.ai_enabled else "DEACTIVATED"
     add_log(f"AI HUD {status_str}")
     return jsonify({"status": "ok", "ai_enabled": state.ai_enabled})
@@ -895,6 +847,14 @@ def api_set_ip():
     if cam_ip:
         state.camera_ip = cam_ip
         state.video_url = f"http://{cam_ip}:{config.DEFAULT_STREAM_PORT}/stream"
+
+        # Update process
+        if video_cmd_queue:
+            video_cmd_queue.put((CMD_SET_URL, {
+                'url': state.video_url,
+                'source_ip': state.camera_net_ip
+            }))
+
         add_log(f"📹 Camera IP Set: {cam_ip}")
         add_log(f"🎥 Stream URL: {state.video_url}")
         if not state.bridge_ip:
@@ -907,11 +867,31 @@ def api_netinfo():
     return jsonify(state.net_info)
 
 if __name__ == '__main__':
+    # Initialize Multiprocessing Queues
+    video_cmd_queue = Queue()
+    video_frame_queue = Queue(maxsize=3) # Limit buffer to reduce latency
+    video_log_queue = Queue()
+
+    initial_config = {
+        'video_url': state.video_url,
+        'camera_net_ip': state.camera_net_ip,
+        'ai_enabled': state.ai_enabled
+    }
+
+    # Start Video Process
+    p = Process(target=video_process_target, args=(video_cmd_queue, video_frame_queue, video_log_queue, initial_config))
+    p.daemon = True
+    p.start()
+
     threading.Thread(target=serial_worker_thread, daemon=True).start()
     threading.Thread(target=udp_discovery_thread, daemon=True).start()
     threading.Thread(target=xbox_controller_thread, daemon=True).start()
     threading.Thread(target=websocket_bridge_thread, daemon=True).start()
-    threading.Thread(target=video_stream_thread, daemon=True).start()
+
+    # New management threads
+    threading.Thread(target=video_manager_thread, daemon=True).start()
+    threading.Thread(target=frame_receiver_thread, daemon=True).start()
+
     threading.Thread(target=status_push_thread, daemon=True).start()
 
     print("=" * 60)
@@ -924,4 +904,8 @@ if __name__ == '__main__':
         print(f"🎥 Stream URL: {state.video_url}")
     print("=" * 60)
 
-    socketio.run(app, host=config.WEB_HOST, port=config.WEB_PORT, debug=False)
+    try:
+        socketio.run(app, host=config.WEB_HOST, port=config.WEB_PORT, debug=False)
+    except KeyboardInterrupt:
+        video_cmd_queue.put((CMD_EXIT, None))
+        p.join()
