@@ -468,7 +468,8 @@ def send_serial_command(cmd, source="HTTP"):
     for url in target_urls:
         try:
             # 使用 state.control_session 確保從正確網卡送出
-            resp = state.control_session.get(f"{url}?act={cmd}", timeout=0.8)
+            # [Optimization] Reduced timeout to 0.2s for fail-fast
+            resp = state.control_session.get(f"{url}?act={cmd}", timeout=0.2)
             if resp.ok:
                 return True, "Sent via WiFi"
         except requests.exceptions.RequestException:
@@ -827,10 +828,15 @@ def api_control():
     cmd = (data.get('cmd') or '').strip()
     if not cmd:
         return jsonify({"status": "error", "msg": "Missing command"}), 400
-    success, msg = send_serial_command(cmd, source="API")
-    status = "ok" if success else "error"
-    code = 200 if success else 500
-    return jsonify({"status": status, "msg": msg, "cmd": cmd}), code
+
+    # [Optimization] Fire-and-forget logic using thread
+    # Immediate response to client to prevent UI blocking
+    def background_send(command):
+        send_serial_command(command, source="API")
+
+    threading.Thread(target=background_send, args=(cmd,), daemon=True).start()
+
+    return jsonify({"status": "ok", "msg": "Command queued", "cmd": cmd}), 200
 
 @app.route('/api/toggle_ai', methods=['POST'])
 def toggle_ai():
