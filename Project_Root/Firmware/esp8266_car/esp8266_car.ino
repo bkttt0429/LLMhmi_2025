@@ -2,18 +2,22 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <Servo.h>
-#include <espnow.h>
 #include <WiFiUdp.h>
 
 // ============= WiFi 設定 =============
-const char* ssid     = "Bk";
-const char* password = ".........";
+const char* ssid     = "ESP32_Car";
+const char* password = "password";
 
 // ============= 伺服馬達與腳位 =============
 Servo leftServo;
 Servo rightServo;
 const int LEFT_PIN = 5;  // D1
 const int RIGHT_PIN = 4; // D2
+
+// ============= 超聲波設定 =============
+// WARNING: GPIO 0 (D3) is a strapping pin. If pulled LOW at boot, the ESP8266 will not boot into firmware.
+// Ensure your ultrasonic sensor does not pull this pin LOW during power-up.
+const int US_SIG_PIN = 0; // D3 (GPIO 0)
 
 // ============= 速度設定 (平滑插值用) =============
 const int STOP_VAL = 1500;
@@ -28,7 +32,7 @@ const int ARC_OUTER_FWD_L = 1700;   // 外側全速
 const int ARC_INNER_FWD_R = 1450;
 const int ARC_OUTER_FWD_R = 1300;
 
-// 弧線轉彎 (後退時) - 新增
+// 弧線轉彎 (後退時)
 const int ARC_INNER_BCK_L = 1450;
 const int ARC_OUTER_BCK_L = 1300;
 const int ARC_INNER_BCK_R = 1550;
@@ -47,7 +51,26 @@ WiFiUDP udp;
 unsigned long lastCmdTime = 0;
 const unsigned long TIMEOUT_MS = 2000;
 const uint16_t UDP_PORT = 4210;
+const uint16_t UDP_DIST_PORT = 4211;
+const char* CONTROLLER_IP = "192.168.4.1"; // ESP32-S3 IP (Gateway)
 String lastCmd = "";
+
+unsigned long lastDistTime = 0;
+const unsigned long DIST_INTERVAL_MS = 200;
+
+// ============= 距離量測 =============
+float get_distance() {
+  pinMode(US_SIG_PIN, OUTPUT);
+  digitalWrite(US_SIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(US_SIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(US_SIG_PIN, LOW);
+  pinMode(US_SIG_PIN, INPUT_PULLUP);
+  unsigned long duration = pulseIn(US_SIG_PIN, HIGH, 30000); // 30ms timeout
+  if (duration == 0) return -1.0;
+  return duration * 0.034 / 2.0;
+}
 
 // ============= 平滑速度更新 =============
 void smoothUpdate() {
@@ -102,7 +125,7 @@ void arcTurnRight() {
   setSpeed(ARC_OUTER_FWD_L, ARC_INNER_FWD_R);
 }
 
-// [新增] 後退弧線轉彎
+// 後退弧線轉彎
 void arcTurnLeftBack() {
   setSpeed(ARC_INNER_BCK_L, ARC_OUTER_BCK_R);
 }
@@ -130,14 +153,14 @@ void processCommand(const String& cmd) {
       leftVal = constrain(leftVal, 1000, 2000);
       rightVal = constrain(rightVal, 1000, 2000);
 
-      Serial.printf("[CMD] PWM L:%d R:%d\n", leftVal, rightVal);
+      // Serial.printf("[CMD] PWM L:%d R:%d\n", leftVal, rightVal);
       setSpeed(leftVal, rightVal);
       return;
     }
   }
 
   char c = cmd.charAt(0);
-  Serial.printf("[CMD] Recv: %c\n", c);
+  // Serial.printf("[CMD] Recv: %c\n", c);
 
   switch (c) {
     case 'F': goForward(); break;
@@ -151,24 +174,6 @@ void processCommand(const String& cmd) {
     case 'S': stopCar(); break;
     default: stopCar(); break;
   }
-}
-
-// ESP-NOW 接收回調
-void onDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
-  if (len > 0) {
-    String cmd = String((char*)incomingData).substring(0, len);
-    processCommand(cmd);
-  }
-}
-
-void initEspNow() {
-  if (esp_now_init() != 0) {
-    Serial.println("[ESPNOW] Init failed");
-    return;
-  }
-  esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
-  esp_now_register_recv_cb(onDataRecv);
-  Serial.println("[ESPNOW] Ready");
 }
 
 // ============= Setup & Loop =============
@@ -197,10 +202,11 @@ void setup() {
 
   udp.begin(UDP_PORT);
   Serial.printf("UDP Listening on port %d\n", UDP_PORT);
-
-  initEspNow();
   
-  server.on("/", [](){ server.send(200, "text/plain", "Car Ready"); });
+  // Init Ultrasonic
+  pinMode(US_SIG_PIN, INPUT_PULLUP);
+
+  server.on("/", [](){ server.send(200, "text/plain", "Car Ready (UDP Mode)"); });
   server.on("/cmd", [](){
     if(server.hasArg("act")) {
       String cmd = server.arg("act");
@@ -215,14 +221,25 @@ void loop() {
   server.handleClient();
   MDNS.update();
   
-  // UDP 處理
+  // UDP 處理 (Receive Commands)
   int packetSize = udp.parsePacket();
   if (packetSize) {
-    char packetBuffer[255];
+    char packetBuffer[256]; // Increased buffer size to accommodate null terminator safely
     int len = udp.read(packetBuffer, 255);
     if (len > 0) {
       packetBuffer[len] = 0;
       processCommand(String(packetBuffer));
+    }
+  }
+
+  // Send Distance Periodically
+  if (millis() - lastDistTime >= DIST_INTERVAL_MS) {
+    lastDistTime = millis();
+    float dist = get_distance();
+    if (dist >= 0) {
+      udp.beginPacket(CONTROLLER_IP, UDP_DIST_PORT);
+      udp.print(dist);
+      udp.endPacket();
     }
   }
 
