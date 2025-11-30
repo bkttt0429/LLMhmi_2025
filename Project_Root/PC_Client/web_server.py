@@ -200,11 +200,23 @@ class SystemState:
         
         # 建立一個綁定到 Control/Internet Interface 的 session 用於發送 HTTP 指令
         self.control_session = requests.Session()
-        if self.internet_net_ip:
-            adapter = SourceAddressAdapter(self.internet_net_ip)
+
+        # 根據目標 IP (Car IP) 決定要綁定哪張網卡
+        # 如果 Car IP 在 Camera 網段 (e.g. 192.168.4.1), 則綁定到 Camera Net Interface
+        target_is_camera_net = self.car_ip and self.car_ip.startswith("192.168.4.")
+
+        bind_ip = None
+        if target_is_camera_net and self.camera_net_ip:
+             bind_ip = self.camera_net_ip
+             print(f"[INIT] Control Target is on Camera Net. Binding to {bind_ip}")
+        elif self.internet_net_ip:
+             bind_ip = self.internet_net_ip
+             print(f"[INIT] Control Target is on Internet Net. Binding to {bind_ip}")
+
+        if bind_ip:
+            adapter = SourceAddressAdapter(bind_ip)
             self.control_session.mount('http://', adapter)
             self.control_session.mount('https://', adapter)
-            print(f"[INIT] Control HTTP Session bound to {self.internet_net_ip}")
 
     def print_network_summary(self):
         print("="*60)
