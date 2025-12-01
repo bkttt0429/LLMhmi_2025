@@ -1,0 +1,9 @@
+Flask
+Flask-SocketIO
+opencv-python-headless
+requests
+pyserial
+pygame
+websocket-client
+psutil
+ultralytics
