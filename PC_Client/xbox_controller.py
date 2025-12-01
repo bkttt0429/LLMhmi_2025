@@ -58,6 +58,8 @@ class XboxController:
 
         # 讀取搖桿軸心數值
         left_stick_x = self.joystick.get_axis(AXIS_LEFT_STICK_X)
+        left_stick_y = self.joystick.get_axis(AXIS_LEFT_STICK_Y)
+
         if abs(left_stick_x) < JOYSTICK_DEADZONE:
             left_stick_x = 0.0
         if abs(left_stick_y) < JOYSTICK_DEADZONE:
