@@ -18,7 +18,7 @@ DEFAULT_STREAM_HOSTS = [
 # Arduino CLI 路徑 (燒錄用)
 SKETCH_DIR = "../Firmware/esp32s3_integrated"
 SKETCH_NAME = "esp32s3_integrated.ino"
-SOURCE_INO = "../code.ino"             
+SOURCE_INO = "../code.ino"
 FQBN = ("esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=fatflash,UploadSpeed=921600")
 ESP32_URL = "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
 
