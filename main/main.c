@@ -31,7 +31,7 @@ void app_main(void)
     gpio_config(&io_conf);
     gpio_set_level(LED_PIN, 0); // Blink once
     vTaskDelay(100 / portTICK_PERIOD_MS);
-    gpio_set_level(LED_PIN, 1);
+    gpio_set_level(LED_PIN, 1); 
 
     ESP_LOGI(TAG, "Starting ESP32-S3 Car Firmware (Integrated Station Mode)...");
 

@@ -1,89 +1,178 @@
-#include "app_udp.h"
-#include <string.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/semphr.h"
-#include "lwip/err.h"
-#include "lwip/sockets.h"
-#include "lwip/sys.h"
-#include <lwip/netdb.h>
+#include "app_httpd.h"
+#include "esp_http_server.h"
+#include "esp_camera.h"
+#include "img_converters.h"
 #include "esp_log.h"
+#include "app_motor.h"
+#include "app_udp.h"
 #include <stdlib.h>
 
-#define UDP_PORT 4211
-static const char *TAG = "app_udp";
-static float g_distance = 0.0;
-static SemaphoreHandle_t s_mutex = NULL;
+static const char *TAG = "app_httpd";
 
-static void udp_server_task(void *pvParameters)
+#define PART_BOUNDARY "123456789000000000000987654321"
+static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
+static const char* _STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
+static const char* _STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
+
+// Handler for streaming
+static esp_err_t stream_handler(httpd_req_t *req)
 {
-    char rx_buffer[128];
-    struct sockaddr_in dest_addr;
+    camera_fb_t *fb = NULL;
+    esp_err_t res = ESP_OK;
+    size_t _jpg_buf_len;
+    uint8_t *_jpg_buf;
+    char *part_buf[64];
 
-    while (1) {
-        dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        dest_addr.sin_family = AF_INET;
-        dest_addr.sin_port = htons(UDP_PORT);
+    res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);
+    if (res != ESP_OK) {
+        return res;
+    }
 
-        int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-        if (sock < 0) {
-            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+    while (true) {
+        fb = esp_camera_fb_get();
+        if (!fb) {
+            ESP_LOGE(TAG, "Camera capture failed");
+            res = ESP_FAIL;
             break;
         }
-        ESP_LOGI(TAG, "Socket created");
 
-        int err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-        if (err < 0) {
-            ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
+        if (fb->format != PIXFORMAT_JPEG) {
+            // Need conversion if not JPEG (but we init as JPEG)
+             bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
+             esp_camera_fb_return(fb);
+             fb = NULL;
+             if(!jpeg_converted){
+                 ESP_LOGE(TAG, "JPEG compression failed");
+                 res = ESP_FAIL;
+             }
         } else {
-            ESP_LOGI(TAG, "Socket bound, port %d", UDP_PORT);
+            _jpg_buf_len = fb->len;
+            _jpg_buf = fb->buf;
+        }
 
-            struct sockaddr_storage source_addr;
-            socklen_t socklen = sizeof(source_addr);
-
-            while (1) {
-                int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
-
-                if (len < 0) {
-                    ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
-                    break;
-                } else {
-                    rx_buffer[len] = 0; // Null-terminate
-                    // Expecting ASCII float
-                    float d = (float)atof(rx_buffer);
-                    if (s_mutex) {
-                        xSemaphoreTake(s_mutex, portMAX_DELAY);
-                        g_distance = d;
-                        xSemaphoreGive(s_mutex);
-                    }
-                    // ESP_LOGI(TAG, "Received distance: %.2f", d);
-                }
+        if (res == ESP_OK) {
+            if (httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY)) != ESP_OK) {
+                break;
+            }
+            size_t hlen = snprintf((char *)part_buf, 64, _STREAM_PART, _jpg_buf_len);
+            if (httpd_resp_send_chunk(req, (const char *)part_buf, hlen) != ESP_OK) {
+                break;
+            }
+            if (httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len) != ESP_OK) {
+                break;
             }
         }
-
-        if (sock != -1) {
-            ESP_LOGE(TAG, "Shutting down socket and restarting...");
-            shutdown(sock, 0);
-            close(sock);
+        
+        if (fb) {
+            esp_camera_fb_return(fb);
+            fb = NULL;
+            _jpg_buf = NULL;
+        } else if (_jpg_buf) {
+            free(_jpg_buf);
+            _jpg_buf = NULL;
         }
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        
+        // Simple delay to control FPS (optional)
+        vTaskDelay(pdMS_TO_TICKS(40)); // ~25 FPS
     }
-    vTaskDelete(NULL);
+    return res;
 }
 
-void app_udp_init(void)
+// Handler for control: /control?left=X&right=Y
+static esp_err_t control_handler(httpd_req_t *req)
 {
-    s_mutex = xSemaphoreCreateMutex();
-    xTaskCreate(udp_server_task, "udp_server", 4096, NULL, 5, NULL);
+    char buf[100];
+    int left_val = 0;
+    int right_val = 0;
+
+    // Get query string
+    if (httpd_req_get_url_query_str(req, buf, sizeof(buf)) == ESP_OK) {
+        char param[16];
+        if (httpd_query_key_value(buf, "left", param, sizeof(param)) == ESP_OK) {
+            left_val = atoi(param);
+        }
+        if (httpd_query_key_value(buf, "right", param, sizeof(param)) == ESP_OK) {
+            right_val = atoi(param);
+        }
+        
+        app_motor_set_pwm(left_val, right_val);
+        httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send_404(req);
+    }
+    return ESP_OK;
 }
 
-float app_udp_get_distance(void)
+// Handler for distance: /dist
+static esp_err_t dist_handler(httpd_req_t *req)
 {
-    float d = 0.0;
-    if (s_mutex) {
-        xSemaphoreTake(s_mutex, portMAX_DELAY);
-        d = g_distance;
-        xSemaphoreGive(s_mutex);
+    float d = app_udp_get_distance();
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.2f", d);
+    httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// Handler for light (optional): /light?on=1
+static esp_err_t light_handler(httpd_req_t *req)
+{
+    // Not fully implemented with GPIO, just a stub based on user code request
+    // User code: pin 48
+    char buf[100];
+    int state = 0;
+    if (httpd_req_get_url_query_str(req, buf, sizeof(buf)) == ESP_OK) {
+        char param[16];
+        if (httpd_query_key_value(buf, "on", param, sizeof(param)) == ESP_OK) {
+            state = atoi(param);
+            // gpio_set_level(LED_PIN, state); // Need to init GPIO in main or here
+        }
     }
-    return d;
+    httpd_resp_send(req, state ? "ON" : "OFF", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+void app_httpd_start(void)
+{
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.server_port = 80;
+
+    httpd_handle_t server = NULL;
+
+    if (httpd_start(&server, &config) == ESP_OK) {
+        httpd_uri_t stream_uri = {
+            .uri       = "/stream",
+            .method    = HTTP_GET,
+            .handler   = stream_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &stream_uri);
+
+        httpd_uri_t control_uri = {
+            .uri       = "/control",
+            .method    = HTTP_GET,
+            .handler   = control_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &control_uri);
+
+        httpd_uri_t dist_uri = {
+            .uri       = "/dist",
+            .method    = HTTP_GET,
+            .handler   = dist_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &dist_uri);
+
+        httpd_uri_t light_uri = {
+            .uri       = "/light",
+            .method    = HTTP_GET,
+            .handler   = light_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &light_uri);
+
+        ESP_LOGI(TAG, "HTTP Server Started on port 80");
+    } else {
+        ESP_LOGE(TAG, "Failed to start HTTP Server");
+    }
 }
