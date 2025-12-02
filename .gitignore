@@ -20,5 +20,10 @@ __pycache__/
 node_modules/
 dist/
 build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
 # 忽略整個資料夾
 yolov13-main/
