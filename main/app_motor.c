@@ -18,9 +18,9 @@
 
 // Servo Pulse Widths (microseconds)
 // Period = 20000us (50Hz)
-// 1000us = 3276 (approx 5% duty)
-// 1500us = 4915 (approx 7.5% duty)
-// 2000us = 6553 (approx 10% duty)
+// 1000us = 819 (approx 5% duty)
+// 1500us = 1229 (approx 7.5% duty)
+// 2000us = 1638 (approx 10% duty)
 #define SERVO_MIN_US      1000
 #define SERVO_MID_US      1500
 #define SERVO_MAX_US      2000
@@ -30,8 +30,8 @@ static const char *TAG = "app_motor";
 static uint32_t us_to_duty(int us) {
     if (us < SERVO_MIN_US) us = SERVO_MIN_US;
     if (us > SERVO_MAX_US) us = SERVO_MAX_US;
-    // Duty = (us / 20000) * 65536
-    return (uint32_t)((us * 65536) / 20000);
+    // Duty = (us / 20000) * 16384
+    return (uint32_t)((us * 16384) / 20000);
 }
 
 static long map_range(long x, long in_min, long in_max, long out_min, long out_max) {
