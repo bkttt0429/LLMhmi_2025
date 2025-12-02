@@ -27,3 +27,4 @@ dependencies.lock
 
 # 忽略整個資料夾
 yolov13-main/
+.last_bridge_host

@@ -11,14 +11,14 @@ if torch.cuda.is_available():
 
 # 嘗試匯入 YOLO
 try:
-    from ultralytics import YOLO
+    from ./ultralytics import YOLO
     YOLO_AVAILABLE = True
 except ImportError:
     print("⚠️ 警告: 未安裝 ultralytics。請執行 'pip install ultralytics'")
     YOLO_AVAILABLE = False
 
 class ObjectDetector:
-    def __init__(self, model_path='./yolov13n.pt'):
+    def __init__(self, model_path='./yolov13l.pt'):
         self.model = None
         self.enabled = False
         self.frame_count = 0
