@@ -2,6 +2,28 @@ import cv2
 import time
 import numpy as np
 import torch
+import sys
+import os
+
+# === Add Local YOLO Path ===
+# Prioritize local yolov13-main folder if it exists
+base_dir = os.path.dirname(os.path.abspath(__file__))
+local_yolo_path = os.path.join(base_dir, 'yolov13-main')
+if os.path.exists(local_yolo_path):
+    if local_yolo_path not in sys.path:
+        sys.path.insert(0, local_yolo_path)
+    print(f"✅ Loaded local YOLO library from: {local_yolo_path}")
+
+# Mock huggingface_hub if missing (often not needed for local inference)
+try:
+    import huggingface_hub
+except ImportError:
+    print("⚠️ huggingface_hub not found, mocking it for offline mode.")
+    from unittest.mock import MagicMock
+    sys.modules["huggingface_hub"] = MagicMock()
+    sys.modules["huggingface_hub.utils"] = MagicMock()
+    sys.modules["huggingface_hub.hub_mixin"] = MagicMock()
+
 
 # === CUDA 效能優化 ===
 if torch.cuda.is_available():
@@ -13,8 +35,8 @@ if torch.cuda.is_available():
 try:
     from ./ultralytics import YOLO
     YOLO_AVAILABLE = True
-except ImportError:
-    print("⚠️ 警告: 未安裝 ultralytics。請執行 'pip install ultralytics'")
+except ImportError as e:
+    print(f"⚠️ 警告: 無法載入 ultralytics ({e})。請確認 'yolov13-main' 資料夾存在或已安裝 'pip install ultralytics'")
     YOLO_AVAILABLE = False
 
 class ObjectDetector:
