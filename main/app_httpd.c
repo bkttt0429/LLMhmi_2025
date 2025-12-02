@@ -73,7 +73,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
         }
         
         // Simple delay to control FPS (optional)
-        vTaskDelay(pdMS_TO_TICKS(40)); // ~25 FPS
+        // vTaskDelay(pdMS_TO_TICKS(40)); // ~25 FPS
     }
     return res;
 }
