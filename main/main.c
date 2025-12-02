@@ -15,6 +15,26 @@ static const char *TAG = "main";
 
 void app_main(void)
 {
+    // Fix for "Cold Boot" issue: Wait for camera hardware to stabilize
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
+#if defined(PWDN_GPIO_NUM) && PWDN_GPIO_NUM != -1
+    // Explicitly power cycle the camera if PWDN pin is available
+    gpio_config_t pwdn_conf = {};
+    pwdn_conf.pin_bit_mask = (1ULL << PWDN_GPIO_NUM);
+    pwdn_conf.mode = GPIO_MODE_OUTPUT;
+    pwdn_conf.pull_up_en = 0;
+    pwdn_conf.pull_down_en = 0;
+    pwdn_conf.intr_type = GPIO_INTR_DISABLE;
+    gpio_config(&pwdn_conf);
+
+    // Power Cycle
+    gpio_set_level(PWDN_GPIO_NUM, 1); // Power Down
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level(PWDN_GPIO_NUM, 0); // Power Up
+    vTaskDelay(pdMS_TO_TICKS(20));
+#endif
+
     // Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
