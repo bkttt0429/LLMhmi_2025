@@ -10,7 +10,7 @@
 // 50Hz for Servo/ESC compatibility
 #define PWM_TIMER         LEDC_TIMER_1
 #define PWM_MODE          LEDC_LOW_SPEED_MODE
-#define PWM_DUTY_RES      LEDC_TIMER_16_BIT // 0-65535
+#define PWM_DUTY_RES       LEDC_TIMER_14_BIT
 #define PWM_FREQUENCY     50 // 50Hz (20ms)
 
 #define LEFT_CHANNEL      LEDC_CHANNEL_2

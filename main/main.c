@@ -8,6 +8,8 @@
 #include "app_udp.h"
 #include "camera_pins.h"
 #include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "main";
 
