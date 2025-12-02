@@ -3,7 +3,7 @@ import os
 # ========= 系統參數 =========
 # ESP32-S3 Integrated Mode
 DEFAULT_STREAM_PORT = 80
-CAMERA_DISCOVERY_PORT = 4211
+CAMERA_DISCOVERY_PORT = 4213 # UDP Broadcast Port for Discovery
 
 # ========= 🚗 車子控制 & 串流設定 (Integrated ESP32-S3) =========
 # 整合後，車子控制和影像串流使用同一個 IP
