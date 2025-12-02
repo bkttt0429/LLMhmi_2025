@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "wifi_ap.h"
+#include "wifi_sta.h"
 #include "app_camera.h"
 #include "app_httpd.h"
 #include "app_motor.h"
@@ -31,9 +31,9 @@ void app_main(void)
     gpio_config(&io_conf);
     gpio_set_level(LED_PIN, 0); // Blink once
     vTaskDelay(100 / portTICK_PERIOD_MS);
-    gpio_set_level(LED_PIN, 1); // High might be off depending on circuit, assuming 1 is ON or OFF based on schematic
+    gpio_set_level(LED_PIN, 1); 
 
-    ESP_LOGI(TAG, "Starting ESP32-S3 Car Firmware (Integrated Mode)...");
+    ESP_LOGI(TAG, "Starting ESP32-S3 Car Firmware (Integrated Station Mode)...");
 
     // 1. Initialize Motors
     app_motor_init();
@@ -44,8 +44,8 @@ void app_main(void)
         // We continue anyway, maybe motors still work
     }
 
-    // 3. Start Wi-Fi AP
-    wifi_init_softap();
+    // 3. Connect to Wi-Fi (Station Mode)
+    wifi_init_sta();
 
     // 4. Start HTTP Server
     app_httpd_start();
@@ -53,5 +53,5 @@ void app_main(void)
     // 5. Start UDP Listener (for Sensors)
     app_udp_init();
 
-    ESP_LOGI(TAG, "System Ready. IP: 192.168.4.1");
+    ESP_LOGI(TAG, "System Ready.");
 }

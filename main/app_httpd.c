@@ -1,6 +1,7 @@
 #include "app_httpd.h"
 #include "esp_http_server.h"
 #include "esp_camera.h"
+#include "img_converters.h"
 #include "esp_log.h"
 #include "app_motor.h"
 #include "app_udp.h"
@@ -61,7 +62,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
                 break;
             }
         }
-
+        
         if (fb) {
             esp_camera_fb_return(fb);
             fb = NULL;
@@ -70,7 +71,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
             free(_jpg_buf);
             _jpg_buf = NULL;
         }
-
+        
         // Simple delay to control FPS (optional)
         vTaskDelay(pdMS_TO_TICKS(40)); // ~25 FPS
     }
@@ -93,7 +94,7 @@ static esp_err_t control_handler(httpd_req_t *req)
         if (httpd_query_key_value(buf, "right", param, sizeof(param)) == ESP_OK) {
             right_val = atoi(param);
         }
-
+        
         app_motor_set_pwm(left_val, right_val);
         httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
     } else {

@@ -2,6 +2,7 @@
 #include "camera_pins.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "app_camera";
 
@@ -28,16 +29,24 @@ esp_err_t app_camera_init(void)
     config.pin_reset = RESET_GPIO_NUM;
     config.xclk_freq_hz = 20000000;
     config.pixel_format = PIXFORMAT_JPEG;
-
-    // Default to lower quality/res to ensure stability in AP mode
+    
+    // Default config
     config.frame_size = FRAMESIZE_VGA;
-    config.jpeg_quality = 12;
-    config.fb_count = 2;
-    config.fb_location = CAMERA_FB_IN_PSRAM;
-    config.grab_mode = CAMERA_GRAB_LATEST;
+    config.jpeg_quality = 12; 
+    config.fb_count = 1;
 
-    // Adjust based on PSRAM availability (though S3 usually has it)
-    // Note: User's arduino code checked for PSRAM. In IDF we assume it's enabled via menuconfig.
+    // Check if PSRAM is available
+    if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0) {
+        config.fb_location = CAMERA_FB_IN_PSRAM;
+        config.fb_count = 2;
+        config.grab_mode = CAMERA_GRAB_LATEST;
+        ESP_LOGI(TAG, "PSRAM found, using CAMERA_FB_IN_PSRAM");
+    } else {
+        config.fb_location = CAMERA_FB_IN_DRAM;
+        config.fb_count = 1;
+        config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+        ESP_LOGI(TAG, "PSRAM not found, using CAMERA_FB_IN_DRAM");
+    }
 
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
@@ -47,10 +56,7 @@ esp_err_t app_camera_init(void)
 
     sensor_t *s = esp_camera_sensor_get();
     if (s) {
-        // Adjust sensors based on user code (Vflip/Hmirror)
         s->set_vflip(s, 1);
-        // s->set_hmirror(s, 1); // User code had this for M5Stack, but S3 Eye also flipped.
-                                 // We stick to vflip=1 as per user's "S3 Eye" block.
     }
     ESP_LOGI(TAG, "Camera Init Success");
     return ESP_OK;
