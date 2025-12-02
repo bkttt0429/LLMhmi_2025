@@ -12,6 +12,7 @@
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
 #include <lwip/netdb.h>
+#include "esp_netif.h"
 
 #include "app_udp.h"
 
@@ -20,6 +21,54 @@ static float g_latest_distance = -1.0;
 static SemaphoreHandle_t xMutexDistance = NULL;
 
 #define PORT 4211
+#define DISCOVERY_PORT 4213
+
+static void udp_broadcast_task(void *pvParameters)
+{
+    struct sockaddr_in dest_addr;
+    dest_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(DISCOVERY_PORT);
+
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Discovery: Unable to create socket: errno %d", errno);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    // Enable Broadcast
+    int broadcast = 1;
+    setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
+
+    char tx_buffer[128];
+    esp_netif_ip_info_t ip_info;
+    esp_netif_t *netif = NULL;
+
+    while (1) {
+        // Get IP
+        netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        if (netif) {
+            esp_netif_get_ip_info(netif, &ip_info);
+
+            if (ip_info.ip.addr != 0) {
+                snprintf(tx_buffer, sizeof(tx_buffer),
+                         "{\"device\": \"esp32-s3-car\", \"ip\": \"" IPSTR "\"}",
+                         IP2STR(&ip_info.ip));
+
+                int err = sendto(sock, tx_buffer, strlen(tx_buffer), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+                if (err < 0) {
+                    // ESP_LOGE(TAG, "Discovery send failed: errno %d", errno);
+                }
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(3000)); // Every 3 seconds
+    }
+
+    close(sock);
+    vTaskDelete(NULL);
+}
 
 static void udp_server_task(void *pvParameters)
 {
@@ -93,6 +142,7 @@ void app_udp_init(void)
         xMutexDistance = xSemaphoreCreateMutex();
     }
     xTaskCreate(udp_server_task, "udp_server", 4096, NULL, 5, NULL);
+    xTaskCreate(udp_broadcast_task, "udp_broadcast", 4096, NULL, 5, NULL);
 }
 
 float app_udp_get_distance(void)

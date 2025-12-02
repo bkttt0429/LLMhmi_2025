@@ -12,6 +12,7 @@ import queue
 import requests
 import serial
 import pygame
+import json
 import websocket
 from queue import SimpleQueue, Empty
 from serial.tools import list_ports
@@ -501,6 +502,40 @@ def status_push_thread():
 
         time.sleep(2)  # Push every 2 seconds
 
+def discovery_listener_thread():
+    """Listens for UDP Broadcasts from ESP32 to auto-configure IP"""
+    add_log(f"Discovery Listener Started on Port {config.CAMERA_DISCOVERY_PORT}...")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("0.0.0.0", config.CAMERA_DISCOVERY_PORT))
+    except Exception as e:
+        add_log(f"[DISCOVERY] Bind failed: {e}")
+        return
+
+    sock.settimeout(1.0)
+
+    while state.is_running:
+        try:
+            data, addr = sock.recvfrom(1024)
+            msg = data.decode('utf-8', errors='ignore')
+            # Expecting JSON: {"device": "esp32-s3-car", "ip": "192.168.x.x"}
+            if "{" in msg:
+                try:
+                    info = json.loads(msg)
+                    if info.get("device") == "esp32-s3-car" and info.get("ip"):
+                        new_ip = info["ip"]
+                        if new_ip != state.camera_ip:
+                            add_log(f"[DISCOVERY] Found Device at {new_ip}")
+                            _apply_camera_ip(new_ip, prefix="[AUTO] ")
+                except json.JSONDecodeError:
+                    pass
+        except socket.timeout:
+            continue
+        except Exception as e:
+            add_log(f"[DISCOVERY] Error: {e}")
+            time.sleep(1)
+
 def xbox_controller_thread():
     add_log("Xbox Controller Thread Started...")
     controller = XboxController()
@@ -640,6 +675,7 @@ if __name__ == '__main__':
     threading.Thread(target=video_manager_thread, daemon=True).start()
     threading.Thread(target=frame_receiver_thread, daemon=True).start()
     threading.Thread(target=status_push_thread, daemon=True).start()
+    threading.Thread(target=discovery_listener_thread, daemon=True).start()
 
     print("=" * 60)
     print(f"🚀 Web Server: http://127.0.0.1:{config.WEB_PORT}")
