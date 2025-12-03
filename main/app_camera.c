@@ -30,10 +30,10 @@ esp_err_t app_camera_init(void)
     // Check PSRAM
     size_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
     if (psram_size == 0) {
-        ESP_LOGE(TAG, "PSRAM not detected! Check hardware.");
-        return ESP_FAIL;
+        ESP_LOGW(TAG, "PSRAM not detected! Falling back to Internal RAM (Low Res).");
+    } else {
+        ESP_LOGI(TAG, "PSRAM Size: %d MB", psram_size / (1024 * 1024));
     }
-    ESP_LOGI(TAG, "PSRAM Size: %d MB", psram_size / (1024 * 1024));
 
     // Camera Config (Optimized for 8MB PSRAM)
     camera_config_t config;
@@ -60,11 +60,21 @@ esp_err_t app_camera_init(void)
     // Optimization 1: JPEG Format (Hardware Encoding)
     config.pixel_format = PIXFORMAT_JPEG;
 
-    // Optimization 2: 8MB PSRAM allows SVGA/XGA + 3 Buffers
-    config.frame_size = FRAMESIZE_SVGA;  // 800x600 (Balanced)
-    config.jpeg_quality = 10;            // High Quality (10-12 recommended)
-    config.fb_count = 3;                 // Triple Buffering (Reduce drops)
-    config.fb_location = CAMERA_FB_IN_PSRAM;
+    // Optimization 2: Configure Buffers based on RAM availability
+    if (psram_size > 0) {
+        config.frame_size = FRAMESIZE_SVGA;  // 800x600 (Balanced)
+        config.jpeg_quality = 10;            // High Quality (10-12 recommended)
+        config.fb_count = 3;                 // Triple Buffering (Reduce drops)
+        config.fb_location = CAMERA_FB_IN_PSRAM;
+    } else {
+        // Fallback for No PSRAM (Internal RAM)
+        // Internal RAM is limited (~320KB), so we must use lower res and fewer buffers
+        config.frame_size = FRAMESIZE_QVGA;  // 320x240
+        config.jpeg_quality = 20;            // Lower quality (higher number) to save space
+        config.fb_count = 1;                 // Single Buffer to prevent OOM
+        config.fb_location = CAMERA_FB_IN_DRAM;
+    }
+
     config.grab_mode = CAMERA_GRAB_LATEST; // Always grab latest frame
 
     // Optimization 3: Retry Mechanism

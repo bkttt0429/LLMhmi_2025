@@ -82,6 +82,19 @@ static esp_err_t stream_handler(httpd_req_t *req)
     int consecutive_errors = 0;
     const int MAX_CONSECUTIVE_ERRORS = 5;
 
+    // Small valid JPEG (1x1 gray pixel) to keep stream alive
+    const uint8_t error_jpg[] = {
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x48,
+        0x00, 0x48, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01,
+        0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xDA, 0x00, 0x08,
+        0x01, 0x01, 0x00, 0x00, 0x3F, 0x00, 0x37, 0xFF, 0xD9
+    };
+    size_t error_jpg_len = sizeof(error_jpg);
+
     while (true) {
         // Check if connection is still alive
         int error = 0;
@@ -94,14 +107,28 @@ static esp_err_t stream_handler(httpd_req_t *req)
         // Get frame with timeout protection
         fb = esp_camera_fb_get();
         if (!fb) {
-            ESP_LOGW(TAG, "Frame capture failed");
+            // ESP_LOGW(TAG, "Frame capture failed"); // Reduce log spam
             consecutive_errors++;
             g_stats.dropped_frames++;
 
             if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
-                ESP_LOGE(TAG, "Too many consecutive errors, closing stream");
-                res = ESP_FAIL;
-                break;
+                 // Send Dummy Frame to keep connection alive
+                 res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
+                 if (res == ESP_OK) {
+                     size_t hlen = snprintf(part_buf, sizeof(part_buf), _STREAM_PART, error_jpg_len);
+                     res = httpd_resp_send_chunk(req, part_buf, hlen);
+                 }
+                 if (res == ESP_OK) {
+                     res = httpd_resp_send_chunk(req, (const char *)error_jpg, error_jpg_len);
+                 }
+
+                 if (res != ESP_OK) {
+                     ESP_LOGE(TAG, "Failed to send dummy frame, client disconnected");
+                     break;
+                 }
+
+                 vTaskDelay(pdMS_TO_TICKS(1000)); // Wait 1s
+                 continue;
             }
 
             vTaskDelay(pdMS_TO_TICKS(100));
