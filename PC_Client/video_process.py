@@ -134,9 +134,18 @@ class MJPEGStreamReader:
             self.connected = False
             return None
 
+        except requests.exceptions.StreamConsumedError:
+            print("[STREAM] ⚠️ Stream consumed, reconnecting...")
+            self.connected = False
+            return None
+
         except Exception as e:
             import traceback
-            print(f"[STREAM] ❌ Frame read error: {traceback.format_exc()}")
+            # Specifically catch the StreamConsumedError if it comes as a generic Exception or not caught above
+            if "StreamConsumedError" in str(type(e)):
+                 print("[STREAM] ⚠️ Stream consumed (caught via generic), reconnecting...")
+            else:
+                 print(f"[STREAM] ❌ Frame read error: {traceback.format_exc()}")
             self.connected = False
             return None
 
