@@ -15,96 +15,136 @@ CMD_SET_AI = "SET_AI"
 CMD_EXIT = "EXIT"
  
 # Improved MJPEG Reader (Supports Reconnect & Stats)
-class MJPEGStreamReader: 
-    def __init__(self, url, timeout=5): 
-        self.url = url 
-        self.timeout = timeout 
-        self.stream = None 
-        self.bytes = b'' 
-        self.connected = False 
-        self.frame_count = 0 
-        self.last_stats_time = time.time() 
-        self._connect() 
- 
-    def _connect(self): 
-        """Establish stream connection (with retry logic)""" 
-        try: 
-            # Add Keep-Alive Header
-            headers = { 
-                'Connection': 'keep-alive', 
-                'User-Agent': 'Python-Client/1.0' 
-            } 
-            self.stream = requests.get( 
-                self.url,  
-                stream=True,  
-                timeout=self.timeout, 
-                headers=headers 
-            ) 
-            if self.stream.status_code == 200: 
-                self.connected = True 
-                print(f"[STREAM] Connected to {self.url}") 
-            else: 
-                self.connected = False 
-                print(f"[STREAM] HTTP {self.stream.status_code}") 
-        except Exception as e: 
-            self.connected = False 
-            print(f"[STREAM] Connection failed: {e}") 
- 
-    def get_frame(self): 
-        """Get single frame (non-blocking)""" 
-        if not self.connected or not self.stream: 
-            self._connect() 
-            if not self.connected: 
-                return None 
- 
-        try: 
-            # Use iter_content instead of raw.read (More stable)
-            for chunk in self.stream.iter_content(chunk_size=1024): 
-                if not chunk: 
-                    break 
-                 
-                self.bytes += chunk 
-                 
-                # Find JPEG Boundary
-                a = self.bytes.find(b'\xff\xd8')  # SOI 
-                b = self.bytes.find(b'\xff\xd9')  # EOI 
-                 
-                if a != -1 and b != -1 and b > a: 
-                    jpg = self.bytes[a:b+2] 
-                    self.bytes = self.bytes[b+2:] 
-                     
-                    # Decode 
-                    frame = cv2.imdecode( 
-                        np.frombuffer(jpg, dtype=np.uint8),  
-                        cv2.IMREAD_COLOR 
-                    ) 
-                     
-                    if frame is not None: 
-                        self.frame_count += 1 
-                         
-                        # Show stats every 100 frames
-                        if self.frame_count % 100 == 0: 
-                            elapsed = time.time() - self.last_stats_time 
-                            fps = 100 / elapsed if elapsed > 0 else 0 
-                            print(f"[STREAM] FPS: {fps:.1f} | Frames: {self.frame_count}") 
-                            self.last_stats_time = time.time() 
-                         
-                        return frame 
-                     
-            return None 
-             
-        except Exception as e: 
-            print(f"[STREAM] Error: {e}") 
-            self.connected = False 
-            return None 
- 
-    def close(self): 
-        if self.stream: 
-            try: 
-                self.stream.close() 
-            except: 
-                pass 
-            self.stream = None 
+class MJPEGStreamReader:
+    def __init__(self, url, timeout=10):
+        self.url = url
+        self.timeout = timeout
+        self.stream = None
+        self.bytes = b''
+        self.connected = False
+        self.frame_count = 0
+        self.last_stats_time = time.time()
+        self.connection_attempts = 0
+        self.max_reconnect_attempts = 5
+        self.reconnect_delay = 2.0
+        self._connect()
+
+    def _connect(self):
+        """Establish stream connection with exponential backoff"""
+        self.connection_attempts += 1
+
+        if self.connection_attempts > self.max_reconnect_attempts:
+            print(f"[STREAM] Max reconnection attempts reached, waiting {self.reconnect_delay}s")
+            time.sleep(self.reconnect_delay)
+            self.connection_attempts = 0
+
+        try:
+            headers = {
+                'Connection': 'keep-alive',
+                'User-Agent': 'Python-MJPEG-Client/2.0',
+                'Accept': 'multipart/x-mixed-replace',
+                'Cache-Control': 'no-cache'
+            }
+
+            print(f"[STREAM] Connecting to {self.url} (attempt {self.connection_attempts})...")
+
+            self.stream = requests.get(
+                self.url,
+                stream=True,
+                timeout=self.timeout,
+                headers=headers,
+                allow_redirects=True,
+                verify=False
+            )
+
+            if self.stream.status_code == 200:
+                self.connected = True
+                self.connection_attempts = 0
+                print(f"[STREAM] ✅ Connected to {self.url}")
+            else:
+                self.connected = False
+                print(f"[STREAM] ❌ HTTP {self.stream.status_code}")
+
+        except requests.exceptions.Timeout:
+            self.connected = False
+            print(f"[STREAM] ⏱️ Connection timeout")
+
+        except requests.exceptions.ConnectionError as e:
+            self.connected = False
+            print(f"[STREAM] ❌ Connection error: {e}")
+
+        except Exception as e:
+            self.connected = False
+            print(f"[STREAM] ❌ Unexpected error: {e}")
+
+    def get_frame(self):
+        """Get single frame with automatic reconnection"""
+        if not self.connected or not self.stream:
+            self._connect()
+            if not self.connected:
+                time.sleep(0.5)
+                return None
+
+        try:
+            chunk_size = 4096
+
+            for chunk in self.stream.iter_content(chunk_size=chunk_size):
+                if not chunk:
+                    print("[STREAM] Empty chunk received, reconnecting...")
+                    self.connected = False
+                    break
+
+                self.bytes += chunk
+
+                a = self.bytes.find(b'\xff\xd8')  # SOI
+                b = self.bytes.find(b'\xff\xd9')  # EOI
+
+                if a != -1 and b != -1 and b > a:
+                    jpg = self.bytes[a:b+2]
+                    self.bytes = self.bytes[b+2:]
+
+                    frame = cv2.imdecode(
+                        np.frombuffer(jpg, dtype=np.uint8),
+                        cv2.IMREAD_COLOR
+                    )
+
+                    if frame is not None:
+                        self.frame_count += 1
+
+                        if self.frame_count % 100 == 0:
+                            elapsed = time.time() - self.last_stats_time
+                            fps = 100 / elapsed if elapsed > 0 else 0
+                            print(f"[STREAM] 📊 FPS: {fps:.1f} | Total Frames: {self.frame_count}")
+                            self.last_stats_time = time.time()
+
+                        return frame
+
+            return None
+
+        except requests.exceptions.ChunkedEncodingError:
+            print("[STREAM] ⚠️ Chunked encoding error, reconnecting...")
+            self.connected = False
+            return None
+
+        except requests.exceptions.ConnectionError:
+            print("[STREAM] ⚠️ Connection lost, reconnecting...")
+            self.connected = False
+            return None
+
+        except Exception as e:
+            print(f"[STREAM] ❌ Frame read error: {e}")
+            self.connected = False
+            return None
+
+    def close(self):
+        if self.stream:
+            try:
+                self.stream.close()
+                print("[STREAM] Stream closed gracefully")
+            except:
+                pass
+            self.stream = None
+        self.connected = False
  
  
 # New: Query Status from ESP32
