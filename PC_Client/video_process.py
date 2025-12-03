@@ -28,6 +28,7 @@ class MJPEGStreamReader:
         self.max_reconnect_attempts = 5
         self.reconnect_delay = 2.0
         self.current_retry_delay = 1.0
+        self.iterator = None
         self._connect()
 
     def _connect(self):
@@ -62,26 +63,32 @@ class MJPEGStreamReader:
                 self.connected = True
                 self.connection_attempts = 0
                 self.current_retry_delay = 1.0
+                # Initialize the iterator once per connection to avoid StreamConsumedError
+                self.iterator = self.stream.iter_content(chunk_size=4096)
                 print(f"[STREAM] ✅ Connected to {self.url}")
             else:
                 self.connected = False
+                self.iterator = None
                 print(f"[STREAM] ❌ HTTP {self.stream.status_code}")
 
         except requests.exceptions.Timeout:
             self.connected = False
+            self.iterator = None
             print(f"[STREAM] ⏱️ Connection timeout")
 
         except requests.exceptions.ConnectionError as e:
             self.connected = False
+            self.iterator = None
             print(f"[STREAM] ❌ Connection error: {e}")
 
         except Exception as e:
             self.connected = False
+            self.iterator = None
             print(f"[STREAM] ❌ Unexpected error: {e}")
 
     def get_frame(self):
         """Get single frame with automatic reconnection"""
-        if not self.connected or not self.stream:
+        if not self.connected or not self.stream or not self.iterator:
             self._connect()
             if not self.connected:
                 time.sleep(self.current_retry_delay)
@@ -89,13 +96,19 @@ class MJPEGStreamReader:
                 return None
 
         try:
-            chunk_size = 4096
-
-            for chunk in self.stream.iter_content(chunk_size=chunk_size):
-                if not chunk:
-                    print("[STREAM] Empty chunk received, reconnecting...")
+            # Consume from the existing iterator
+            # Iterate manually until we have a full frame or no data left
+            while True:
+                try:
+                    chunk = next(self.iterator)
+                except StopIteration:
+                    print("[STREAM] Stream ended (StopIteration), reconnecting...")
                     self.connected = False
-                    break
+                    self.iterator = None
+                    return None
+
+                if not chunk:
+                    continue
 
                 self.bytes += chunk
 
@@ -121,6 +134,9 @@ class MJPEGStreamReader:
                             self.last_stats_time = time.time()
 
                         return frame
+
+                    # If we found markers but decoding failed, or bytes remain, loop continues
+                    # to process more chunks or remaining buffer.
 
             return None
 
