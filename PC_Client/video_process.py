@@ -27,6 +27,7 @@ class MJPEGStreamReader:
         self.connection_attempts = 0
         self.max_reconnect_attempts = 5
         self.reconnect_delay = 2.0
+        self.current_retry_delay = 1.0
         self._connect()
 
     def _connect(self):
@@ -60,6 +61,7 @@ class MJPEGStreamReader:
             if self.stream.status_code == 200:
                 self.connected = True
                 self.connection_attempts = 0
+                self.current_retry_delay = 1.0
                 print(f"[STREAM] ✅ Connected to {self.url}")
             else:
                 self.connected = False
@@ -82,7 +84,8 @@ class MJPEGStreamReader:
         if not self.connected or not self.stream:
             self._connect()
             if not self.connected:
-                time.sleep(0.5)
+                time.sleep(self.current_retry_delay)
+                self.current_retry_delay = min(self.current_retry_delay * 2, 30.0)
                 return None
 
         try:
@@ -191,7 +194,7 @@ def adjust_esp32_settings(ip, quality=None, framesize=None):
  
  
 # Main Process Function (Optimized)
-def video_process_target(cmd_queue, frame_queue, log_queue, initial_config): 
+def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
     """ 
     Video Process Main Loop (Optimized for ESP32-S3) 
     """ 
@@ -218,8 +221,10 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
         except Exception as e: 
             log(f"AI init failed: {e}") 
      
-    stream_reader = None 
-    last_status_check = 0 
+    stream_reader = None
+    last_status_check = 0
+    restart_delay = 2.0
+    consecutive_failures = 0
     
     # State
     last_url = video_url
@@ -260,12 +265,14 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
             stream_reader = MJPEGStreamReader(last_url) 
          
         # Acquire Frame 
-        frame = None 
-        if stream_reader: 
-            frame = stream_reader.get_frame() 
-         
-        if frame is not None: 
-            final_frame = frame 
+        frame = None
+        if stream_reader:
+            frame = stream_reader.get_frame()
+
+        if frame is not None:
+            consecutive_failures = 0
+            restart_delay = 2.0
+            final_frame = frame
              
             # AI Processing 
             if detector and detector.enabled: 
@@ -286,10 +293,22 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
                         except Empty: 
                             pass 
                     frame_queue.put(buffer.tobytes()) 
-            except: 
-                pass 
-        else: 
-            time.sleep(0.01) 
+            except:
+                pass
+        else:
+            consecutive_failures += 1
+
+            if consecutive_failures >= 10:
+                log(f"Restarting stream reader after {consecutive_failures} failures. Waiting {restart_delay:.1f}s")
+                if stream_reader:
+                    stream_reader.close()
+                    stream_reader = None
+
+                time.sleep(restart_delay)
+                restart_delay = min(restart_delay * 1.5, 30.0)
+                consecutive_failures = 0
+            else:
+                time.sleep(0.1)
  
  
 # ============================================ 
