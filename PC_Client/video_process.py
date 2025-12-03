@@ -135,7 +135,8 @@ class MJPEGStreamReader:
             return None
 
         except Exception as e:
-            print(f"[STREAM] ❌ Frame read error: {e}")
+            import traceback
+            print(f"[STREAM] ❌ Frame read error: {traceback.format_exc()}")
             self.connected = False
             return None
 
