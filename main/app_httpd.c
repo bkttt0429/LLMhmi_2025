@@ -112,23 +112,11 @@ static esp_err_t stream_handler(httpd_req_t *req)
             g_stats.dropped_frames++;
 
             if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
-                 // Send Dummy Frame to keep connection alive
-                 res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
-                 if (res == ESP_OK) {
-                     size_t hlen = snprintf(part_buf, sizeof(part_buf), _STREAM_PART, error_jpg_len);
-                     res = httpd_resp_send_chunk(req, part_buf, hlen);
-                 }
-                 if (res == ESP_OK) {
-                     res = httpd_resp_send_chunk(req, (const char *)error_jpg, error_jpg_len);
-                 }
-
-                 if (res != ESP_OK) {
-                     ESP_LOGE(TAG, "Failed to send dummy frame, client disconnected");
-                     break;
-                 }
-
-                 vTaskDelay(pdMS_TO_TICKS(1000)); // Wait 1s
-                 continue;
+                ESP_LOGE(TAG, "Too many consecutive errors, but keeping stream alive with delay");
+                // Instead of closing, we just wait longer to avoid spamming logs
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                consecutive_errors = 0; // Reset to keep loop alive
+                continue;
             }
 
             vTaskDelay(pdMS_TO_TICKS(100));

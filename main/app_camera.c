@@ -70,8 +70,8 @@ esp_err_t app_camera_init(void)
         // Fallback for No PSRAM (Internal RAM)
         // Internal RAM is limited (~320KB), so we must use lower res and fewer buffers
         config.frame_size = FRAMESIZE_QVGA;  // 320x240
-        config.jpeg_quality = 20;            // Lower quality (higher number) to save space
-        config.fb_count = 1;                 // Single Buffer to prevent OOM
+        config.jpeg_quality = 15;            // Lower quality to save space
+        config.fb_count = 2;                 // Double Buffering
         config.fb_location = CAMERA_FB_IN_DRAM;
     }
 
