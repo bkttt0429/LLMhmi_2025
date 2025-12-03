@@ -3,11 +3,39 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "app_camera";
 
+// 重試相機初始化（解決 Cold Boot 問題）
+#define CAMERA_INIT_RETRY_MAX 3
+#define CAMERA_POWER_CYCLE_DELAY_MS 100
+
+// 檢查相機感測器是否正常
+static bool camera_probe(void)
+{
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (fb) {
+        esp_camera_fb_return(fb);
+        return true;
+    }
+    return false;
+}
+
 esp_err_t app_camera_init(void)
 {
+    ESP_LOGI(TAG, "Initializing Camera (N16R8 Optimized)...");
+
+    // 檢查 PSRAM
+    size_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    if (psram_size == 0) {
+        ESP_LOGE(TAG, "PSRAM not detected! Check hardware.");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "PSRAM Size: %d MB", psram_size / (1024 * 1024));
+
+    // 相機配置（針對 8MB PSRAM 優化）
     camera_config_t config;
     config.ledc_channel = LEDC_CHANNEL_0;
     config.ledc_timer = LEDC_TIMER_0;
@@ -27,37 +55,112 @@ esp_err_t app_camera_init(void)
     config.pin_sccb_scl = SIOC_GPIO_NUM;
     config.pin_pwdn = PWDN_GPIO_NUM;
     config.pin_reset = RESET_GPIO_NUM;
-    config.xclk_freq_hz = 20000000;
-    config.pixel_format = PIXFORMAT_JPEG;
-    
-    // Default config
-    config.frame_size = FRAMESIZE_VGA;
-    config.jpeg_quality = 12; 
-    config.fb_count = 1;
+    config.xclk_freq_hz = 20000000; // 20MHz
 
-    // Check if PSRAM is available
-    if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0) {
-        config.fb_location = CAMERA_FB_IN_PSRAM;
-        config.fb_count = 2;
-        config.grab_mode = CAMERA_GRAB_LATEST;
-        ESP_LOGI(TAG, "PSRAM found, using CAMERA_FB_IN_PSRAM");
-    } else {
-        config.fb_location = CAMERA_FB_IN_DRAM;
-        config.fb_count = 1;
-        config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-        ESP_LOGI(TAG, "PSRAM not found, using CAMERA_FB_IN_DRAM");
+    // ⭐ 優化重點 1: JPEG 格式（硬體編碼）
+    config.pixel_format = PIXFORMAT_JPEG;
+
+    // ⭐ 優化重點 2: 8MB PSRAM 可用 SVGA/XGA + 3 緩衝
+    config.frame_size = FRAMESIZE_SVGA;  // 800x600 (平衡)
+    config.jpeg_quality = 10;            // 高品質 (10-12 推薦)
+    config.fb_count = 3;                 // 三緩衝（減少丟幀）
+    config.fb_location = CAMERA_FB_IN_PSRAM;
+    config.grab_mode = CAMERA_GRAB_LATEST; // 永遠取最新幀
+
+    // ⭐ 優化重點 3: 重試機制
+    esp_err_t err = ESP_FAIL;
+    for (int retry = 0; retry < CAMERA_INIT_RETRY_MAX; retry++) {
+        if (retry > 0) {
+            ESP_LOGW(TAG, "Retry %d/%d...", retry, CAMERA_INIT_RETRY_MAX);
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+
+        err = esp_camera_init(&config);
+
+        if (err == ESP_OK) {
+            // 驗證相機是否真的可用
+            if (camera_probe()) {
+                ESP_LOGI(TAG, "✅ Camera Init Success on attempt %d", retry + 1);
+                break;
+            } else {
+                ESP_LOGW(TAG, "Camera init returned OK but probe failed");
+                esp_camera_deinit();
+                err = ESP_FAIL;
+            }
+        } else {
+            ESP_LOGE(TAG, "Camera Init Failed: 0x%x", err);
+        }
     }
 
-    esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Camera Init Failed");
+        ESP_LOGE(TAG, "❌ Camera Init Failed after %d retries", CAMERA_INIT_RETRY_MAX);
         return err;
     }
 
+    // ⭐ 優化重點 4: 感測器微調
     sensor_t *s = esp_camera_sensor_get();
     if (s) {
-        s->set_vflip(s, 1);
+        // 翻轉設定（根據實際安裝調整）
+        s->set_vflip(s, 1);   // 垂直翻轉
+        s->set_hmirror(s, 0); // 水平鏡像
+
+        // 圖像品質微調
+        s->set_brightness(s, 0);     // -2 to 2
+        s->set_contrast(s, 0);       // -2 to 2
+        s->set_saturation(s, 0);     // -2 to 2
+        s->set_sharpness(s, 0);      // -2 to 2
+        s->set_denoise(s, 0);        // 降噪 (0-8)
+
+        // 自動曝光/白平衡
+        s->set_exposure_ctrl(s, 1);  // 自動曝光
+        s->set_whitebal(s, 1);       // 自動白平衡
+        s->set_awb_gain(s, 1);       // AWB Gain
+        s->set_wb_mode(s, 0);        // 白平衡模式 (0=auto)
+
+        // 特效與品質
+        s->set_special_effect(s, 0); // 無特效
+        s->set_lenc(s, 1);           // 鏡頭校正
+        s->set_gainceiling(s, GAINCEILING_4X); // 增益上限
+
+        ESP_LOGI(TAG, "Sensor settings applied");
     }
-    ESP_LOGI(TAG, "Camera Init Success");
+
+    // 記憶體檢查
+    ESP_LOGI(TAG, "Free Heap: %d KB, Free PSRAM: %d KB",
+             heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
+             heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
+
     return ESP_OK;
+}
+
+// ⭐ 新增：動態調整解析度
+esp_err_t app_camera_set_framesize(framesize_t size)
+{
+    sensor_t *s = esp_camera_sensor_get();
+    if (s) {
+        if (s->set_framesize(s, size) == 0) {
+            ESP_LOGI(TAG, "Framesize changed to %d", size);
+            return ESP_OK;
+        }
+    }
+    return ESP_FAIL;
+}
+
+// ⭐ 新增：動態調整 JPEG 品質
+esp_err_t app_camera_set_quality(int quality)
+{
+    sensor_t *s = esp_camera_sensor_get();
+    if (s && quality >= 0 && quality <= 63) {
+        if (s->set_quality(s, quality) == 0) {
+            ESP_LOGI(TAG, "JPEG Quality set to %d", quality);
+            return ESP_OK;
+        }
+    }
+    return ESP_FAIL;
+}
+
+// ⭐ 新增：健康檢查（定期呼叫）
+bool app_camera_health_check(void)
+{
+    return camera_probe();
 }
