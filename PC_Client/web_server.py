@@ -664,11 +664,15 @@ def api_camera_settings():
         try:
             # Forward to ESP32 /control?var=X&val=Y
             url = f"http://{target_ip}/control"
+            add_log(f"[Control] Sending {var}={val} to {target_ip}")
             resp = state.control_session.get(url, params={'var': var, 'val': val}, timeout=2)
             if resp.status_code == 200:
+                add_log(f"[Control] Success: {var}={val}")
                 return jsonify({"status": "ok", "var": var, "val": val})
+            add_log(f"[Control] Failed: HTTP {resp.status_code}")
             return jsonify({"error": f"ESP32 returned {resp.status_code}"}), 502
         except requests.exceptions.RequestException as e:
+            add_log(f"[Control] Exception: {e}")
             return jsonify({"error": str(e)}), 503
 
 if __name__ == '__main__':

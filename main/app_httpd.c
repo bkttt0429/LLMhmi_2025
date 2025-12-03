@@ -10,6 +10,7 @@
 #include "camera_index.h"  // ⭐ Now includes the generated Web UI
 #include <sys/socket.h>
 #include "lwip/sockets.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "camera_httpd";
 
@@ -234,6 +235,11 @@ static esp_err_t stream_handler(httpd_req_t *req){
 void app_httpd_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.max_open_sockets = 13;
+    config.lru_purge_enable = true;
+    config.stack_size = 8192;
+    config.backlog_conn = 13;
+    config.task_caps = MALLOC_CAP_SPIRAM;
     config.server_port = 80;
 
     // Split Stream and Control on different cores/ports if needed
