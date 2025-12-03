@@ -5,6 +5,10 @@
 本架構旨在整合 **ESP32-S3 (Camera + Motor)** 與 **ESP8266 (Sensors)**，兩者皆連線至同一 Wi-Fi AP (SSID: `Bk`)。
 PC 也連線至該 AP (或同一區網)，透過區網 IP 進行控制與影像接收。
 
+> **新增說明：** ESP32-S3 端採用 [espressif/esp32-camera](https://github.com/espressif/esp32-camera) 的 `camera_web_server` 作為基礎。
+> - `/stream` MJPEG 串流直接沿用官方實作，並保留 TCP keep-alive/Send Buffer 調整以提升穩定度。
+> - 以 ESP-IDF Component 方式整合，維持 `app_camera_init()` 的 PSRAM/畫質判斷，並在 HTTP 服務中新增 `/control`、`/dist`、`/health` 路由。
+
 ### 角色分配
 1. **Wi-Fi Router (AP)**
    - **SSID**: `Bk`
@@ -19,7 +23,7 @@ PC 也連線至該 AP (或同一區網)，透過區網 IP 進行控制與影像�
      - 接收馬達控制指令 (`/control`)
      - 接收 ESP8266 傳來的感測器數據 (UDP)
      - 透過 HTTP 提供感測器數據 (`/dist`)
-   
+
 3. **ESP8266 (感測端 / Station)**
    - **模式**: Wi-Fi Station (連線至 `Bk`)
    - **功能**:
@@ -42,10 +46,11 @@ PC 也連線至該 AP (或同一區網)，透過區網 IP 進行控制與影像�
 *   **SSID**: `Bk`
 *   **Password**: `.........`
 *   **HTTP API**:
-    *   `GET /stream`: 取得 MJPEG 串流
+    *   `GET /stream`: 取得 MJPEG 串流（`camera_web_server` 內建）
     *   `GET /control?left=<val>&right=<val>`: 馬達控制 (val: -255 ~ 255)
     *   `GET /dist`: 取得最新超聲波距離 (float)
     *   `GET /light?on=<0|1>`: LED 控制 (可選)
+    *   `GET /health`: 回傳相機健康檢查結果（基於 `app_camera_health_check()`）
 *   **UDP Listener**:
     *   Port: `4211`
     *   功能: 接收 ESP8266 廣播或單播的感測數據 (ASCII string)
@@ -77,8 +82,8 @@ PC 也連線至該 AP (或同一區網)，透過區網 IP 進行控制與影像�
 
 1. **ESP32-S3**:
    - 使用 ESP-IDF 建立專案 (main 資料夾位於專案根目錄)。
-   - 燒錄至 ESP32-S3。
-   - 觀察 Serial Monitor 確認取得的 IP 位址。
+   - 將 `esp32-camera` 加入 `idf_component.yml`（或以 `git submodule` 形式引入），並沿用 `camera_web_server` 的初始化/路由碼。
+   - 燒錄至 ESP32-S3，觀察 Serial Monitor 確認取得的 IP 位址。
 
 2. **ESP8266**:
    - 更新 Wi-Fi Credential 連線至 `Bk`。
@@ -93,4 +98,4 @@ PC 也連線至該 AP (或同一區網)，透過區網 IP 進行控制與影像�
 
 ## 3. 備註
 *   馬達控制採用 PWM (50Hz)，模擬 Servo/ESC 訊號 (1000us-2000us) 映射。
-*   影像解析度預設 VGA (FRAMESIZE_VGA)。
+*   影像解析度預設 VGA (FRAMESIZE_VGA)；若 PSRAM 足夠可調高解析度，但需監看 `/health` 回傳的記憶體餘裕。
