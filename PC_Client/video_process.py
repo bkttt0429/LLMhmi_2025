@@ -134,9 +134,18 @@ class MJPEGStreamReader:
             self.connected = False
             return None
 
+        except requests.exceptions.StreamConsumedError:
+            print("[STREAM] ⚠️ Stream consumed, reconnecting...")
+            self.connected = False
+            return None
+
         except Exception as e:
             import traceback
-            print(f"[STREAM] ❌ Frame read error: {traceback.format_exc()}")
+            # Specifically catch the StreamConsumedError if it comes as a generic Exception or not caught above
+            if "StreamConsumedError" in str(type(e)):
+                 print("[STREAM] ⚠️ Stream consumed (caught via generic), reconnecting...")
+            else:
+                 print(f"[STREAM] ❌ Frame read error: {traceback.format_exc()}")
             self.connected = False
             return None
 
@@ -178,20 +187,26 @@ def adjust_esp32_settings(ip, quality=None, framesize=None):
         - 7  = FRAMESIZE_SVGA (800x600) 
         - 10 = FRAMESIZE_XGA (1024x768) 
     """ 
-    params = {} 
+    settings = {}
     if quality is not None: 
-        params['quality'] = quality 
+        settings['quality'] = quality
     if framesize is not None: 
-        params['framesize'] = framesize 
+        settings['framesize'] = framesize
      
-    try: 
-        resp = requests.get(f"http://{ip}/settings", params=params, timeout=2) 
-        if resp.status_code == 200: 
-            print(f"[ESP32] Settings updated: {params}") 
-            return True 
-    except Exception as e: 
-        print(f"[ESP32] Settings update failed: {e}") 
-    return False 
+    all_success = True
+    for var, val in settings.items():
+        try:
+            # ESP32 expects /control?var=variable_name&val=value
+            resp = requests.get(f"http://{ip}/control", params={'var': var, 'val': val}, timeout=2)
+            if resp.status_code == 200:
+                print(f"[ESP32] Setting {var}={val} updated")
+            else:
+                print(f"[ESP32] Failed to set {var}: HTTP {resp.status_code}")
+                all_success = False
+        except Exception as e:
+            print(f"[ESP32] Settings update failed: {e}")
+            all_success = False
+    return all_success
  
  
 # Main Process Function (Optimized)
