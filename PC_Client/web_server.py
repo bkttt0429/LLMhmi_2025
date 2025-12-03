@@ -34,9 +34,6 @@ from ai_detector import YOLO_AVAILABLE
 # 導入 Video Process
 from video_process import video_process_target, CMD_SET_URL, CMD_SET_AI, CMD_EXIT
 
-# 導入自訂網卡綁定模組
-from network_utils import SourceAddressAdapter
-
 # 初始化 Flask 和 SocketIO
 template_dir = os.path.join(BASE_DIR, 'templates')
 app = Flask(__name__, template_folder=template_dir, static_folder=template_dir)
@@ -200,21 +197,7 @@ class SystemState:
         
         # 建立一個綁定到 Camera Net Interface 的 session 用於發送 HTTP 控制指令到 ESP32
         self.control_session = requests.Session()
-
-        # 默認綁定到 Camera Net IP，因為我們現在直接控制 192.168.4.1
-        bind_ip = None
-        if self.camera_net_ip:
-             bind_ip = self.camera_net_ip
-             print(f"[INIT] Binding Control Session to Camera Net: {bind_ip}")
-        elif self.internet_net_ip:
-             # Fallback
-             bind_ip = self.internet_net_ip
-             print(f"[INIT] Binding Control Session to Internet Net (Fallback): {bind_ip}")
-
-        if bind_ip:
-            adapter = SourceAddressAdapter(bind_ip)
-            self.control_session.mount('http://', adapter)
-            self.control_session.mount('https://', adapter)
+        print("[INIT] Control Session created (Default Routing)")
 
     def print_network_summary(self):
         print("="*60)

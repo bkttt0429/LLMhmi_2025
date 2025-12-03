@@ -99,9 +99,11 @@ static esp_err_t stream_handler(httpd_req_t *req)
             g_stats.dropped_frames++;
 
             if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
-                ESP_LOGE(TAG, "Too many consecutive errors, closing stream");
-                res = ESP_FAIL;
-                break;
+                ESP_LOGE(TAG, "Too many consecutive errors, but keeping stream alive with delay");
+                // Instead of closing, we just wait longer to avoid spamming logs
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                consecutive_errors = 0; // Reset to keep loop alive
+                continue;
             }
 
             vTaskDelay(pdMS_TO_TICKS(100));
