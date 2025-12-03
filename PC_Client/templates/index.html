@@ -265,6 +265,86 @@
             </div>
 
             <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
+                <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">CAMERA CONFIGURATION</div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+
+                    <!-- Selectors -->
+                    <div class="flex flex-col gap-1">
+                        <label class="text-gray-400">Resolution</label>
+                        <select id="cfg-framesize" onchange="updateCameraSetting('framesize', this.value)" class="bg-black border border-green-900 text-green-400 p-1 rounded">
+                            <option value="11">VGA (640x480)</option>
+                            <option value="10">HVGA (480x320)</option>
+                            <option value="9">CIF (400x296)</option>
+                            <option value="8">QVGA (320x240)</option>
+                            <option value="6">HQVGA (240x176)</option>
+                            <option value="5">QCIF (176x144)</option>
+                        </select>
+                    </div>
+
+                    <div class="flex flex-col gap-1">
+                        <label class="text-gray-400">Special Effect</label>
+                        <select id="cfg-special_effect" onchange="updateCameraSetting('special_effect', this.value)" class="bg-black border border-green-900 text-green-400 p-1 rounded">
+                            <option value="0">No Effect</option>
+                            <option value="1">Negative</option>
+                            <option value="2">Grayscale</option>
+                            <option value="3">Red Tint</option>
+                            <option value="4">Green Tint</option>
+                            <option value="5">Blue Tint</option>
+                            <option value="6">Sepia</option>
+                        </select>
+                    </div>
+
+                    <div class="flex flex-col gap-1">
+                        <label class="text-gray-400">WB Mode</label>
+                        <select id="cfg-wb_mode" onchange="updateCameraSetting('wb_mode', this.value)" class="bg-black border border-green-900 text-green-400 p-1 rounded">
+                            <option value="0">Auto</option>
+                            <option value="1">Sunny</option>
+                            <option value="2">Cloudy</option>
+                            <option value="3">Office</option>
+                            <option value="4">Home</option>
+                        </select>
+                    </div>
+
+                    <!-- Sliders -->
+                    <div class="col-span-full grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-gray-800 pt-2">
+                        <div class="flex flex-col gap-1">
+                            <div class="flex justify-between"><label>Quality (10-63)</label><span id="val-quality" class="text-gray-500">--</span></div>
+                            <input type="range" id="cfg-quality" min="10" max="63" step="1" onchange="updateCameraSetting('quality', this.value)" class="accent-green-500">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <div class="flex justify-between"><label>Brightness (-2 to 2)</label><span id="val-brightness" class="text-gray-500">--</span></div>
+                            <input type="range" id="cfg-brightness" min="-2" max="2" step="1" onchange="updateCameraSetting('brightness', this.value)" class="accent-green-500">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <div class="flex justify-between"><label>Contrast (-2 to 2)</label><span id="val-contrast" class="text-gray-500">--</span></div>
+                            <input type="range" id="cfg-contrast" min="-2" max="2" step="1" onchange="updateCameraSetting('contrast', this.value)" class="accent-green-500">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <div class="flex justify-between"><label>Saturation (-2 to 2)</label><span id="val-saturation" class="text-gray-500">--</span></div>
+                            <input type="range" id="cfg-saturation" min="-2" max="2" step="1" onchange="updateCameraSetting('saturation', this.value)" class="accent-green-500">
+                        </div>
+                    </div>
+
+                    <!-- Toggles -->
+                    <div class="col-span-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 border-t border-gray-800 pt-2">
+                        <button id="btn-awb" onclick="toggleCamBool('awb')" class="btn-cy py-1 text-[10px] rounded">AWB</button>
+                        <button id="btn-aec" onclick="toggleCamBool('aec')" class="btn-cy py-1 text-[10px] rounded">AEC (Sensor)</button>
+                        <button id="btn-aec2" onclick="toggleCamBool('aec2')" class="btn-cy py-1 text-[10px] rounded">AEC (DSP)</button>
+                        <button id="btn-agc" onclick="toggleCamBool('agc')" class="btn-cy py-1 text-[10px] rounded">AGC</button>
+                        <button id="btn-bpc" onclick="toggleCamBool('bpc')" class="btn-cy py-1 text-[10px] rounded">BPC</button>
+                        <button id="btn-wpc" onclick="toggleCamBool('wpc')" class="btn-cy py-1 text-[10px] rounded">WPC</button>
+                        <button id="btn-raw_gma" onclick="toggleCamBool('raw_gma')" class="btn-cy py-1 text-[10px] rounded">Raw GMA</button>
+                        <button id="btn-lenc" onclick="toggleCamBool('lenc')" class="btn-cy py-1 text-[10px] rounded">Lens Corr</button>
+                        <button id="btn-hmirror" onclick="toggleCamBool('hmirror')" class="btn-cy py-1 text-[10px] rounded">H-Mirror</button>
+                        <button id="btn-vflip" onclick="toggleCamBool('vflip')" class="btn-cy py-1 text-[10px] rounded">V-Flip</button>
+                        <button id="btn-dcw" onclick="toggleCamBool('dcw')" class="btn-cy py-1 text-[10px] rounded">DCW</button>
+                        <button id="btn-colorbar" onclick="toggleCamBool('colorbar')" class="btn-cy py-1 text-[10px] rounded">Colorbar</button>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
                 <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">SYSTEM TOOLS</div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                      <button onclick="toggleAI()" id="ai-toggle-btn" class="btn-cy py-2 rounded text-xs sm:text-sm">ACTIVATE AI HUD</button>
@@ -542,6 +622,84 @@
             }
         }
 
+        // === Camera Config ===
+        const camState = {};
+
+        async function fetchCameraSettings() {
+            try {
+                const res = await fetch('/api/camera_settings');
+                if(!res.ok) return;
+                const data = await res.json();
+
+                // Update UI elements
+                const updateVal = (id, val) => {
+                    const el = document.getElementById(id);
+                    if(el) {
+                        el.value = val;
+                        // Trigger onchange manually if needed, or just update UI
+                        const display = document.getElementById('val-' + id.replace('cfg-', ''));
+                        if(display) display.innerText = val;
+                    }
+                };
+
+                // Selects & Sliders
+                ['framesize', 'special_effect', 'wb_mode', 'quality', 'brightness', 'contrast', 'saturation'].forEach(key => {
+                    if(data[key] !== undefined) {
+                        updateVal('cfg-' + key, data[key]);
+                        camState[key] = data[key];
+                    }
+                });
+
+                // Toggles
+                ['awb', 'aec', 'aec2', 'agc', 'bpc', 'wpc', 'raw_gma', 'lenc', 'hmirror', 'vflip', 'dcw', 'colorbar'].forEach(key => {
+                    if(data[key] !== undefined) {
+                        camState[key] = data[key];
+                        const btn = document.getElementById('btn-' + key);
+                        if(btn) {
+                             if(data[key] == 1) btn.classList.add('btn-active');
+                             else btn.classList.remove('btn-active');
+                        }
+                    }
+                });
+
+                log("Camera settings synced.");
+
+            } catch(e) {
+                log("Failed to sync camera settings.");
+            }
+        }
+
+        async function updateCameraSetting(varName, val) {
+            // Update local state and UI display immediately
+            camState[varName] = val;
+            const display = document.getElementById('val-' + varName);
+            if(display) display.innerText = val;
+
+            try {
+                await fetch('/api/camera_settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({var: varName, val: Number(val)})
+                });
+            } catch(e) {
+                log(`Failed to set ${varName}`);
+            }
+        }
+
+        function toggleCamBool(varName) {
+            const current = camState[varName] || 0;
+            const newVal = current ? 0 : 1;
+
+            // Toggle visual state
+            const btn = document.getElementById('btn-' + varName);
+            if(btn) {
+                if(newVal) btn.classList.add('btn-active');
+                else btn.classList.remove('btn-active');
+            }
+
+            updateCameraSetting(varName, newVal);
+        }
+
         function switchView(view) {
             currentView = view;
             document.getElementById('main-view').style.display = view === 'main' ? 'grid' : 'none';
@@ -549,6 +707,10 @@
             
             document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
             document.getElementById('nav-' + view).classList.add('active');
+
+            if(view === 'settings') {
+                fetchCameraSettings();
+            }
         }
         
         function log(msg) {

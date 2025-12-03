@@ -635,6 +635,42 @@ def toggle_ai():
 def api_netinfo():
     return jsonify(state.net_info)
 
+@app.route('/api/camera_settings', methods=['GET', 'POST'])
+def api_camera_settings():
+    """
+    GET: Fetch current settings from ESP32 /status endpoint
+    POST: Update a setting via ESP32 /control endpoint
+    """
+    target_ip = state.camera_ip or "192.168.4.1"
+
+    if request.method == 'GET':
+        try:
+            url = f"http://{target_ip}/status"
+            resp = state.control_session.get(url, timeout=2)
+            if resp.status_code == 200:
+                return jsonify(resp.json())
+            return jsonify({"error": f"ESP32 returned {resp.status_code}"}), 502
+        except requests.exceptions.RequestException as e:
+            return jsonify({"error": str(e)}), 503
+
+    elif request.method == 'POST':
+        data = request.json
+        var = data.get('var')
+        val = data.get('val')
+
+        if var is None or val is None:
+            return jsonify({"error": "Missing var or val"}), 400
+
+        try:
+            # Forward to ESP32 /control?var=X&val=Y
+            url = f"http://{target_ip}/control"
+            resp = state.control_session.get(url, params={'var': var, 'val': val}, timeout=2)
+            if resp.status_code == 200:
+                return jsonify({"status": "ok", "var": var, "val": val})
+            return jsonify({"error": f"ESP32 returned {resp.status_code}"}), 502
+        except requests.exceptions.RequestException as e:
+            return jsonify({"error": str(e)}), 503
+
 if __name__ == '__main__':
     # Initialize Multiprocessing Queues
     video_cmd_queue = Queue()
