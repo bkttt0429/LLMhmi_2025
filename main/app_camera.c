@@ -164,3 +164,18 @@ bool app_camera_health_check(void)
 {
     return camera_probe();
 }
+
+void app_camera_print_diagnostics(void)
+{
+    ESP_LOGI(TAG, "=== Camera Diagnostics ===");
+    ESP_LOGI(TAG, "Free Heap: %d KB", heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+    ESP_LOGI(TAG, "Free PSRAM: %d KB", heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
+    ESP_LOGI(TAG, "Min Free Heap: %d KB", heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024);
+
+    sensor_t *s = esp_camera_sensor_get();
+    if (s) {
+        ESP_LOGI(TAG, "Camera Status: OK");
+    } else {
+        ESP_LOGE(TAG, "Camera Status: FAILED");
+    }
+}

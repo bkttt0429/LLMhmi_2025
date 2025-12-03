@@ -38,83 +38,122 @@ static esp_err_t stream_handler(httpd_req_t *req)
     esp_err_t res = ESP_OK;
     size_t _jpg_buf_len = 0;
     uint8_t *_jpg_buf = NULL;
-    char part_buf[64];
+    char part_buf[128];
 
-    int64_t frame_start_time = 0;
-    const int64_t target_frame_time_us = 33333; // Target 30 FPS
-
+    // Set response type BEFORE other operations
     res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);
     if (res != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set response type");
         return res;
     }
 
-    // Set TCP Keep-Alive
+    // Disable response cache
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+    httpd_resp_set_hdr(req, "Expires", "0");
+
+    // Configure TCP socket options
     int sock = httpd_req_to_sockfd(req);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Invalid socket");
+        return ESP_FAIL;
+    }
+
+    // Increase send buffer to prevent blocking
+    int sndbuf_size = 32768; // 32KB
+    setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sndbuf_size, sizeof(sndbuf_size));
+
+    // TCP Keep-Alive settings
     int keepalive = 1;
-    int keepidle = 5;
-    int keepinterval = 5;
+    int keepidle = 3;
+    int keepinterval = 2;
     int keepcount = 3;
     setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(int));
     setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(int));
     setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepinterval, sizeof(int));
     setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &keepcount, sizeof(int));
 
-    char user_agent[512] = {0}; 
-    httpd_req_get_hdr_value_str(req, "User-Agent", user_agent, sizeof(user_agent));
-    ESP_LOGI(TAG, "Stream started from %s", user_agent[0] ? user_agent : "Unknown");
+    // Disable Nagle's algorithm for lower latency
+    int nodelay = 1;
+    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(int));
+
+    ESP_LOGI(TAG, "Stream started (socket=%d)", sock);
+
+    int consecutive_errors = 0;
+    const int MAX_CONSECUTIVE_ERRORS = 5;
 
     while (true) {
-        frame_start_time = esp_timer_get_time();
-
-        // Get Latest Frame
-        fb = esp_camera_fb_get();
-        if (!fb) {
-            ESP_LOGE(TAG, "Camera capture failed");
-            g_stats.dropped_frames++;
-            res = ESP_FAIL;
-
-            // Health Check
-            if (g_stats.dropped_frames > 10) {
-                ESP_LOGW(TAG, "Too many dropped frames, checking camera health");
-                if (!app_camera_health_check()) {
-                    ESP_LOGE(TAG, "Camera unhealthy, need manual restart");
-                }
-                g_stats.dropped_frames = 0;
-            }
+        // Check if connection is still alive
+        int error = 0;
+        socklen_t len = sizeof(error);
+        if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {
+            ESP_LOGW(TAG, "Socket error detected, closing stream");
             break;
         }
 
-        // Handle JPEG Format
+        // Get frame with timeout protection
+        fb = esp_camera_fb_get();
+        if (!fb) {
+            ESP_LOGW(TAG, "Frame capture failed");
+            consecutive_errors++;
+            g_stats.dropped_frames++;
+
+            if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
+                ESP_LOGE(TAG, "Too many consecutive errors, closing stream");
+                res = ESP_FAIL;
+                break;
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        consecutive_errors = 0; // Reset on success
+
+        // Convert to JPEG if needed
         if (fb->format != PIXFORMAT_JPEG) {
             bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
             esp_camera_fb_return(fb);
             fb = NULL;
+
             if (!jpeg_converted) {
-                ESP_LOGE(TAG, "JPEG compression failed");
-                res = ESP_FAIL;
-                break;
+                ESP_LOGE(TAG, "JPEG conversion failed");
+                if (_jpg_buf) {
+                    free(_jpg_buf);
+                    _jpg_buf = NULL;
+                }
+                continue;
             }
         } else {
             _jpg_buf_len = fb->len;
             _jpg_buf = fb->buf;
         }
 
-        // Non-blocking Send
+        // Send frame with error checking
         if (res == ESP_OK) {
             res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
-            if (res != ESP_OK) break;
+            if (res != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to send boundary (client disconnected?)");
+                break;
+            }
 
             size_t hlen = snprintf(part_buf, sizeof(part_buf), _STREAM_PART, _jpg_buf_len);
             res = httpd_resp_send_chunk(req, part_buf, hlen);
-            if (res != ESP_OK) break;
+            if (res != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to send header");
+                break;
+            }
 
             res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len);
-            if (res != ESP_OK) break;
+            if (res != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to send image data");
+                break;
+            }
 
             g_stats.frame_count++;
         }
 
-        // Free Memory
+        // Cleanup
         if (fb) {
             esp_camera_fb_return(fb);
             fb = NULL;
@@ -123,34 +162,33 @@ static esp_err_t stream_handler(httpd_req_t *req)
             _jpg_buf = NULL;
         }
 
-        // FPS Calculation
-        int64_t frame_end_time = esp_timer_get_time();
-        int64_t frame_duration = frame_end_time - frame_start_time;
-
+        // FPS calculation and stats
+        int64_t now = esp_timer_get_time();
         if (g_stats.last_frame_time > 0) {
-            int64_t actual_interval = frame_start_time - g_stats.last_frame_time;
-            if (actual_interval > 0) {
-                g_stats.current_fps = 1000000.0f / actual_interval;
+            int64_t interval = now - g_stats.last_frame_time;
+            if (interval > 0) {
+                g_stats.current_fps = 1000000.0f / interval;
             }
         }
-        g_stats.last_frame_time = frame_start_time;
+        g_stats.last_frame_time = now;
 
-        // Rate Control
-        if (frame_duration < target_frame_time_us) {
-            int64_t delay_us = target_frame_time_us - frame_duration;
-            if (delay_us > 1000) {
-                vTaskDelay(pdMS_TO_TICKS(delay_us / 1000));
-            }
-        }
-
-        // Periodically Log Stats (使用 PRIu32 宏)
+        // Log stats periodically
         if (g_stats.frame_count % 100 == 0) {
-            ESP_LOGI(TAG, "FPS: %.1f | Frames: %" PRIu32 " | Dropped: %" PRIu32,
+            ESP_LOGI(TAG, "Stream Stats: FPS=%.1f Frames=%" PRIu32 " Dropped=%" PRIu32,
                      g_stats.current_fps, g_stats.frame_count, g_stats.dropped_frames);
         }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
-    ESP_LOGI(TAG, "Stream ended. Total frames: %" PRIu32 ", Dropped: %" PRIu32,
+    if (fb) {
+        esp_camera_fb_return(fb);
+    }
+    if (_jpg_buf) {
+        free(_jpg_buf);
+    }
+
+    ESP_LOGI(TAG, "Stream ended: Total=%" PRIu32 " Dropped=%" PRIu32,
              g_stats.frame_count, g_stats.dropped_frames);
 
     return res;
@@ -261,14 +299,29 @@ void app_httpd_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.stack_size = 8192;
-    config.max_uri_handlers = 8;
+    config.ctrl_port = 32768;
+    config.max_open_sockets = 7;
+    config.max_uri_handlers = 12;
+    config.max_resp_headers = 8;
+    config.backlog_conn = 5;
     config.lru_purge_enable = true;
+    config.recv_wait_timeout = 10;
+    config.send_wait_timeout = 10;
+    config.stack_size = 8192;
+    config.task_priority = 5;
+    config.core_id = 1;
+
+    config.global_user_ctx = NULL;
+    config.global_user_ctx_free_fn = NULL;
+    config.global_transport_ctx = NULL;
+    config.global_transport_ctx_free_fn = NULL;
+    config.open_fn = NULL;
+    config.close_fn = NULL;
+    config.uri_match_fn = NULL;
 
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) == ESP_OK) {
-        // Register all URIs
         httpd_uri_t uris[] = {
             {"/stream", HTTP_GET, stream_handler, NULL},
             {"/control", HTTP_GET, control_handler, NULL},
@@ -279,17 +332,20 @@ void app_httpd_start(void)
         };
 
         for (int i = 0; i < sizeof(uris) / sizeof(httpd_uri_t); i++) {
-            httpd_register_uri_handler(server, &uris[i]);
+            if (httpd_register_uri_handler(server, &uris[i]) != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to register URI: %s", uris[i].uri);
+            }
         }
 
-        ESP_LOGI(TAG, "✅ HTTP Server Started on port 80");
-        ESP_LOGI(TAG, "   - /stream   : MJPEG Stream");
-        ESP_LOGI(TAG, "   - /control  : Motor Control");
-        ESP_LOGI(TAG, "   - /dist     : Distance Sensor");
-        ESP_LOGI(TAG, "   - /status   : System Status");
-        ESP_LOGI(TAG, "   - /settings : Camera Settings");
-        ESP_LOGI(TAG, "   - /light    : LED Control");
+        ESP_LOGI(TAG, "✅ HTTP Server Started");
+        ESP_LOGI(TAG, "   Available endpoints:");
+        ESP_LOGI(TAG, "   - GET  /stream   (MJPEG Stream)");
+        ESP_LOGI(TAG, "   - GET  /control  (Motor Control)");
+        ESP_LOGI(TAG, "   - GET  /dist     (Distance Sensor)");
+        ESP_LOGI(TAG, "   - GET  /status   (System Status)");
+        ESP_LOGI(TAG, "   - GET  /settings (Camera Settings)");
+        ESP_LOGI(TAG, "   - GET  /light    (LED Control)");
     } else {
-        ESP_LOGE(TAG, "❌ Failed to start HTTP Server");
+        ESP_LOGE(TAG, "❌ HTTP Server Start Failed");
     }
 }

@@ -8,5 +8,6 @@ esp_err_t app_camera_init(void);
 esp_err_t app_camera_set_framesize(framesize_t size);
 esp_err_t app_camera_set_quality(int quality);
 bool app_camera_health_check(void);
+void app_camera_print_diagnostics(void);
 
 #endif
