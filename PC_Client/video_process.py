@@ -28,6 +28,7 @@ class MJPEGStreamReader:
         self.max_reconnect_attempts = 5
         self.reconnect_delay = 2.0
         self.current_retry_delay = 1.0
+        self.iterator = None
         self._connect()
 
     def _connect(self):
@@ -62,26 +63,32 @@ class MJPEGStreamReader:
                 self.connected = True
                 self.connection_attempts = 0
                 self.current_retry_delay = 1.0
+                # Initialize the iterator once per connection to avoid StreamConsumedError
+                self.iterator = self.stream.iter_content(chunk_size=4096)
                 print(f"[STREAM] ✅ Connected to {self.url}")
             else:
                 self.connected = False
+                self.iterator = None
                 print(f"[STREAM] ❌ HTTP {self.stream.status_code}")
 
         except requests.exceptions.Timeout:
             self.connected = False
+            self.iterator = None
             print(f"[STREAM] ⏱️ Connection timeout")
 
         except requests.exceptions.ConnectionError as e:
             self.connected = False
+            self.iterator = None
             print(f"[STREAM] ❌ Connection error: {e}")
 
         except Exception as e:
             self.connected = False
+            self.iterator = None
             print(f"[STREAM] ❌ Unexpected error: {e}")
 
     def get_frame(self):
         """Get single frame with automatic reconnection"""
-        if not self.connected or not self.stream:
+        if not self.connected or not self.stream or not self.iterator:
             self._connect()
             if not self.connected:
                 time.sleep(self.current_retry_delay)
@@ -89,13 +96,19 @@ class MJPEGStreamReader:
                 return None
 
         try:
-            chunk_size = 4096
-
-            for chunk in self.stream.iter_content(chunk_size=chunk_size):
-                if not chunk:
-                    print("[STREAM] Empty chunk received, reconnecting...")
+            # Consume from the existing iterator
+            # Iterate manually until we have a full frame or no data left
+            while True:
+                try:
+                    chunk = next(self.iterator)
+                except StopIteration:
+                    print("[STREAM] Stream ended (StopIteration), reconnecting...")
                     self.connected = False
-                    break
+                    self.iterator = None
+                    return None
+
+                if not chunk:
+                    continue
 
                 self.bytes += chunk
 
@@ -122,6 +135,9 @@ class MJPEGStreamReader:
 
                         return frame
 
+                    # If we found markers but decoding failed, or bytes remain, loop continues
+                    # to process more chunks or remaining buffer.
+
             return None
 
         except requests.exceptions.ChunkedEncodingError:
@@ -134,9 +150,18 @@ class MJPEGStreamReader:
             self.connected = False
             return None
 
+        except requests.exceptions.StreamConsumedError:
+            print("[STREAM] ⚠️ Stream consumed, reconnecting...")
+            self.connected = False
+            return None
+
         except Exception as e:
             import traceback
-            print(f"[STREAM] ❌ Frame read error: {traceback.format_exc()}")
+            # Specifically catch the StreamConsumedError if it comes as a generic Exception or not caught above
+            if "StreamConsumedError" in str(type(e)):
+                 print("[STREAM] ⚠️ Stream consumed (caught via generic), reconnecting...")
+            else:
+                 print(f"[STREAM] ❌ Frame read error: {traceback.format_exc()}")
             self.connected = False
             return None
 
@@ -178,20 +203,26 @@ def adjust_esp32_settings(ip, quality=None, framesize=None):
         - 7  = FRAMESIZE_SVGA (800x600) 
         - 10 = FRAMESIZE_XGA (1024x768) 
     """ 
-    params = {} 
+    settings = {}
     if quality is not None: 
-        params['quality'] = quality 
+        settings['quality'] = quality
     if framesize is not None: 
-        params['framesize'] = framesize 
+        settings['framesize'] = framesize
      
-    try: 
-        resp = requests.get(f"http://{ip}/settings", params=params, timeout=2) 
-        if resp.status_code == 200: 
-            print(f"[ESP32] Settings updated: {params}") 
-            return True 
-    except Exception as e: 
-        print(f"[ESP32] Settings update failed: {e}") 
-    return False 
+    all_success = True
+    for var, val in settings.items():
+        try:
+            # ESP32 expects /control?var=variable_name&val=value
+            resp = requests.get(f"http://{ip}/control", params={'var': var, 'val': val}, timeout=2)
+            if resp.status_code == 200:
+                print(f"[ESP32] Setting {var}={val} updated")
+            else:
+                print(f"[ESP32] Failed to set {var}: HTTP {resp.status_code}")
+                all_success = False
+        except Exception as e:
+            print(f"[ESP32] Settings update failed: {e}")
+            all_success = False
+    return all_success
  
  
 # Main Process Function (Optimized)
