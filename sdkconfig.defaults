@@ -1,5 +1,73 @@
-# Enable PSRAM
+# ============================================
+# ESP32-S3 CAM N16R8 Optimized Config
+# Flash: 16MB | PSRAM: 8MB OPI
+# ============================================
+
+# --- PSRAM Config ---
 CONFIG_ESP32S3_SPIRAM_SUPPORT=y
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
-CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_SPEED_80M=y               # 80MHz (Stable)
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y      # Fetch instructions from PSRAM
+CONFIG_SPIRAM_RODATA=y                  # Read-only data in PSRAM
+CONFIG_SPIRAM_USE_MALLOC=y              # Allow malloc to use PSRAM
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096 # Allocate < 4KB in Internal RAM
+
+# --- Memory Config ---
+CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP=y
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+
+# --- Wi-Fi Optimization ---
+CONFIG_ESP32_WIFI_DYNAMIC_RX_BUFFER_NUM=16  # Increase RX buffer
+CONFIG_ESP32_WIFI_DYNAMIC_TX_BUFFER_NUM=16  # Increase TX buffer
+CONFIG_ESP32_WIFI_STATIC_RX_BUFFER_NUM=8
+CONFIG_ESP32_WIFI_STATIC_TX_BUFFER_NUM=0
+CONFIG_ESP32_WIFI_AMPDU_TX_ENABLED=y        # Enable AMPDU TX
+CONFIG_ESP32_WIFI_AMPDU_RX_ENABLED=y        # Enable AMPDU RX
+CONFIG_ESP32_WIFI_RX_BA_WIN=16              # Increase RX Window
+
+# --- TCP/IP Optimization (Critical for Streaming) ---
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768       # TCP Send Buffer 32KB
+CONFIG_LWIP_TCP_WND_DEFAULT=32768           # TCP Receive Window 32KB
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=16
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=16
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64          # Increase TCP/IP Task Mailbox
+
+# --- HTTP Server Optimization ---
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=512
+
+# --- FreeRTOS Optimization ---
+CONFIG_FREERTOS_HZ=1000                     # Tick Rate 1000Hz
+CONFIG_FREERTOS_UNICORE=n                   # Dual Core Mode
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+
+# --- Camera Specific Config ---
+CONFIG_CAMERA_CORE0=n                       # Camera Task on Core 1
+CONFIG_CAMERA_CORE1=y
+CONFIG_CAMERA_DMA_BUFFER_SIZE_MAX=32768     # Max DMA Buffer
+
+# --- Log Level ---
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y
+
+# --- Watchdog Config ---
+CONFIG_ESP_TASK_WDT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10            # 10s Watchdog
+
+# --- Flash Config (16MB) ---
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+# CONFIG_PARTITION_TABLE_CUSTOM=y
+# CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- Compiler Optimization ---
+CONFIG_COMPILER_OPTIMIZATION_PERF=y         # Optimize for performance
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE=y # Release Mode
+
+# --- Power Management ---
+CONFIG_PM_ENABLE=n                          # Disable PM for max performance
+
+# --- Other Optimizations ---
+CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240=y       # CPU 240MHz
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y        # 64B Cache Line
