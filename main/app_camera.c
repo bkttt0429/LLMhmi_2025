@@ -8,34 +8,10 @@
 
 static const char *TAG = "app_camera";
 
-// Retry camera init (Fix for Cold Boot issue)
-#define CAMERA_INIT_RETRY_MAX 3
-#define CAMERA_POWER_CYCLE_DELAY_MS 100
-
-// Check if camera sensor is healthy
-static bool camera_probe(void)
-{
-    camera_fb_t *fb = esp_camera_fb_get();
-    if (fb) {
-        esp_camera_fb_return(fb);
-        return true;
-    }
-    return false;
-}
-
 esp_err_t app_camera_init(void)
 {
-    ESP_LOGI(TAG, "Initializing Camera (N16R8 Optimized)...");
+    ESP_LOGI(TAG, "Initializing Camera (Refactored)...");
 
-    // Check PSRAM
-    size_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
-    if (psram_size == 0) {
-        ESP_LOGW(TAG, "PSRAM not detected! Falling back to Internal RAM (Low Res).");
-    } else {
-        ESP_LOGI(TAG, "PSRAM Size: %d MB", psram_size / (1024 * 1024));
-    }
-
-    // Camera Config (Optimized for 8MB PSRAM)
     camera_config_t config;
     config.ledc_channel = LEDC_CHANNEL_0;
     config.ledc_timer = LEDC_TIMER_0;
@@ -55,137 +31,69 @@ esp_err_t app_camera_init(void)
     config.pin_sccb_scl = SIOC_GPIO_NUM;
     config.pin_pwdn = PWDN_GPIO_NUM;
     config.pin_reset = RESET_GPIO_NUM;
-    config.xclk_freq_hz = 20000000; // 20MHz
-
-    // Optimization 1: JPEG Format (Hardware Encoding)
+    config.xclk_freq_hz = 20000000;
     config.pixel_format = PIXFORMAT_JPEG;
 
-    // Optimization 2: Configure Buffers based on RAM availability
-    if (psram_size > 0) {
-        config.frame_size = FRAMESIZE_SVGA;  // 800x600 (Balanced)
-        config.jpeg_quality = 10;            // High Quality (10-12 recommended)
-        config.fb_count = 3;                 // Triple Buffering (Reduce drops)
-        config.fb_location = CAMERA_FB_IN_PSRAM;
+    // Default framesize
+    config.frame_size = FRAMESIZE_SVGA;
+    config.jpeg_quality = 12;
+    config.fb_count = 1;
+
+    // Detect PSRAM and optimize
+    // Crucial for N16R8 module
+    if(heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0){
+        ESP_LOGI(TAG, "PSRAM found, optimizing buffers...");
+        config.frame_size = FRAMESIZE_UXGA; // Can support higher res
+        config.jpeg_quality = 10;
+        config.fb_count = 2; // Double buffer for smooth stream
+        config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
     } else {
-        // Fallback for No PSRAM (Internal RAM)
-        // Internal RAM is limited (~320KB), so we must use lower res and fewer buffers
-        config.frame_size = FRAMESIZE_QVGA;  // 320x240
-        config.jpeg_quality = 15;            // Lower quality to save space
-        config.fb_count = 2;                 // Double Buffering
-        config.fb_location = CAMERA_FB_IN_DRAM;
+        ESP_LOGW(TAG, "No PSRAM found, using minimal config");
+        config.frame_size = FRAMESIZE_SVGA;
+        config.jpeg_quality = 12;
+        config.fb_count = 1;
+        config.grab_mode = CAMERA_GRAB_LATEST;
     }
 
-    config.grab_mode = CAMERA_GRAB_LATEST; // Always grab latest frame
-
-    // Optimization 3: Retry Mechanism
-    esp_err_t err = ESP_FAIL;
-    for (int retry = 0; retry < CAMERA_INIT_RETRY_MAX; retry++) {
-        if (retry > 0) {
-            ESP_LOGW(TAG, "Retry %d/%d...", retry, CAMERA_INIT_RETRY_MAX);
-            vTaskDelay(pdMS_TO_TICKS(200));
-        }
-
-        err = esp_camera_init(&config);
-
-        if (err == ESP_OK) {
-            // Verify if camera is truly available
-            if (camera_probe()) {
-                ESP_LOGI(TAG, "Camera Init Success on attempt %d", retry + 1);
-                break;
-            } else {
-                ESP_LOGW(TAG, "Camera init returned OK but probe failed");
-                esp_camera_deinit();
-                err = ESP_FAIL;
-            }
-        } else {
-            ESP_LOGE(TAG, "Camera Init Failed: 0x%x", err);
-        }
-    }
-
+    // Init Camera
+    esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Camera Init Failed after %d retries", CAMERA_INIT_RETRY_MAX);
+        ESP_LOGE(TAG, "Camera Init Failed");
         return err;
     }
 
-    // Optimization 4: Sensor Fine-tuning
+    // Sensor Settings (Standard Defaults)
     sensor_t *s = esp_camera_sensor_get();
     if (s) {
-        // Flip settings (Adjust based on actual mounting)
-        s->set_vflip(s, 1);   // Vertical Flip
-        s->set_hmirror(s, 0); // Horizontal Mirror
+        // Drop down frame size for higher initial FPS
+        if(heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0){
+            s->set_framesize(s, FRAMESIZE_SVGA);
+        }
 
-        // Image Quality Tuning
+        // Basic tuning
         s->set_brightness(s, 0);     // -2 to 2
         s->set_contrast(s, 0);       // -2 to 2
         s->set_saturation(s, 0);     // -2 to 2
-        s->set_sharpness(s, 0);      // -2 to 2
-        s->set_denoise(s, 0);        // Denoise (0-8)
-
-        // Auto Exposure / White Balance
-        s->set_exposure_ctrl(s, 1);  // Auto Exposure
-        s->set_whitebal(s, 1);       // Auto White Balance
-        s->set_awb_gain(s, 1);       // AWB Gain
-        s->set_wb_mode(s, 0);        // WB Mode (0=auto)
-
-        // Effects and Quality
-        s->set_special_effect(s, 0); // No Effect
-        s->set_lenc(s, 1);           // Lens Correction
-        s->set_gainceiling(s, GAINCEILING_4X); // Gain Ceiling
-
-        ESP_LOGI(TAG, "Sensor settings applied");
+        s->set_special_effect(s, 0); // 0 to 6 (0 - No Effect, 1 - Negative, 2 - Grayscale, 3 - Red Tint, 4 - Green Tint, 5 - Blue Tint, 6 - Sepia)
+        s->set_whitebal(s, 1);       // 0 = disable , 1 = enable
+        s->set_awb_gain(s, 1);       // 0 = disable , 1 = enable
+        s->set_wb_mode(s, 0);        // 0 to 4 - if awb_gain enabled (0 - Auto, 1 - Sunny, 2 - Cloudy, 3 - Office, 4 - Home)
+        s->set_exposure_ctrl(s, 1);  // 0 = disable , 1 = enable
+        s->set_aec2(s, 0);           // 0 = disable , 1 = enable
+        s->set_ae_level(s, 0);       // -2 to 2
+        s->set_aec_value(s, 300);    // 0 to 1200
+        s->set_gain_ctrl(s, 1);      // 0 = disable , 1 = enable
+        s->set_agc_gain(s, 0);       // 0 to 30
+        s->set_gainceiling(s, (gainceiling_t)0);  // 0 to 6
+        s->set_bpc(s, 0);            // 0 = disable , 1 = enable
+        s->set_wpc(s, 1);            // 0 = disable , 1 = enable
+        s->set_raw_gma(s, 1);        // 0 = disable , 1 = enable
+        s->set_lenc(s, 1);           // 0 = disable , 1 = enable
+        s->set_hmirror(s, 0);        // 0 = disable , 1 = enable
+        s->set_vflip(s, 1);          // 0 = disable , 1 = enable
+        s->set_dcw(s, 1);            // 0 = disable , 1 = enable
+        s->set_colorbar(s, 0);       // 0 = disable , 1 = enable
     }
-
-    // Memory Check
-    ESP_LOGI(TAG, "Free Heap: %d KB, Free PSRAM: %d KB",
-             heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
-             heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
 
     return ESP_OK;
-}
-
-// New: Dynamic Resolution Adjustment
-esp_err_t app_camera_set_framesize(framesize_t size)
-{
-    sensor_t *s = esp_camera_sensor_get();
-    if (s) {
-        if (s->set_framesize(s, size) == 0) {
-            ESP_LOGI(TAG, "Framesize changed to %d", size);
-            return ESP_OK;
-        }
-    }
-    return ESP_FAIL;
-}
-
-// New: Dynamic JPEG Quality Adjustment
-esp_err_t app_camera_set_quality(int quality)
-{
-    sensor_t *s = esp_camera_sensor_get();
-    if (s && quality >= 0 && quality <= 63) {
-        if (s->set_quality(s, quality) == 0) {
-            ESP_LOGI(TAG, "JPEG Quality set to %d", quality);
-            return ESP_OK;
-        }
-    }
-    return ESP_FAIL;
-}
-
-// New: Health Check (Called periodically)
-bool app_camera_health_check(void)
-{
-    return camera_probe();
-}
-
-void app_camera_print_diagnostics(void)
-{
-    ESP_LOGI(TAG, "=== Camera Diagnostics ===");
-    ESP_LOGI(TAG, "Free Heap: %d KB", heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
-    ESP_LOGI(TAG, "Free PSRAM: %d KB", heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
-    ESP_LOGI(TAG, "Min Free Heap: %d KB", heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024);
-
-    sensor_t *s = esp_camera_sensor_get();
-    if (s) {
-        ESP_LOGI(TAG, "Camera Status: OK");
-    } else {
-        ESP_LOGE(TAG, "Camera Status: FAILED");
-    }
 }
