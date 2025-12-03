@@ -28,92 +28,116 @@ typedef struct {
 
 static stream_stats_t g_stats = {0};
 
-// ⭐ 優化重點 1: 改進的串流處理器
+// Improved Stream Handler (Optimization Focus 1)
 static esp_err_t stream_handler(httpd_req_t *req)
 {
     camera_fb_t *fb = NULL;
     esp_err_t res = ESP_OK;
     size_t _jpg_buf_len = 0;
     uint8_t *_jpg_buf = NULL;
-    char part_buf[64];
+    char part_buf[128];  // Increased buffer size
 
     int64_t frame_start_time = 0;
-    const int64_t target_frame_time_us = 33333; // 目標 30 FPS (1/30 sec)
+    const int64_t target_frame_time_us = 40000; // Lower to 25 FPS (more stable)
 
+    // Fix 1: Set correct Content-Type first
     res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);
     if (res != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set response type");
         return res;
     }
 
-    // 設定 TCP Keep-Alive（防止連線中斷）
-    int sock = httpd_req_to_sockfd(req);
-    int keepalive = 1;
-    int keepidle = 5;
-    int keepinterval = 5;
-    int keepcount = 3;
-    setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(int));
-    setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(int));
-    setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepinterval, sizeof(int));
-    setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &keepcount, sizeof(int));
+    // Fix 2: Disable HTTP cache
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+    httpd_resp_set_hdr(req, "Expires", "0");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
-    ESP_LOGI(TAG, "Stream started from %s",
-             httpd_req_get_hdr_value_str(req, "User-Agent"));
+    // Fix 3: TCP Keep-Alive settings
+    int sock = httpd_req_to_sockfd(req);
+    if (sock >= 0) {
+        int keepalive = 1;
+        int keepidle = 5;
+        int keepinterval = 5;
+        int keepcount = 3;
+        setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(int));
+        setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(int));
+        setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepinterval, sizeof(int));
+        setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &keepcount, sizeof(int));
+
+        // Fix 4: Disable Nagle algorithm (reduce latency)
+        int nodelay = 1;
+        setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(int));
+    }
+
+    ESP_LOGI(TAG, "Stream started");
 
     while (true) {
         frame_start_time = esp_timer_get_time();
 
-        // ⭐ 優化重點 2: 取得最新幀（GRAB_LATEST 模式會自動跳過舊幀）
+        // Get frame
         fb = esp_camera_fb_get();
         if (!fb) {
             ESP_LOGE(TAG, "Camera capture failed");
             g_stats.dropped_frames++;
-            res = ESP_FAIL;
 
-            // 健康檢查：連續失敗則嘗試重啟相機
             if (g_stats.dropped_frames > 10) {
-                ESP_LOGW(TAG, "Too many dropped frames, checking camera health");
+                ESP_LOGW(TAG, "Too many dropped frames, checking health");
                 if (!app_camera_health_check()) {
-                    ESP_LOGE(TAG, "Camera unhealthy, need manual restart");
+                    ESP_LOGE(TAG, "Camera unhealthy");
                 }
                 g_stats.dropped_frames = 0;
             }
-            break;
+
+            // Fix 5: Short delay after failure then retry
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue; // Do not break, retry
         }
 
-        // 處理 JPEG 格式
+        // Process JPEG
         if (fb->format != PIXFORMAT_JPEG) {
             bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
             esp_camera_fb_return(fb);
             fb = NULL;
             if (!jpeg_converted) {
                 ESP_LOGE(TAG, "JPEG compression failed");
-                res = ESP_FAIL;
-                break;
+                vTaskDelay(pdMS_TO_TICKS(100));
+                continue;
             }
         } else {
             _jpg_buf_len = fb->len;
             _jpg_buf = fb->buf;
         }
 
-        // ⭐ 優化重點 3: 非阻塞式傳送（檢查是否可發送）
+        // Fix 6: Send in chunks, check success of each step
         if (res == ESP_OK) {
-            // 發送邊界
+            // Send boundary
             res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
-            if (res != ESP_OK) break;
+            if (res != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to send boundary");
+                goto cleanup;
+            }
 
-            // 發送 Header
+            // Send Header
             size_t hlen = snprintf(part_buf, sizeof(part_buf), _STREAM_PART, _jpg_buf_len);
             res = httpd_resp_send_chunk(req, part_buf, hlen);
-            if (res != ESP_OK) break;
+            if (res != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to send header");
+                goto cleanup;
+            }
 
-            // 發送影像數據
+            // Send image data
             res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len);
-            if (res != ESP_OK) break;
+            if (res != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to send image data");
+                goto cleanup;
+            }
 
             g_stats.frame_count++;
         }
 
-        // 釋放記憶體
+cleanup:
+        // Free memory
         if (fb) {
             esp_camera_fb_return(fb);
             fb = NULL;
@@ -122,33 +146,43 @@ static esp_err_t stream_handler(httpd_req_t *req)
             _jpg_buf = NULL;
         }
 
-        // ⭐ 優化重點 4: FPS 計算與限制
+        // If send failed, exit loop
+        if (res != ESP_OK) {
+            break;
+        }
+
+        // FPS calculation
         int64_t frame_end_time = esp_timer_get_time();
         int64_t frame_duration = frame_end_time - frame_start_time;
 
         if (g_stats.last_frame_time > 0) {
             int64_t actual_interval = frame_start_time - g_stats.last_frame_time;
-            g_stats.current_fps = 1000000.0f / actual_interval;
+            if (actual_interval > 0) {
+                g_stats.current_fps = 1000000.0f / actual_interval;
+            }
         }
         g_stats.last_frame_time = frame_start_time;
 
-        // 幀率控制：若處理過快則稍作延遲（避免網路阻塞）
+        // Frame rate control
         if (frame_duration < target_frame_time_us) {
             int64_t delay_us = target_frame_time_us - frame_duration;
-            if (delay_us > 1000) { // 只有超過 1ms 才延遲
+            if (delay_us > 1000) {
                 vTaskDelay(pdMS_TO_TICKS(delay_us / 1000));
             }
         }
 
-        // 定期輸出統計
+        // Periodically output stats
         if (g_stats.frame_count % 100 == 0) {
-            ESP_LOGI(TAG, "FPS: %.1f | Frames: %u | Dropped: %u",
-                     g_stats.current_fps, g_stats.frame_count, g_stats.dropped_frames);
+            ESP_LOGI(TAG, "FPS: %.1f | Frames: %lu | Dropped: %lu",
+                     g_stats.current_fps,
+                     (unsigned long)g_stats.frame_count,
+                     (unsigned long)g_stats.dropped_frames);
         }
     }
 
-    ESP_LOGI(TAG, "Stream ended. Total frames: %u, Dropped: %u",
-             g_stats.frame_count, g_stats.dropped_frames);
+    ESP_LOGI(TAG, "Stream ended. Total: %lu, Dropped: %lu",
+             (unsigned long)g_stats.frame_count,
+             (unsigned long)g_stats.dropped_frames);
 
     return res;
 }
