@@ -33,7 +33,7 @@ if torch.cuda.is_available():
 
 # 嘗試匯入 YOLO
 try:
-    from ./ultralytics import YOLO
+    from ultralytics import YOLO
     YOLO_AVAILABLE = True
 except ImportError as e:
     print(f"⚠️ 警告: 無法載入 ultralytics ({e})。請確認 'yolov13-main' 資料夾存在或已安裝 'pip install ultralytics'")
