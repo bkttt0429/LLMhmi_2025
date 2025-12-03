@@ -1,216 +1,147 @@
 #include "app_httpd.h"
 #include "esp_http_server.h"
+#include "esp_timer.h"
 #include "esp_camera.h"
 #include "img_converters.h"
+// #include "fb_gfx.h" // Removed: Face detection unused
 #include "esp_log.h"
-#include "esp_timer.h"
-#include "esp_heap_caps.h"
 #include "app_motor.h"
 #include "app_udp.h"
-#include "app_camera.h"
-#include <stdlib.h>
-#include <string.h>
-#include <inttypes.h>  // ⭐ 用於 PRIu32 等格式化宏
+#include "camera_index.h"  // ⭐ Now includes the generated Web UI
 #include <sys/socket.h>
 #include "lwip/sockets.h"
 
-static const char *TAG = "app_httpd";
+static const char *TAG = "camera_httpd";
 
 #define PART_BOUNDARY "123456789000000000000987654321"
 static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
 static const char* _STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
 static const char* _STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 
-// ⭐ Performance Stats Structure
-typedef struct {
-    uint32_t frame_count;
-    uint32_t dropped_frames;
-    int64_t last_frame_time;
-    float current_fps;
-} stream_stats_t;
+httpd_handle_t stream_httpd = NULL;
+httpd_handle_t camera_httpd = NULL;
 
-static stream_stats_t g_stats = {0};
+// Index Handler (Serves the Web UI)
+static esp_err_t index_handler(httpd_req_t *req){
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    return httpd_resp_send(req, (const char *)camera_index_html, camera_index_html_len);
+}
 
-// ⭐ Stream Handler with Optimizations
-static esp_err_t stream_handler(httpd_req_t *req)
-{
-    camera_fb_t *fb = NULL;
-    esp_err_t res = ESP_OK;
-    size_t _jpg_buf_len = 0;
-    uint8_t *_jpg_buf = NULL;
-    char part_buf[128];
+// Status Handler (Returns Camera Settings JSON)
+static esp_err_t status_handler(httpd_req_t *req){
+    static char json_response[1024];
+    sensor_t * s = esp_camera_sensor_get();
+    char * p = json_response;
+    *p++ = '{';
+    p+=sprintf(p, "\"framesize\":%u,", s->status.framesize);
+    p+=sprintf(p, "\"quality\":%u,", s->status.quality);
+    p+=sprintf(p, "\"brightness\":%d,", s->status.brightness);
+    p+=sprintf(p, "\"contrast\":%d,", s->status.contrast);
+    p+=sprintf(p, "\"saturation\":%d,", s->status.saturation);
+    p+=sprintf(p, "\"sharpness\":%d,", s->status.sharpness);
+    p+=sprintf(p, "\"special_effect\":%u,", s->status.special_effect);
+    p+=sprintf(p, "\"wb_mode\":%u,", s->status.wb_mode);
+    p+=sprintf(p, "\"awb\":%u,", s->status.awb);
+    p+=sprintf(p, "\"awb_gain\":%u,", s->status.awb_gain);
+    p+=sprintf(p, "\"aec\":%u,", s->status.aec);
+    p+=sprintf(p, "\"aec2\":%u,", s->status.aec2);
+    p+=sprintf(p, "\"ae_level\":%d,", s->status.ae_level);
+    p+=sprintf(p, "\"aec_value\":%u,", s->status.aec_value);
+    p+=sprintf(p, "\"agc\":%u,", s->status.agc);
+    p+=sprintf(p, "\"agc_gain\":%u,", s->status.agc_gain);
+    p+=sprintf(p, "\"gainceiling\":%u,", s->status.gainceiling);
+    p+=sprintf(p, "\"bpc\":%u,", s->status.bpc);
+    p+=sprintf(p, "\"wpc\":%u,", s->status.wpc);
+    p+=sprintf(p, "\"raw_gma\":%u,", s->status.raw_gma);
+    p+=sprintf(p, "\"lenc\":%u,", s->status.lenc);
+    p+=sprintf(p, "\"hmirror\":%u,", s->status.hmirror);
+    p+=sprintf(p, "\"dcw\":%u,", s->status.dcw);
+    p+=sprintf(p, "\"colorbar\":%u", s->status.colorbar);
+    *p++ = '}';
+    *p++ = 0;
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    return httpd_resp_send(req, json_response, strlen(json_response));
+}
 
-    // Set response type BEFORE other operations
-    res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);
-    if (res != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set response type");
-        return res;
-    }
+// Camera Control Handler (Settings)
+static esp_err_t cmd_handler(httpd_req_t *req){
+    char*  buf;
+    size_t buf_len;
+    char variable[32] = {0,};
+    char value[32] = {0,};
 
-    // Disable response cache
-    httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
-    httpd_resp_set_hdr(req, "Pragma", "no-cache");
-    httpd_resp_set_hdr(req, "Expires", "0");
-
-    // Configure TCP socket options
-    int sock = httpd_req_to_sockfd(req);
-    if (sock < 0) {
-        ESP_LOGE(TAG, "Invalid socket");
+    buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len > 1) {
+        buf = (char*)malloc(buf_len);
+        if(!buf){
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+        if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+            if (httpd_query_key_value(buf, "var", variable, sizeof(variable)) == ESP_OK &&
+                httpd_query_key_value(buf, "val", value, sizeof(value)) == ESP_OK) {
+            } else {
+                free(buf);
+                httpd_resp_send_404(req);
+                return ESP_FAIL;
+            }
+        } else {
+            free(buf);
+            httpd_resp_send_404(req);
+            return ESP_FAIL;
+        }
+        free(buf);
+    } else {
+        httpd_resp_send_404(req);
         return ESP_FAIL;
     }
 
-    // Increase send buffer to prevent blocking
-    int sndbuf_size = 32768; // 32KB
-    setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sndbuf_size, sizeof(sndbuf_size));
+    int val = atoi(value);
+    sensor_t * s = esp_camera_sensor_get();
+    int res = 0;
 
-    // TCP Keep-Alive settings
-    int keepalive = 1;
-    int keepidle = 3;
-    int keepinterval = 2;
-    int keepcount = 3;
-    setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(int));
-    setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(int));
-    setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepinterval, sizeof(int));
-    setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &keepcount, sizeof(int));
-
-    // Disable Nagle's algorithm for lower latency
-    int nodelay = 1;
-    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(int));
-
-    ESP_LOGI(TAG, "Stream started (socket=%d)", sock);
-
-    int consecutive_errors = 0;
-    const int MAX_CONSECUTIVE_ERRORS = 5;
-
-    // Small valid JPEG (1x1 gray pixel) to keep stream alive
-    const uint8_t error_jpg[] = {
-        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x48,
-        0x00, 0x48, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01,
-        0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xDA, 0x00, 0x08,
-        0x01, 0x01, 0x00, 0x00, 0x3F, 0x00, 0x37, 0xFF, 0xD9
-    };
-    size_t error_jpg_len = sizeof(error_jpg);
-
-    while (true) {
-        // Check if connection is still alive
-        int error = 0;
-        socklen_t len = sizeof(error);
-        if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {
-            ESP_LOGW(TAG, "Socket error detected, closing stream");
-            break;
-        }
-
-        // Get frame with timeout protection
-        fb = esp_camera_fb_get();
-        if (!fb) {
-            // ESP_LOGW(TAG, "Frame capture failed"); // Reduce log spam
-            consecutive_errors++;
-            g_stats.dropped_frames++;
-
-            if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
-                ESP_LOGE(TAG, "Too many consecutive errors, but keeping stream alive with delay");
-                // Instead of closing, we just wait longer to avoid spamming logs
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                consecutive_errors = 0; // Reset to keep loop alive
-                continue;
-            }
-
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
-        }
-
-        consecutive_errors = 0; // Reset on success
-
-        // Convert to JPEG if needed
-        if (fb->format != PIXFORMAT_JPEG) {
-            bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
-            esp_camera_fb_return(fb);
-            fb = NULL;
-
-            if (!jpeg_converted) {
-                ESP_LOGE(TAG, "JPEG conversion failed");
-                if (_jpg_buf) {
-                    free(_jpg_buf);
-                    _jpg_buf = NULL;
-                }
-                continue;
-            }
-        } else {
-            _jpg_buf_len = fb->len;
-            _jpg_buf = fb->buf;
-        }
-
-        // Send frame with error checking
-        if (res == ESP_OK) {
-            res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
-            if (res != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to send boundary (client disconnected?)");
-                break;
-            }
-
-            size_t hlen = snprintf(part_buf, sizeof(part_buf), _STREAM_PART, _jpg_buf_len);
-            res = httpd_resp_send_chunk(req, part_buf, hlen);
-            if (res != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to send header");
-                break;
-            }
-
-            res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len);
-            if (res != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to send image data");
-                break;
-            }
-
-            g_stats.frame_count++;
-        }
-
-        // Cleanup
-        if (fb) {
-            esp_camera_fb_return(fb);
-            fb = NULL;
-        } else if (_jpg_buf) {
-            free(_jpg_buf);
-            _jpg_buf = NULL;
-        }
-
-        // FPS calculation and stats
-        int64_t now = esp_timer_get_time();
-        if (g_stats.last_frame_time > 0) {
-            int64_t interval = now - g_stats.last_frame_time;
-            if (interval > 0) {
-                g_stats.current_fps = 1000000.0f / interval;
-            }
-        }
-        g_stats.last_frame_time = now;
-
-        // Log stats periodically
-        if (g_stats.frame_count % 100 == 0) {
-            ESP_LOGI(TAG, "Stream Stats: FPS=%.1f Frames=%" PRIu32 " Dropped=%" PRIu32,
-                     g_stats.current_fps, g_stats.frame_count, g_stats.dropped_frames);
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(10));
+    if(!strcmp(variable, "framesize")) {
+        if(s->pixformat == PIXFORMAT_JPEG) res = s->set_framesize(s, (framesize_t)val);
+    }
+    else if(!strcmp(variable, "quality")) res = s->set_quality(s, val);
+    else if(!strcmp(variable, "contrast")) res = s->set_contrast(s, val);
+    else if(!strcmp(variable, "brightness")) res = s->set_brightness(s, val);
+    else if(!strcmp(variable, "saturation")) res = s->set_saturation(s, val);
+    else if(!strcmp(variable, "gainceiling")) res = s->set_gainceiling(s, (gainceiling_t)val);
+    else if(!strcmp(variable, "colorbar")) res = s->set_colorbar(s, val);
+    else if(!strcmp(variable, "awb")) res = s->set_whitebal(s, val);
+    else if(!strcmp(variable, "agc")) res = s->set_gain_ctrl(s, val);
+    else if(!strcmp(variable, "aec")) res = s->set_exposure_ctrl(s, val);
+    else if(!strcmp(variable, "hmirror")) res = s->set_hmirror(s, val);
+    else if(!strcmp(variable, "vflip")) res = s->set_vflip(s, val);
+    else if(!strcmp(variable, "awb_gain")) res = s->set_awb_gain(s, val);
+    else if(!strcmp(variable, "agc_gain")) res = s->set_agc_gain(s, val);
+    else if(!strcmp(variable, "aec_value")) res = s->set_aec_value(s, val);
+    else if(!strcmp(variable, "aec2")) res = s->set_aec2(s, val);
+    else if(!strcmp(variable, "dcw")) res = s->set_dcw(s, val);
+    else if(!strcmp(variable, "bpc")) res = s->set_bpc(s, val);
+    else if(!strcmp(variable, "wpc")) res = s->set_wpc(s, val);
+    else if(!strcmp(variable, "raw_gma")) res = s->set_raw_gma(s, val);
+    else if(!strcmp(variable, "lenc")) res = s->set_lenc(s, val);
+    else if(!strcmp(variable, "special_effect")) res = s->set_special_effect(s, val);
+    else if(!strcmp(variable, "wb_mode")) res = s->set_wb_mode(s, val);
+    else if(!strcmp(variable, "ae_level")) res = s->set_ae_level(s, val);
+    else {
+        res = -1;
     }
 
-    if (fb) {
-        esp_camera_fb_return(fb);
-    }
-    if (_jpg_buf) {
-        free(_jpg_buf);
+    if(res){
+        return httpd_resp_send_500(req);
     }
 
-    ESP_LOGI(TAG, "Stream ended: Total=%" PRIu32 " Dropped=%" PRIu32,
-             g_stats.frame_count, g_stats.dropped_frames);
-
-    return res;
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    return httpd_resp_send(req, NULL, 0);
 }
 
-// Control Handler
-static esp_err_t control_handler(httpd_req_t *req)
+// ⭐ Motor Handler (Renamed from /control)
+static esp_err_t motor_handler(httpd_req_t *req)
 {
     char buf[100];
     int left_val = 0;
@@ -226,6 +157,7 @@ static esp_err_t control_handler(httpd_req_t *req)
         }
 
         app_motor_set_pwm(left_val, right_val);
+        httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
         httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
     } else {
         httpd_resp_send_404(req);
@@ -233,134 +165,128 @@ static esp_err_t control_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-// Distance Handler
-static esp_err_t dist_handler(httpd_req_t *req)
-{
-    float d = app_udp_get_distance();
-    char buf[32];
-    snprintf(buf, sizeof(buf), "{\"distance\":%.2f}", d);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
-}
+// Stream Handler (Optimized)
+static esp_err_t stream_handler(httpd_req_t *req){
+    camera_fb_t * fb = NULL;
+    esp_err_t res = ESP_OK;
+    size_t _jpg_buf_len = 0;
+    uint8_t * _jpg_buf = NULL;
+    char * part_buf[64];
 
-// ⭐ Status Query API (使用 PRIu32 宏確保跨平台相容)
-static esp_err_t status_handler(httpd_req_t *req)
-{
-    char buf[256];
-    uint32_t heap_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024;
-    uint32_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024;
-    
-    snprintf(buf, sizeof(buf),
-             "{\"fps\":%.1f,\"frames\":%" PRIu32 ",\"dropped\":%" PRIu32 
-             ",\"heap\":%" PRIu32 ",\"psram\":%" PRIu32 "}",
-             g_stats.current_fps,
-             g_stats.frame_count,
-             g_stats.dropped_frames,
-             heap_free,
-             psram_free);
-
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
-}
-
-// ⭐ Settings API
-static esp_err_t settings_handler(httpd_req_t *req)
-{
-    char buf[100];
-
-    if (httpd_req_get_url_query_str(req, buf, sizeof(buf)) == ESP_OK) {
-        char param[16];
-
-        // Adjust JPEG Quality
-        if (httpd_query_key_value(buf, "quality", param, sizeof(param)) == ESP_OK) {
-            int quality = atoi(param);
-            app_camera_set_quality(quality);
-            ESP_LOGI(TAG, "Quality set to %d", quality);
-        }
-
-        // Adjust Resolution
-        if (httpd_query_key_value(buf, "framesize", param, sizeof(param)) == ESP_OK) {
-            int framesize = atoi(param);
-            app_camera_set_framesize((framesize_t)framesize);
-            ESP_LOGI(TAG, "Framesize set to %d", framesize);
-        }
-
-        httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
-    } else {
-        httpd_resp_send_404(req);
+    res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);
+    if(res != ESP_OK){
+        return res;
     }
-    return ESP_OK;
-}
 
-// Light Handler
-static esp_err_t light_handler(httpd_req_t *req)
-{
-    char buf[100];
-    int state = 0;
-    if (httpd_req_get_url_query_str(req, buf, sizeof(buf)) == ESP_OK) {
-        char param[16];
-        if (httpd_query_key_value(buf, "on", param, sizeof(param)) == ESP_OK) {
-            state = atoi(param);
-            ESP_LOGI(TAG, "Light %s", state ? "ON" : "OFF");
+    // TCP Options for Low Latency (Critical for Robot)
+    int sock = httpd_req_to_sockfd(req);
+    if (sock >= 0) {
+        int nodelay = 1;
+        setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(int));
+    }
+
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+    while(true){
+        fb = esp_camera_fb_get();
+        if (!fb) {
+            ESP_LOGE(TAG, "Camera capture failed");
+            res = ESP_FAIL;
+        } else {
+            if(fb->format != PIXFORMAT_JPEG){
+                bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
+                esp_camera_fb_return(fb);
+                fb = NULL;
+                if(!jpeg_converted){
+                    ESP_LOGE(TAG, "JPEG compression failed");
+                    res = ESP_FAIL;
+                }
+            } else {
+                _jpg_buf_len = fb->len;
+                _jpg_buf = fb->buf;
+            }
+        }
+        if(res == ESP_OK){
+            res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
+        }
+        if(res == ESP_OK){
+            size_t hlen = snprintf((char *)part_buf, 64, _STREAM_PART, _jpg_buf_len);
+            res = httpd_resp_send_chunk(req, (const char *)part_buf, hlen);
+        }
+        if(res == ESP_OK){
+            res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len);
+        }
+        if(fb){
+            esp_camera_fb_return(fb);
+            fb = NULL;
+            _jpg_buf = NULL;
+        } else if(_jpg_buf){
+            free(_jpg_buf);
+            _jpg_buf = NULL;
+        }
+        if(res != ESP_OK){
+            break;
         }
     }
-    httpd_resp_send(req, state ? "ON" : "OFF", HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
+    return res;
 }
 
 void app_httpd_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.ctrl_port = 32768;
-    config.max_open_sockets = 7;
-    config.max_uri_handlers = 12;
-    config.max_resp_headers = 8;
-    config.backlog_conn = 5;
-    config.lru_purge_enable = true;
-    config.recv_wait_timeout = 10;
-    config.send_wait_timeout = 10;
-    config.stack_size = 8192;
-    config.task_priority = 5;
-    config.core_id = 1;
 
-    config.global_user_ctx = NULL;
-    config.global_user_ctx_free_fn = NULL;
-    config.global_transport_ctx = NULL;
-    config.global_transport_ctx_free_fn = NULL;
-    config.open_fn = NULL;
-    config.close_fn = NULL;
-    config.uri_match_fn = NULL;
+    // Split Stream and Control on different cores/ports if needed
+    // But here we keep simple 80 for all to match official example simple mode
+    // (Official example puts stream on 81, control on 80. Let's do that for compatibility)
 
-    httpd_handle_t server = NULL;
+    httpd_uri_t index_uri = {
+        .uri       = "/",
+        .method    = HTTP_GET,
+        .handler   = index_handler,
+        .user_ctx  = NULL
+    };
 
-    if (httpd_start(&server, &config) == ESP_OK) {
-        httpd_uri_t uris[] = {
-            {"/stream", HTTP_GET, stream_handler, NULL},
-            {"/control", HTTP_GET, control_handler, NULL},
-            {"/dist", HTTP_GET, dist_handler, NULL},
-            {"/status", HTTP_GET, status_handler, NULL},
-            {"/settings", HTTP_GET, settings_handler, NULL},
-            {"/light", HTTP_GET, light_handler, NULL}
-        };
+    httpd_uri_t status_uri = {
+        .uri       = "/status",
+        .method    = HTTP_GET,
+        .handler   = status_handler,
+        .user_ctx  = NULL
+    };
 
-        for (int i = 0; i < sizeof(uris) / sizeof(httpd_uri_t); i++) {
-            if (httpd_register_uri_handler(server, &uris[i]) != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to register URI: %s", uris[i].uri);
-            }
-        }
+    httpd_uri_t cmd_uri = {
+        .uri       = "/control",
+        .method    = HTTP_GET,
+        .handler   = cmd_handler,
+        .user_ctx  = NULL
+    };
 
-        ESP_LOGI(TAG, "✅ HTTP Server Started");
-        ESP_LOGI(TAG, "   Available endpoints:");
-        ESP_LOGI(TAG, "   - GET  /stream   (MJPEG Stream)");
-        ESP_LOGI(TAG, "   - GET  /control  (Motor Control)");
-        ESP_LOGI(TAG, "   - GET  /dist     (Distance Sensor)");
-        ESP_LOGI(TAG, "   - GET  /status   (System Status)");
-        ESP_LOGI(TAG, "   - GET  /settings (Camera Settings)");
-        ESP_LOGI(TAG, "   - GET  /light    (LED Control)");
-    } else {
-        ESP_LOGE(TAG, "❌ HTTP Server Start Failed");
+    httpd_uri_t motor_uri = {
+        .uri       = "/motor",
+        .method    = HTTP_GET,
+        .handler   = motor_handler,
+        .user_ctx  = NULL
+    };
+
+    httpd_uri_t stream_uri = {
+        .uri       = "/stream",
+        .method    = HTTP_GET,
+        .handler   = stream_handler,
+        .user_ctx  = NULL
+    };
+
+    ESP_LOGI(TAG, "Starting web server on port: '%d'", config.server_port);
+    if (httpd_start(&camera_httpd, &config) == ESP_OK) {
+        httpd_register_uri_handler(camera_httpd, &index_uri);
+        httpd_register_uri_handler(camera_httpd, &cmd_uri);
+        httpd_register_uri_handler(camera_httpd, &status_uri);
+        httpd_register_uri_handler(camera_httpd, &motor_uri); // Added renamed handler
+    }
+
+    config.server_port += 1; // Port 81 for stream
+    config.ctrl_port += 1;
+    ESP_LOGI(TAG, "Starting stream server on port: '%d'", config.server_port);
+    if (httpd_start(&stream_httpd, &config) == ESP_OK) {
+        httpd_register_uri_handler(stream_httpd, &stream_uri);
     }
 }
