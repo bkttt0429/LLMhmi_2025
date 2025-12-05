@@ -99,26 +99,76 @@ def _unique_hosts(hosts):
             seen.add(host)
     return ordered
 
+def find_reachable_interface(target_ip):
+    """
+    Find which local network interface can reach the target IP.
+    Returns the local IP that's on the same subnet as target_ip.
+    """
+    try:
+        # Parse target IP into octets
+        target_parts = target_ip.split('.')
+        if len(target_parts) != 4:
+            return None
+
+        target_subnet = '.'.join(target_parts[:3])  # e.g., "10.243.115"
+
+        # Check all network interfaces
+        addrs = psutil.net_if_addrs()
+        for iface_name, iface_addrs in addrs.items():
+            for addr in iface_addrs:
+                if addr.family == socket.AF_INET:
+                    local_ip = addr.address
+                    if local_ip == "127.0.0.1":
+                        continue
+
+                    local_parts = local_ip.split('.')
+                    if len(local_parts) == 4:
+                        local_subnet = '.'.join(local_parts[:3])
+
+                        # If on same subnet, this interface can reach the target
+                        if local_subnet == target_subnet:
+                            # print(f"[NET] Found reachable interface: {iface_name} ({local_ip}) can reach {target_ip}")
+                            return local_ip
+    except Exception as e:
+        print(f"[NET] Error finding reachable interface: {e}")
+
+    return None
+
 def _apply_camera_ip(ip, stream_url=None, prefix=""):
+    """
+    Apply discovered camera IP and update video process configuration.
+    Now includes smart interface detection.
+    """
     updated = False
     if state.camera_ip != ip:
         state.camera_ip = ip
         state.video_url = stream_url or f"http://{ip}:{config.DEFAULT_STREAM_PORT}/stream"
         updated = True
-        add_log(f"{prefix}Camera IP detected: {ip}")
-        add_log(f"{prefix}Stream URL: {state.video_url}")
+
+        # Find which local interface can reach this camera
+        reachable_interface = find_reachable_interface(ip)
+        if reachable_interface:
+            state.camera_net_ip = reachable_interface
+        else:
+            state.camera_net_ip = None
+
+        # Simplified Logging
+        msg = f"{prefix}Camera found at {ip} (via {reachable_interface if reachable_interface else 'Default Route'})"
+        add_log(msg)
     
     if not state.bridge_ip or state.bridge_ip.endswith('.local') or state.bridge_ip != ip:
         state.bridge_ip = ip
         _persist_bridge_host(ip)
-        add_log(f"{prefix}Bridge host updated to {ip}")
+        # add_log(f"{prefix}Bridge host updated to {ip}") # Reduced noise
 
-    # Notify Video Process if updated
+    # Notify Video Process immediately if updated
     if updated and video_cmd_queue:
-        video_cmd_queue.put((CMD_SET_URL, {
+        config_update = {
             'url': state.video_url,
             'source_ip': state.camera_net_ip
-        }))
+        }
+        video_cmd_queue.put((CMD_SET_URL, config_update))
+        # add_log(f"{prefix}Video process notified") # Reduced noise
 
 def _build_stream_url(host: str | None):
     if not host:
@@ -531,7 +581,7 @@ def discovery_listener_thread():
                             if info.get("device") == "esp32-s3-car" and info.get("ip"):
                                 new_ip = info["ip"]
                                 if new_ip != state.camera_ip:
-                                    add_log(f"[DISCOVERY] Found Device at {new_ip}")
+                                    # add_log(f"[DISCOVERY] Found Device at {new_ip}") # Moved to _apply_camera_ip
                                     _apply_camera_ip(new_ip, prefix="[AUTO] ")
                         except json.JSONDecodeError:
                             pass
