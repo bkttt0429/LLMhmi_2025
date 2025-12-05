@@ -43,6 +43,27 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 BRIDGE_CACHE_FILE = Path(BASE_DIR) / ".last_bridge_host"
 
+
+def _is_host_reachable(host: str, port: int, timeout: float = 1.0) -> bool:
+    """Check whether a TCP connection to ``host:port`` can be established."""
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _clear_cached_bridge_host():
+    """Remove the cached bridge host file when it is stale or invalid."""
+
+    try:
+        BRIDGE_CACHE_FILE.unlink()
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
 # === 雙網卡自動偵測邏輯 ===
 def get_network_info():
     """偵測所有網卡並自動分類為 Camera Net 或 Internet Net"""
@@ -198,12 +219,17 @@ class SystemState:
         # 1. 執行網卡偵測
         self.net_info = get_network_info()
         self.print_network_summary()
-        
+
         # 記錄對應介面的 Source IP
         self.camera_net_ip = self.net_info["camera_net"]["ip"] if self.net_info["camera_net"] else None
         self.internet_net_ip = self.net_info["internet_net"]["ip"] if self.net_info["internet_net"] else None
 
         cached_bridge = _load_cached_bridge_host()
+        if cached_bridge and not _is_host_reachable(cached_bridge, config.DEFAULT_STREAM_PORT):
+            print(f"[INIT] Cached camera IP {cached_bridge} unreachable on port {config.DEFAULT_STREAM_PORT}, clearing cache.")
+            cached_bridge = None
+            _clear_cached_bridge_host()
+
         default_stream_hosts = getattr(config, "DEFAULT_STREAM_HOSTS", [])
         default_stream_ip = getattr(config, "DEFAULT_STREAM_IP", "")
 
