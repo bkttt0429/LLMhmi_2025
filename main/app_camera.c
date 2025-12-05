@@ -45,7 +45,7 @@ esp_err_t app_camera_init(void)
         ESP_LOGI(TAG, "PSRAM found, optimizing buffers...");
         config.frame_size = FRAMESIZE_SVGA; // Lower res for higher FPS
         config.jpeg_quality = 14; // Slightly lower quality for higher FPS
-        config.fb_count = 2; // Double buffer for smooth stream
+        config.fb_count = 3; // Triple buffer for smooth stream
         config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
     } else {
         ESP_LOGW(TAG, "No PSRAM found, using minimal config");
