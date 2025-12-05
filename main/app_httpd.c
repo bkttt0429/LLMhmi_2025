@@ -235,16 +235,12 @@ static esp_err_t stream_handler(httpd_req_t *req){
 void app_httpd_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_open_sockets = 13;
+    config.max_open_sockets = 7;
     config.lru_purge_enable = true;
     config.stack_size = 8192;
-    config.backlog_conn = 13;
+    config.backlog_conn = 5;
     config.task_caps = MALLOC_CAP_SPIRAM;
     config.server_port = 80;
-
-    // Split Stream and Control on different cores/ports if needed
-    // But here we keep simple 80 for all to match official example simple mode
-    // (Official example puts stream on 81, control on 80. Let's do that for compatibility)
 
     httpd_uri_t index_uri = {
         .uri       = "/",
@@ -286,13 +282,22 @@ void app_httpd_start(void)
         httpd_register_uri_handler(camera_httpd, &index_uri);
         httpd_register_uri_handler(camera_httpd, &cmd_uri);
         httpd_register_uri_handler(camera_httpd, &status_uri);
-        httpd_register_uri_handler(camera_httpd, &motor_uri); // Added renamed handler
+        httpd_register_uri_handler(camera_httpd, &motor_uri);
+        ESP_LOGI(TAG, "✅ Main HTTP server started");
+    } else {
+        ESP_LOGE(TAG, "❌ Failed to start main HTTP server"); 
     }
 
-    config.server_port += 1; // Port 81 for stream
-    config.ctrl_port += 1;
+    // Start Stream Server
+    config.server_port = 81;       // Port 81 for streaming
+    config.ctrl_port += 1;         // Increment control port (was 32768, now 32769)
+    config.max_open_sockets = 3;   // Streams need fewer connections
+    
     ESP_LOGI(TAG, "Starting stream server on port: '%d'", config.server_port);
     if (httpd_start(&stream_httpd, &config) == ESP_OK) {
         httpd_register_uri_handler(stream_httpd, &stream_uri);
+        ESP_LOGI(TAG, "✅ Stream server started");
+    } else {
+        ESP_LOGE(TAG, "❌ Failed to start stream server"); 
     }
 }
