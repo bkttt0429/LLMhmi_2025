@@ -277,7 +277,20 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
                             stream_reader.close()
                             stream_reader = None
                 elif cmd == CMD_SET_AI:
-                    if detector: detector.enabled = bool(data)
+                    enable_ai = bool(data)
+                    # Lazy Load AI if enabling and not yet loaded
+                    if enable_ai and detector is None:
+                        try:
+                            from ai_detector import ObjectDetector
+                            detector = ObjectDetector()
+                            log("AI Detector lazy loaded")
+                        except Exception as e:
+                            log(f"AI lazy load failed: {e}")
+                            detector = None
+
+                    if detector:
+                        detector.enabled = enable_ai
+
         except Empty:
             pass
 
