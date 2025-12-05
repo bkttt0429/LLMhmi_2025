@@ -1,6 +1,6 @@
 # ============================================ 
-# PC_Client/video_process.py Optimized Version
-# Compatible with ESP32-S3 Optimized API
+# PC_Client/video_process.py Fixed Version
+# Binds HTTP requests to correct network interface
 # ============================================ 
  
 import cv2 
@@ -8,6 +8,12 @@ import time
 import requests 
 import numpy as np 
 from queue import Empty 
+import sys
+import os
+
+# Import the SourceAddressAdapter from network_utils
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from network_utils import SourceAddressAdapter
 
 # Commands (Restored for compatibility with web_server.py)
 CMD_SET_URL = "SET_URL"
@@ -16,9 +22,18 @@ CMD_EXIT = "EXIT"
  
 # Improved MJPEG Reader (Supports Reconnect & Stats)
 class MJPEGStreamReader:
-    def __init__(self, url, timeout=10):
+    def __init__(self, url, timeout=10, source_ip=None):
+        """
+        Initialize MJPEG Stream Reader
+        
+        Args:
+            url: Stream URL (e.g., http://10.243.115.133:81/stream)
+            timeout: Connection timeout in seconds
+            source_ip: Source IP address to bind the connection to (critical for multi-NIC setups)
+        """
         self.url = url
         self.timeout = timeout
+        self.source_ip = source_ip  # NEW: Store source IP for interface binding
         self.stream = None
         self.bytes = b''
         self.connected = False
@@ -29,6 +44,15 @@ class MJPEGStreamReader:
         self.reconnect_delay = 2.0
         self.current_retry_delay = 1.0
         self.iterator = None
+        
+        # NEW: Create a session with proper adapter if source_ip is specified
+        self.session = requests.Session()
+        if self.source_ip:
+            # Bind all HTTP requests to the specified source interface
+            self.session.mount('http://', SourceAddressAdapter(self.source_ip))
+            self.session.mount('https://', SourceAddressAdapter(self.source_ip))
+            print(f"[STREAM] Binding to source interface: {self.source_ip}")
+        
         self._connect()
 
     def _connect(self):
@@ -49,8 +73,11 @@ class MJPEGStreamReader:
             }
 
             print(f"[STREAM] Connecting to {self.url} (attempt {self.connection_attempts})...")
+            if self.source_ip:
+                print(f"[STREAM] Using source IP: {self.source_ip}")
 
-            self.stream = requests.get(
+            # Use the session (which has the adapter mounted) instead of requests.get directly
+            self.stream = self.session.get(
                 self.url,
                 stream=True,
                 timeout=self.timeout,
@@ -74,7 +101,7 @@ class MJPEGStreamReader:
         except requests.exceptions.Timeout:
             self.connected = False
             self.iterator = None
-            print(f"[STREAM] ⏱️ Connection timeout")
+            print(f"[STREAM] ⏱️ Connection timeout (Check if camera is reachable from {self.source_ip})")
 
         except requests.exceptions.ConnectionError as e:
             self.connected = False
@@ -135,9 +162,6 @@ class MJPEGStreamReader:
 
                         return frame
 
-                    # If we found markers but decoding failed, or bytes remain, loop continues
-                    # to process more chunks or remaining buffer.
-
             return None
 
         except requests.exceptions.ChunkedEncodingError:
@@ -157,7 +181,6 @@ class MJPEGStreamReader:
 
         except Exception as e:
             import traceback
-            # Specifically catch the StreamConsumedError if it comes as a generic Exception or not caught above
             if "StreamConsumedError" in str(type(e)):
                  print("[STREAM] ⚠️ Stream consumed (caught via generic), reconnecting...")
             else:
@@ -212,7 +235,6 @@ def adjust_esp32_settings(ip, quality=None, framesize=None):
     all_success = True
     for var, val in settings.items():
         try:
-            # ESP32 expects /control?var=variable_name&val=value
             resp = requests.get(f"http://{ip}/control", params={'var': var, 'val': val}, timeout=2)
             if resp.status_code == 200:
                 print(f"[ESP32] Setting {var}={val} updated")
@@ -238,9 +260,13 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
  
     log("Started (Optimized for ESP32-S3 N16R8)") 
      
-    video_url = initial_config.get('video_url', '') 
+    video_url = initial_config.get('url', '')  # Changed from 'video_url' to 'url'
     ai_enabled = initial_config.get('ai_enabled', False) 
-    esp32_ip = initial_config.get('camera_ip', '192.168.4.1') 
+    esp32_ip = initial_config.get('camera_ip', '192.168.4.1')
+    source_ip = initial_config.get('camera_net_ip', None)  # NEW: Get source IP for binding
+    
+    # Log the configuration for debugging
+    log(f"Initial config: URL={video_url}, AI={ai_enabled}, Source IP={source_ip}")
      
     # Init AI Detector (if needed)
     detector = None 
@@ -260,6 +286,7 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
     
     # State
     last_url = video_url
+    last_source_ip = source_ip
      
     while True: 
         # Process Commands
@@ -270,15 +297,25 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
                     if stream_reader: stream_reader.close()
                     return
                 elif cmd == CMD_SET_URL:
-                    new_url = data.get('url', '') if isinstance(data, dict) else data
-                    if new_url != last_url:
+                    # Extract URL and source_ip from data
+                    if isinstance(data, dict):
+                        new_url = data.get('url', '')
+                        new_source_ip = data.get('source_ip', None)
+                    else:
+                        new_url = data
+                        new_source_ip = None
+                    
+                    # Recreate stream reader if URL or source IP changed
+                    if new_url != last_url or new_source_ip != last_source_ip:
+                        log(f"URL/Source changed: {new_url} (from {new_source_ip})")
                         last_url = new_url
+                        last_source_ip = new_source_ip
                         if stream_reader:
                             stream_reader.close()
                             stream_reader = None
+                            
                 elif cmd == CMD_SET_AI:
                     enable_ai = bool(data)
-                    # Lazy Load AI if enabling and not yet loaded
                     if enable_ai and detector is None:
                         try:
                             from ai_detector import ObjectDetector
@@ -296,11 +333,9 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
 
         # Periodically Query ESP32 Status (Every 10s) 
         if time.time() - last_status_check > 10: 
-            # Attempt to derive IP from current URL, otherwise fallback to initial IP
             target_ip = esp32_ip
             if last_url and 'http' in last_url:
                  try:
-                     # Parse http://IP:PORT/stream -> IP
                      parsed_ip = last_url.split('//')[1].split(':')[0]
                      if parsed_ip:
                         target_ip = parsed_ip
@@ -310,9 +345,10 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
             query_esp32_status(target_ip)
             last_status_check = time.time() 
          
-        # Init Stream Reader 
-        if not stream_reader and last_url: 
-            stream_reader = MJPEGStreamReader(last_url) 
+        # Init Stream Reader with source IP binding
+        if not stream_reader and last_url:
+            log(f"Creating stream reader for {last_url} with source {last_source_ip}")
+            stream_reader = MJPEGStreamReader(last_url, source_ip=last_source_ip)
          
         # Acquire Frame 
         frame = None
@@ -359,17 +395,3 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
                 consecutive_failures = 0
             else:
                 time.sleep(0.1)
- 
- 
-# ============================================ 
-# Usage Example 
-# ============================================ 
-if __name__ == "__main__": 
-    # Query Status 
-    query_esp32_status("192.168.4.1") 
-     
-    # Switch to High Quality Mode 
-    adjust_esp32_settings("192.168.4.1", quality=10, framesize=10) 
-     
-    # Switch to High Speed Mode 
-    adjust_esp32_settings("192.168.4.1", quality=15, framesize=5)
