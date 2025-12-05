@@ -373,7 +373,7 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
             else:
                 consecutive_failures = 0
 
-            if consecutive_failures >= 10:
+            if consecutive_failures >= 100:
                 log(f"Restarting stream reader after {consecutive_failures} failures. Waiting {restart_delay:.1f}s")
                 if stream_reader:
                     stream_reader.close()
