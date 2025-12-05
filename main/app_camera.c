@@ -43,8 +43,8 @@ esp_err_t app_camera_init(void)
     // Crucial for N16R8 module
     if(heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0){
         ESP_LOGI(TAG, "PSRAM found, optimizing buffers...");
-        config.frame_size = FRAMESIZE_UXGA; // Can support higher res
-        config.jpeg_quality = 10;
+        config.frame_size = FRAMESIZE_SVGA; // Lower res for higher FPS
+        config.jpeg_quality = 14; // Slightly lower quality for higher FPS
         config.fb_count = 2; // Double buffer for smooth stream
         config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
     } else {

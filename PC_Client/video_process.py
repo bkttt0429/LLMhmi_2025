@@ -44,12 +44,12 @@ class MJPEGStreamReader:
         self.current_retry_delay = 1.0
         self.iterator = None
         
-        # Create a session with proper adapter if source_ip is specified
+        # Create a session (Binding is disabled to avoid WinError 10061/10049 on some setups)
         self.session = requests.Session()
-        if self.source_ip:
-            self.session.mount('http://', SourceAddressAdapter(self.source_ip))
-            self.session.mount('https://', SourceAddressAdapter(self.source_ip))
-            print(f"[STREAM] Binding to source interface: {self.source_ip}")
+        # if self.source_ip:
+        #     self.session.mount('http://', SourceAddressAdapter(self.source_ip))
+        #     self.session.mount('https://', SourceAddressAdapter(self.source_ip))
+        #     print(f"[STREAM] Binding to source interface: {self.source_ip}")
         
         self._connect()
 
@@ -71,8 +71,8 @@ class MJPEGStreamReader:
             }
 
             print(f"[STREAM] Connecting to {self.url} (attempt {self.connection_attempts})...")
-            if self.source_ip:
-                print(f"[STREAM] Using source IP: {self.source_ip}")
+            # if self.source_ip:
+            #     print(f"[STREAM] Using source IP: {self.source_ip}")
 
             self.stream = self.session.get(
                 self.url,
@@ -121,7 +121,7 @@ class MJPEGStreamReader:
         try:
             # Read multiple chunks to build up buffer, but with a limit to avoid infinite loop
             chunks_read = 0
-            max_chunks_per_call = 10  # Limit chunks read per call to prevent blocking
+            max_chunks_per_call = 128  # Limit chunks read per call to prevent blocking (increased to handle high-res frames)
             
             while chunks_read < max_chunks_per_call:
                 try:
