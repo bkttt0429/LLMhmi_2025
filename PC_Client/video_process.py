@@ -121,7 +121,7 @@ class MJPEGStreamReader:
         try:
             # Read multiple chunks to build up buffer, but with a limit to avoid infinite loop
             chunks_read = 0
-            max_chunks_per_call = 10  # Limit chunks read per call to prevent blocking
+            max_chunks_per_call = 128  # Limit chunks read per call to prevent blocking (increased to handle high-res frames)
             
             while chunks_read < max_chunks_per_call:
                 try:
