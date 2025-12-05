@@ -34,6 +34,7 @@ from ai_detector import YOLO_AVAILABLE
 
 # 導入 Video Process
 from video_process import video_process_target, CMD_SET_URL, CMD_SET_AI, CMD_EXIT
+from video_config import build_initial_video_config
 
 # 初始化 Flask 和 SocketIO
 template_dir = os.path.join(BASE_DIR, 'templates')
@@ -369,12 +370,9 @@ def send_control_command(left: int, right: int):
 def video_manager_thread():
     """Manages the video stream status and reads frames from the video process."""
     add_log("Video Manager Thread Started...")
-    
+
     # 1. Send initial config to video process
-    initial_config = {
-        'video_url': state.video_url,
-        'camera_net_ip': state.camera_net_ip
-    }
+    initial_config = build_initial_video_config(state)
     video_cmd_queue.put((CMD_SET_URL, initial_config))
 
     while state.is_running:
@@ -708,11 +706,7 @@ if __name__ == '__main__':
     video_frame_queue = Queue(maxsize=3) # Limit buffer to reduce latency
     video_log_queue = Queue()
 
-    initial_config = {
-        'video_url': state.video_url,
-        'camera_net_ip': state.camera_net_ip,
-        'ai_enabled': state.ai_enabled
-    }
+    initial_config = build_initial_video_config(state)
 
     # Start Video Process
     p = Process(target=video_process_target, args=(video_cmd_queue, video_frame_queue, video_log_queue, initial_config))
