@@ -239,7 +239,15 @@ void app_httpd_start(void)
     config.lru_purge_enable = true;
     config.stack_size = 8192;
     config.backlog_conn = 5;
-    config.task_caps = MALLOC_CAP_SPIRAM;
+
+    // Adaptive Memory Allocation: Use PSRAM only if available
+    if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0) {
+        config.task_caps = MALLOC_CAP_SPIRAM;
+    } else {
+        config.task_caps = MALLOC_CAP_8BIT; // Fallback to Internal RAM
+        ESP_LOGW(TAG, "No PSRAM detected, HTTP server using Internal RAM");
+    }
+
     config.server_port = 80;
 
     httpd_uri_t index_uri = {
