@@ -264,6 +264,35 @@
                 </div>
             </div>
 
+            <!-- SYSTEM TOOLS (AI Model Selection) -->
+            <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
+                <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">SYSTEM TOOLS</div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="flex flex-col gap-2">
+                        <button onclick="toggleAI()" id="ai-toggle-btn" class="btn-cy py-2 rounded text-xs sm:text-sm">ACTIVATE AI HUD</button>
+                        <button onclick="exportLogs()" class="btn-cy py-2 rounded text-xs sm:text-sm">EXPORT SYSTEM LOGS</button>
+                        <button onclick="showNetInfo()" class="btn-cy py-2 rounded text-xs sm:text-sm text-blue-300 border-blue-500">SHOW NET INFO</button>
+                    </div>
+
+                    <!-- AI Model Selector -->
+                    <div class="flex flex-col gap-2 p-2 border border-green-900/30 rounded">
+                        <label class="text-xs text-green-400 font-bold">🧠 AI Model Selection</label>
+                        <div class="flex gap-2">
+                            <select id="model-selector" class="bg-black text-green-400 border border-green-800 rounded px-2 py-1 text-xs flex-1">
+                                <option value="yolov13l.pt" selected>YOLOv13-Large (Default)</option>
+                                <option value="yolov8n.pt">YOLOv8-Nano (Fast)</option>
+                                <option value="yolov8s.pt">YOLOv8-Small</option>
+                                <option value="yolov8m.pt">YOLOv8-Medium</option>
+                            </select>
+                            <button onclick="applyModel()" class="btn-cy px-4 text-xs rounded font-bold">LOAD</button>
+                        </div>
+                        <div class="text-[9px] text-gray-500">
+                            * Use Nano/Small for CPU. Large requires NVIDIA GPU.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
                 <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">CAMERA CONFIGURATION</div>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
@@ -343,15 +372,6 @@
 
                 </div>
             </div>
-
-            <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
-                <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">SYSTEM TOOLS</div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                     <button onclick="toggleAI()" id="ai-toggle-btn" class="btn-cy py-2 rounded text-xs sm:text-sm">ACTIVATE AI HUD</button>
-                     <button onclick="exportLogs()" class="btn-cy py-2 rounded text-xs sm:text-sm">EXPORT SYSTEM LOGS</button>
-                     <button onclick="showNetInfo()" class="btn-cy py-2 rounded text-xs sm:text-sm text-blue-300 border-blue-500">SHOW NET INFO</button>
-                </div>
-            </div>
             
         </div>
     </div>
@@ -385,7 +405,50 @@
             requestAnimationFrame(animationLoop);
             // Removed startStatusPolling(); replaced with SocketIO events
             log("System Initialized. Dual-Link Mode Active.");
+
+            // Initial Model Fetch
+            fetchModels();
         };
+
+        async function fetchModels() {
+            try {
+                const res = await fetch('/api/get_models');
+                const data = await res.json();
+                const selector = document.getElementById('model-selector');
+                if (data.models && data.models.length > 0) {
+                    selector.innerHTML = ''; // Clear defaults
+                    data.models.forEach(model => {
+                        const opt = document.createElement('option');
+                        opt.value = model;
+                        opt.text = model;
+                        selector.appendChild(opt);
+                    });
+                }
+            } catch(e) {
+                console.log("Failed to fetch models", e);
+            }
+        }
+
+        async function applyModel() {
+            const model = document.getElementById('model-selector').value;
+            if(!model) return;
+            log(`Switching AI model to ${model}...`);
+            try {
+                const res = await fetch('/api/set_model', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ model: model })
+                });
+                const data = await res.json();
+                if(data.status === 'ok') {
+                    log(`Model switched to ${model}`);
+                } else {
+                    log(`Failed to switch model: ${data.msg}`);
+                }
+            } catch(e) {
+                log(`Error switching model: ${e}`);
+            }
+        }
 
         window.addEventListener('resize', resizeCanvas);
 

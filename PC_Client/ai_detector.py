@@ -29,6 +29,12 @@ except ImportError:
 if torch.cuda.is_available():
     torch.backends.cudnn.benchmark = True  # 自動尋找最佳卷積演算法
     torch.backends.cudnn.deterministic = False  # 允許非確定性演算法以提升速度
+    # 啟用 Tensor Core 優化 (Ampere+)
+    try:
+        torch.set_float32_matmul_precision('high')
+        print("✅ Tensor Core 優化已啟用 (Float32 MatMul Precision: High)")
+    except AttributeError:
+        pass
     print("✅ CUDA cuDNN 加速已啟用")
 
 # 嘗試匯入 YOLO
@@ -45,6 +51,7 @@ class ObjectDetector:
         self.enabled = False
         self.frame_count = 0
         self.total_inference_time = 0
+        self.model_path = model_path
         
         # === 裝置選擇與詳細資訊 ===
         self.device = self._select_device()
@@ -79,6 +86,14 @@ class ObjectDetector:
             print(f"   └─ Compute Capability: {compute_capability[0]}.{compute_capability[1]}")
             print(f"   └─ cuDNN Benchmark: {'Enabled' if torch.backends.cudnn.benchmark else 'Disabled'}")
             
+            # Check for Flash Attention support (PyTorch 2.0+)
+            try:
+                # 簡單檢查是否存在 sdp_kernel 上下文管理器
+                if hasattr(torch.backends, 'cuda') and hasattr(torch.backends.cuda, 'sdp_kernel'):
+                     print(f"   └─ Flash Attention (SDPA): Available")
+            except:
+                pass
+
             # 根據 VRAM 調整批次大小建議
             if gpu_memory < 4:
                 print("   └─ ⚠️ 低 VRAM 檢測，建議使用 yolov8n.pt")
@@ -104,10 +119,21 @@ class ObjectDetector:
             
         return device
 
+    def load_model(self, model_path):
+        """公開方法：切換模型"""
+        self._load_model(model_path)
+        self.model_path = model_path
+
     def _load_model(self, model_path):
         """載入 YOLO 模型"""
         print(f"\n[AI] 嘗試載入模型: {model_path}...")
         
+        # Unload existing model if any to free memory
+        if self.model is not None:
+            del self.model
+            torch.cuda.empty_cache()
+            print("[AI] 已釋放舊模型記憶體")
+
         try:
             self.model = YOLO(model_path)
             self.model.to(self.device)  # 明確移動到目標裝置
@@ -226,6 +252,9 @@ class ObjectDetector:
         
         try:
             # 1. YOLO 推論 (使用 track 模式保持 ID)
+            # 使用 SDPA (Flash Attention) 上下文 (如果可用)
+            # PyTorch 2.0+ 自動啟用，但我們可以嘗試強制最佳路徑 (如果需要)
+
             results = self.model.track(
                 frame, 
                 device=self.device,
@@ -277,6 +306,7 @@ class ObjectDetector:
             info_lines = [
                 f"FPS: {fps:.1f} (Avg: {avg_fps:.1f})",
                 f"Device: {self.device.upper()}",
+                f"Model: {os.path.basename(self.model_path)}",
                 f"Objects: {len(detections)}",
                 f"Control: v={v:.2f} w={ang_w:.2f}"
             ]

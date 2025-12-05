@@ -33,7 +33,7 @@ from serial_worker import serial_worker, prepare_sketch, compile_and_upload
 from ai_detector import YOLO_AVAILABLE
 
 # 導入 Video Process
-from video_process import video_process_target, CMD_SET_URL, CMD_SET_AI, CMD_EXIT
+from video_process import video_process_target, CMD_SET_URL, CMD_SET_AI, CMD_SET_MODEL, CMD_EXIT
 from video_config import build_initial_video_config
 
 # 初始化 Flask 和 SocketIO
@@ -731,6 +731,33 @@ def toggle_ai():
     status_str = "ACTIVATED" if state.ai_enabled else "DEACTIVATED"
     add_log(f"AI HUD {status_str}")
     return jsonify({"status": "ok", "ai_enabled": state.ai_enabled})
+
+@app.route('/api/set_model', methods=['POST'])
+def set_model():
+    """Endpoint to switch AI Model"""
+    data = request.json
+    model_name = data.get('model')
+
+    if not model_name:
+        return jsonify({"status": "error", "msg": "No model name provided"}), 400
+
+    add_log(f"Requesting model switch to: {model_name}")
+
+    # Notify Process
+    if video_cmd_queue:
+        video_cmd_queue.put((CMD_SET_MODEL, {'model': model_name}))
+
+    return jsonify({"status": "ok", "model": model_name})
+
+@app.route('/api/get_models', methods=['GET'])
+def get_models():
+    """List available .pt models in the root/PC_Client directory"""
+    try:
+        models = [f for f in os.listdir(BASE_DIR) if f.endswith('.pt')]
+        # Also check yolov13-main or other subdirs if needed, but for now root is enough
+        return jsonify({"models": models})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/netinfo')
 def api_netinfo():
