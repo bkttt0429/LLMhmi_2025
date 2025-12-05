@@ -296,13 +296,18 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
 
         # Periodically Query ESP32 Status (Every 10s) 
         if time.time() - last_status_check > 10: 
-            # If we know the IP, or can derive it from URL
-            if '192.168' in last_url:
+            # Attempt to derive IP from current URL, otherwise fallback to initial IP
+            target_ip = esp32_ip
+            if last_url and 'http' in last_url:
                  try:
-                     ip = last_url.split('//')[1].split(':')[0]
-                     query_esp32_status(ip)
+                     # Parse http://IP:PORT/stream -> IP
+                     parsed_ip = last_url.split('//')[1].split(':')[0]
+                     if parsed_ip:
+                        target_ip = parsed_ip
                  except:
-                     query_esp32_status(esp32_ip)
+                     pass
+
+            query_esp32_status(target_ip)
             last_status_check = time.time() 
          
         # Init Stream Reader 
