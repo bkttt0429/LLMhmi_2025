@@ -179,6 +179,144 @@
                 opacity: 0.35;
             }
         }
+
+        /* === Module System (Draggable/Resizable) === */
+        .module-container {
+            position: absolute;
+            min-width: 200px;
+            min-height: 150px;
+            background: rgba(10, 20, 20, 0.95);
+            border: 1px solid #00ff9d;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0, 255, 157, 0.15);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+            transition: box-shadow 0.2s;
+        }
+
+        .module-container:hover {
+            box-shadow: 0 0 30px rgba(0, 255, 157, 0.3);
+        }
+
+        .module-container.dragging {
+            opacity: 0.8;
+            cursor: move !important;
+            z-index: 1000;
+        }
+
+        .module-header {
+            padding: 8px 12px;
+            background: linear-gradient(to right, rgba(0, 255, 157, 0.1), transparent);
+            border-bottom: 1px solid rgba(0, 255, 157, 0.3);
+            cursor: move;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .module-header:hover {
+            background: linear-gradient(to right, rgba(0, 255, 157, 0.2), transparent);
+        }
+
+        .module-title {
+            font-size: 11px;
+            font-weight: bold;
+            color: #00ff9d;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .module-body {
+            flex: 1;
+            overflow: auto;
+            padding: 12px;
+        }
+
+        .module-resize-handle {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 20px;
+            height: 20px;
+            cursor: nwse-resize;
+            z-index: 100;
+        }
+
+        .module-resize-handle::after {
+            content: '';
+            position: absolute;
+            bottom: 3px;
+            right: 3px;
+            width: 12px;
+            height: 12px;
+            border-right: 2px solid #00ff9d;
+            border-bottom: 2px solid #00ff9d;
+            opacity: 0.5;
+        }
+
+        .module-resize-handle:hover::after {
+            opacity: 1;
+        }
+
+        /* Speed Limiter Slider */
+        .speed-limiter-container {
+            padding: 12px;
+            background: rgba(0, 20, 10, 0.4);
+            border: 1px solid rgba(0, 255, 157, 0.2);
+            border-radius: 6px;
+            margin-top: 8px;
+        }
+
+        .speed-slider {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: linear-gradient(to right, #ff4444 0%, #ffaa00 50%, #00ff9d 100%);
+            outline: none;
+            border-radius: 3px;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+
+        .speed-slider:hover {
+            opacity: 1;
+        }
+
+        .speed-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #00ff9d;
+            border: 2px solid #0a1410;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(0, 255, 157, 0.6);
+        }
+
+        .speed-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            background: #00ff9d;
+            border: 2px solid #0a1410;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(0, 255, 157, 0.6);
+        }
+
+        .speed-value {
+            display: inline-block;
+            min-width: 45px;
+            text-align: right;
+            font-weight: bold;
+            color: #00ff9d;
+            font-family: 'Share Tech Mono', monospace;
+        }
     </style>
 </head>
 
@@ -284,6 +422,16 @@
                     <div></div>
                 </div>
 
+                <!-- Speed Limiter Slider -->
+                <div class="speed-limiter-container">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-[10px] text-gray-400 uppercase tracking-wider">Speed Limit</span>
+                        <span class="speed-value" id="speed-limit-value">100%</span>
+                    </div>
+                    <input type="range" min="0" max="100" value="100" step="5" class="speed-slider"
+                        id="speed-limit-slider" title="Control speed limit" aria-label="Speed limit slider">
+                </div>
+
                 <button class="btn-cy w-full py-2 sm:py-3 rounded tracking-widest text-xs sm:text-sm"
                     onclick="toggleLight()">TOGGLE LIGHTS (ESP32 CAM)</button>
             </div>
@@ -291,14 +439,56 @@
             <div class="xbox-card rounded p-3 sm:p-4 flex flex-col gap-3 relative">
                 <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">XBOX TELEMETRY</div>
                 <div class="flex items-center gap-4">
-                    <div class="relative xbox-stick" id="xbox-stick"></div>
-                    <div class="space-y-1 text-xs sm:text-sm text-gray-300">
-                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">LS</span>：移動控制</div>
-                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">X</span>：緊急煞車</div>
-                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">A</span>：補光燈 (CAM)
+                    <!-- Enhanced Xbox Stick Visual -->
+                    <div class="relative flex flex-col items-center gap-2">
+                        <div class="relative xbox-stick" id="xbox-stick"></div>
+                        <div class="text-[9px] text-gray-500 font-mono" id="stick-coords">X:0.00 Y:0.00</div>
+                    </div>
+
+                    <div class="flex flex-col gap-2 flex-1">
+                        <!-- Button Indicators -->
+                        <div class="flex gap-2">
+                            <div
+                                class="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-black/40 text-[10px]">
+                                <span class="text-green-400 font-bold">A</span>
+                                <div class="w-2 h-2 rounded-full bg-gray-700" id="btn-indicator-a"></div>
+                            </div>
+                            <div
+                                class="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-black/40 text-[10px]">
+                                <span class="text-blue-400 font-bold">X</span>
+                                <div class="w-2 h-2 rounded-full bg-gray-700" id="btn-indicator-x"></div>
+                            </div>
+                            <div
+                                class="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-black/40 text-[10px]">
+                                <span class="text-purple-400 font-bold">LS</span>
+                                <div class="w-2 h-2 rounded-full bg-gray-700" id="btn-indicator-ls"></div>
+                            </div>
+                        </div>
+
+                        <!-- Control Info -->
+                        <div class="space-y-1 text-[10px] text-gray-400">
+                            <div class="flex items-center gap-2"><span class="text-green-400 font-mono">LS</span>：移動控制
+                            </div>
+                            <div class="flex items-center gap-2"><span class="text-blue-400 font-mono">X</span>：緊急煞車
+                            </div>
+                            <div class="flex items-center gap-2"><span class="text-green-400 font-mono">A</span>：補光燈
+                            </div>
                         </div>
                     </div>
                 </div>
+
+                <!-- PWM Output Display -->
+                <div class="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                    <div class="bg-black/60 border border-green-900/50 rounded p-1.5">
+                        <div class="text-gray-500">LEFT PWM</div>
+                        <div class="text-green-400 font-bold text-sm" id="pwm-left">0</div>
+                    </div>
+                    <div class="bg-black/60 border border-green-900/50 rounded p-1.5">
+                        <div class="text-gray-500">RIGHT PWM</div>
+                        <div class="text-green-400 font-bold text-sm" id="pwm-right">0</div>
+                    </div>
+                </div>
+
                 <div class="flex items-center justify-between text-[10px] sm:text-xs text-gray-400">
                     <div>CMD: <span id="xbox-cmd" class="text-yellow-400 font-mono">--</span></div>
                     <div id="ai-status" class="text-gray-500">AI: STANDBY</div>
@@ -506,6 +696,18 @@
         // Keyboard state tracking
         let keyPressed = {};
 
+        // === Speed Limiter System ===
+        let speedLimitPercent = 100; // Global speed limit (0-100%)
+
+        function applySpeedLimit(pwmValue) {
+            return Math.round(pwmValue * (speedLimitPercent / 100));
+        }
+
+        function updateSpeedLimitDisplay() {
+            const display = document.getElementById('speed-limit-value');
+            if (display) display.innerText = speedLimitPercent + '%';
+        }
+
         window.onload = () => {
             initWebSocket();
             resizeCanvas();
@@ -515,7 +717,37 @@
 
             // Add keyboard event listeners
             setupKeyboardControls();
+
+            // Initialize speed limiter
+            initSpeedLimiter();
         };
+
+        // === Speed Limiter Initialization ===
+        function initSpeedLimiter() {
+            const slider = document.getElementById('speed-limit-slider');
+            if (!slider) {
+                console.warn('[SPEED_LIMITER] Slider element not found');
+                return;
+            }
+
+            // Set initial value
+            speedLimitPercent = parseInt(slider.value);
+            updateSpeedLimitDisplay();
+
+            // Bind input event
+            slider.addEventListener('input', (e) => {
+                speedLimitPercent = parseInt(e.target.value);
+                updateSpeedLimitDisplay();
+                console.log(`[SPEED_LIMITER] Updated to ${speedLimitPercent}%`);
+            });
+
+            // Bind change event for final value (when user releases slider)
+            slider.addEventListener('change', (e) => {
+                log(`Speed Limit set to ${speedLimitPercent}%`);
+            });
+
+            console.log('[SPEED_LIMITER] Initialized successfully');
+        }
 
 
         function setupKeyboardControls() {
@@ -776,8 +1008,20 @@
             }
 
             // === 2. Deadzone Processing ===
-            // Update Visuals (use corrected values)
-            updateXboxVisual(steer, throttle, gp.buttons[10] && gp.buttons[10].pressed);
+            const DEADZONE = 0.15;
+            const applyDeadzone = (val) => Math.abs(val) < DEADZONE ? 0 : val;
+
+            let steer = applyDeadzone(rawX);     // -1.0 (Left) to 1.0 (Right)
+            let throttle = -applyDeadzone(rawY); // Invert Y: Up is positive
+
+            // === 3. Update Visuals ===
+            // Update stick animation and button indicators
+            updateXboxVisual(rawX, rawY, gp.buttons[10] && gp.buttons[10].pressed);
+
+            // Update button indicators
+            updateButtonIndicator('a', gp.buttons[0] && gp.buttons[0].pressed);
+            updateButtonIndicator('x', gp.buttons[2] && gp.buttons[2].pressed);
+            updateButtonIndicator('ls', gp.buttons[10] && gp.buttons[10].pressed);
 
             // === 4. Differential Drive Mixing ===
             // Formula:
@@ -798,6 +1042,13 @@
             const MAX_PWM = 255;
             let leftPWM = Math.round(leftVal * MAX_PWM);
             let rightPWM = Math.round(rightVal * MAX_PWM);
+
+            // Apply speed limiter to gamepad as well
+            leftPWM = applySpeedLimit(leftPWM);
+            rightPWM = applySpeedLimit(rightPWM);
+
+            // Update PWM display in real-time
+            updatePWMDisplay(leftPWM, rightPWM);
 
             if (leftPWM !== 0 || rightPWM !== 0) {
                 console.log(`[GAMEPAD] 📤 PWM → L:${leftPWM}, R:${rightPWM}`);
@@ -891,17 +1142,17 @@
             let left = 0, right = 0;
 
             switch (cmd) {
-                case 'F': // Forward
-                    left = 200; right = 200;
+                case 'F': // Forward (reduced from 200 to 130)
+                    left = 130; right = 130;
                     break;
-                case 'B': // Backward  
-                    left = -200; right = -200;
+                case 'B': // Backward (reduced from -200 to -130)
+                    left = -130; right = -130;
                     break;
-                case 'L': // Turn Left
-                    left = -150; right = 150;
+                case 'L': // Turn Left (reduced from ±150 to ±100)
+                    left = -100; right = 100;
                     break;
-                case 'R': // Turn Right
-                    left = 150; right = -150;
+                case 'R': // Turn Right (reduced from ±150 to ±100)
+                    left = 100; right = -100;
                     break;
                 case 'S': // Stop
                     left = 0; right = 0;
@@ -910,6 +1161,10 @@
                     console.log(`[KEYBOARD] Unknown command: ${cmd}`);
                     return; // Ignore unknown commands
             }
+
+            // Apply speed limiter
+            left = applySpeedLimit(left);
+            right = applySpeedLimit(right);
 
             console.log(`[KEYBOARD] Sending: L=${left}, R=${right}`);
 
@@ -946,14 +1201,63 @@
 
         function updateXboxVisual(x, y, pressed) {
             const stick = document.getElementById('xbox-stick');
+            const coords = document.getElementById('stick-coords');
             if (!stick) return;
+
             const clamp = (v) => Math.max(-1, Math.min(1, v));
-            const offset = 12;
+            const offset = 24; // Increased offset for more visible movement
             const dx = clamp(x) * offset;
-            const dy = -clamp(y) * offset;
+            const dy = clamp(y) * offset; // Keep Y as-is for visual representation
+
             stick.style.transform = `translate(${dx}px, ${dy}px)`;
-            if (pressed) stick.style.boxShadow = "0 0 15px #fff";
-            else stick.style.boxShadow = "inset 0 0 12px rgba(0,255,157,0.35)";
+
+            // Enhanced visual feedback
+            if (pressed) {
+                stick.style.boxShadow = "0 0 20px #fff, 0 0 10px #00ff9d";
+                stick.style.transform = `translate(${dx}px, ${dy}px) scale(0.9)`;
+            } else {
+                stick.style.boxShadow = "inset 0 0 12px rgba(0,255,157,0.35)";
+            }
+
+            // Update coordinates display
+            if (coords) {
+                coords.innerText = `X:${x.toFixed(2)} Y:${y.toFixed(2)}`;
+            }
+        }
+
+        function updateButtonIndicator(buttonId, pressed) {
+            const indicator = document.getElementById(`btn-indicator-${buttonId}`);
+            if (!indicator) return;
+
+            if (pressed) {
+                indicator.classList.remove('bg-gray-700');
+                indicator.classList.add('bg-green-400');
+                indicator.style.boxShadow = '0 0 8px #00ff9d';
+            } else {
+                indicator.classList.remove('bg-green-400');
+                indicator.classList.add('bg-gray-700');
+                indicator.style.boxShadow = 'none';
+            }
+        }
+
+        function updatePWMDisplay(left, right) {
+            const leftEl = document.getElementById('pwm-left');
+            const rightEl = document.getElementById('pwm-right');
+
+            if (leftEl) {
+                leftEl.innerText = left;
+                // Color coding based on direction
+                if (left > 0) leftEl.className = 'text-green-400 font-bold text-sm';
+                else if (left < 0) leftEl.className = 'text-red-400 font-bold text-sm';
+                else leftEl.className = 'text-gray-500 font-bold text-sm';
+            }
+
+            if (rightEl) {
+                rightEl.innerText = right;
+                if (right > 0) rightEl.className = 'text-green-400 font-bold text-sm';
+                else if (right < 0) rightEl.className = 'text-red-400 font-bold text-sm';
+                else rightEl.className = 'text-gray-500 font-bold text-sm';
+            }
         }
 
         let lightState = false;
