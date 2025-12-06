@@ -80,8 +80,11 @@ void app_motor_set_pwm(int left_val, int right_val)
 {
     // Input range: -255 to 255
     // Map to 1000..2000
-    int l_us = map_range(left_val, -255, 255, SERVO_MIN_US, SERVO_MAX_US);
-    int r_us = map_range(right_val, -255, 255, SERVO_MIN_US, SERVO_MAX_US);
+    
+    // [CRITICAL FIX] Motors are physically swapped!
+    // Swap left and right values here to compensate
+    int l_us = map_range(right_val, -255, 255, SERVO_MIN_US, SERVO_MAX_US);  // Use right_val for left motor
+    int r_us = map_range(left_val, -255, 255, SERVO_MIN_US, SERVO_MAX_US);   // Use left_val for right motor
 
     ledc_set_duty(PWM_MODE, LEFT_CHANNEL, us_to_duty(l_us));
     ledc_update_duty(PWM_MODE, LEFT_CHANNEL);

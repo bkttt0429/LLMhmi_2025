@@ -762,22 +762,28 @@
             let y = Math.abs(rawY) < DEADZONE ? 0 : rawY;
 
             // === 3. Axis Correction ===
-            // [CRITICAL FIX] User reported: "左前右後上左下右"
-            // Translation: Left stick → Forward, Right stick → Back, Up stick → Left, Down stick → Right
-            // This means the axes are COMPLETELY SWAPPED!
+            // [FIXED] Correct Standard Mapping:
+            // axes[0] (X) = Steering (Left/Right): -1 = Left, +1 = Right
+            // axes[1] (Y) = Throttle (Forward/Back): -1 = Up/Forward, +1 = Down/Back
 
-            // SWAP X and Y
-            let steer = -y;     // Y-axis becomes steering (invert: up=-1 should turn left, so negate)
-            let throttle = -x;  // X-axis becomes throttle (invert: right=+1 should go forward, so negate)
+            // Standard gamepad Y-axis: -1 is UP, +1 is DOWN
+            // We want: UP (Y=-1) = Forward (positive throttle)
+            // So we NEGATE Y for throttle
+            let steer = x;      // X-axis controls steering (no need to swap!)
+            let throttle = -y;  // Y-axis controls throttle (negate because -1 is up)
 
             if (Math.abs(steer) > 0.1 || Math.abs(throttle) > 0.1) {
-                console.log(`[GAMEPAD] 🔄 SWAPPED → Steer:${steer.toFixed(2)}, Throttle:${throttle.toFixed(2)}`);
+                console.log(`[GAMEPAD] 📍 CORRECTED → Steer:${steer.toFixed(2)}, Throttle:${throttle.toFixed(2)}`);
             }
 
             // Update Visuals (use corrected values)
             updateXboxVisual(steer, throttle, gp.buttons[10] && gp.buttons[10].pressed);
 
             // === 4. Differential Drive Mixing ===
+            // Formula:
+            //   Left  = Throttle + Steer
+            //   Right = Throttle - Steer
+            // When turning right (steer > 0): Left speeds up, Right slows down
             let leftVal = throttle + steer;
             let rightVal = throttle - steer;
 
@@ -819,6 +825,7 @@
 
                 if (isStickActive || wasJoystickActive) {
                     if ((now - lastGamepadCmdTime > CMD_INTERVAL) || (wasJoystickActive && !isStickActive)) {
+
 
                         // Construct payload
                         const payload = { left: leftPWM, right: rightPWM };

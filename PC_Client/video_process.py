@@ -271,95 +271,104 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
 
     last_status_check = 0
     
-    while True: 
-        # 1. Process Commands (Non-blocking)
-        try:
-            while not cmd_queue.empty():
-                cmd, data = cmd_queue.get_nowait()
+    try:
+        while True: 
+            # 1. Process Commands (Non-blocking)
+            try:
+                while not cmd_queue.empty():
+                    cmd, data = cmd_queue.get_nowait()
 
-                if cmd == CMD_EXIT:
-                    if stream_reader: stream_reader.stop()
-                    return
+                    if cmd == CMD_EXIT:
+                        if stream_reader: stream_reader.stop()
+                        log("Video process exiting (CMD_EXIT)")
+                        return
 
-                elif cmd == CMD_SET_URL:
-                    new_url = data.get('url', '') if isinstance(data, dict) else data
-                    new_source = data.get('source_ip', None) if isinstance(data, dict) else None
-                    
-                    if stream_reader:
-                        stream_reader.stop()
-                    stream_reader = MJPEGStreamReader(new_url, source_ip=new_source)
-                    log(f"Switched stream to {new_url}")
-                            
-                elif cmd == CMD_SET_AI:
-                    enable_ai = bool(data)
-                    if enable_ai and detector is None:
-                        try:
-                            from ai_detector import ObjectDetector
-                            detector = ObjectDetector()
-                            log("AI Detector lazy loaded")
-                        except Exception as e:
-                            log(f"AI lazy load failed: {e}")
-                            detector = None
-                    if detector:
-                        detector.enabled = enable_ai
+                    elif cmd == CMD_SET_URL:
+                        new_url = data.get('url', '') if isinstance(data, dict) else data
+                        new_source = data.get('source_ip', None) if isinstance(data, dict) else None
+                        
+                        if stream_reader:
+                            stream_reader.stop()
+                        stream_reader = MJPEGStreamReader(new_url, source_ip=new_source)
+                        log(f"Switched stream to {new_url}")
+                                
+                    elif cmd == CMD_SET_AI:
+                        enable_ai = bool(data)
+                        if enable_ai and detector is None:
+                            try:
+                                from ai_detector import ObjectDetector
+                                detector = ObjectDetector()
+                                log("AI Detector lazy loaded")
+                            except Exception as e:
+                                log(f"AI lazy load failed: {e}")
+                                detector = None
+                        if detector:
+                            detector.enabled = enable_ai
 
-                elif cmd == CMD_SET_MODEL:
-                    # data should be {'model': 'path/to/model.pt'}
-                    model_path = data.get('model')
-                    if detector and model_path:
-                        log(f"Switching AI model to: {model_path}")
-                        detector.load_model(model_path)
-                    elif not detector and model_path:
-                        # Init detector if not exists
-                        try:
-                            from ai_detector import ObjectDetector
-                            detector = ObjectDetector(model_path=model_path)
-                            detector.enabled = True
-                            log(f"AI Detector initialized with {model_path}")
-                        except Exception as e:
-                            log(f"AI init failed: {e}")
+                    elif cmd == CMD_SET_MODEL:
+                        # data should be {'model': 'path/to/model.pt'}
+                        model_path = data.get('model')
+                        if detector and model_path:
+                            log(f"Switching AI model to: {model_path}")
+                            detector.load_model(model_path)
+                        elif not detector and model_path:
+                            # Init detector if not exists
+                            try:
+                                from ai_detector import ObjectDetector
+                                detector = ObjectDetector(model_path=model_path)
+                                detector.enabled = True
+                                log(f"AI Detector initialized with {model_path}")
+                            except Exception as e:
+                                log(f"AI init failed: {e}")
 
-        except Empty:
-            pass
-
-        # 2. Status Check (Removed to prevent blocking video loop)
-        # if time.time() - last_status_check > 10: 
-        #     target_ip = esp32_ip
-        #     if stream_reader and stream_reader.url:
-        #          try:
-        #              parsed = stream_reader.url.split('//')[1].split(':')[0]
-        #              if parsed: target_ip = parsed
-        #          except: pass
-        #     # query_esp32_status(target_ip) # This was blocking!
-        #     last_status_check = time.time() 
-         
-        # 3. Get Latest Frame (Instant)
-        frame = None
-        if stream_reader:
-            frame = stream_reader.read()
-
-        if frame is not None:
-            final_frame = frame
-             
-            # 4. AI Processing (May take time, but reader thread keeps buffer empty)
-            if detector and detector.enabled: 
-                try: 
-                    # Note: detector.detect() is synchronous and might slow down THIS loop,
-                    # but the reader thread continues to drain the socket, preventing "lag/corruption".
-                    annotated_frame, detections, control = detector.detect(frame) 
-                    final_frame = annotated_frame 
-                except Exception as e: 
-                    log(f"AI Error: {e}") 
-             
-            # 5. Send to Web (Queue)
-            try: 
-                ret, buffer = cv2.imencode('.jpg', final_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                if ret: 
-                    if frame_queue.full(): 
-                        try: frame_queue.get_nowait()
-                        except Empty: pass
-                    frame_queue.put(buffer.tobytes()) 
-            except:
+            except Empty:
                 pass
-        else:
-            time.sleep(0.01) # Prevent CPU spin if no frame yet
+
+            # 2. Status Check (Removed to prevent blocking video loop)
+            # if time.time() - last_status_check > 10: 
+            #     target_ip = esp32_ip
+            #     if stream_reader and stream_reader.url:
+            #          try:
+            #              parsed = stream_reader.url.split('//')[1].split(':')[0]
+            #              if parsed: target_ip = parsed
+            #          except: pass
+            #     # query_esp32_status(target_ip) # This was blocking!
+            #     last_status_check = time.time() 
+              
+            # 3. Get Latest Frame (Instant)
+            frame = None
+            if stream_reader:
+                frame = stream_reader.read()
+
+            if frame is not None:
+                final_frame = frame
+                  
+                # 4. AI Processing (May take time, but reader thread keeps buffer empty)
+                if detector and detector.enabled: 
+                    try: 
+                        # Note: detector.detect() is synchronous and might slow down THIS loop,
+                        # but the reader thread continues to drain the socket, preventing "lag/corruption".
+                        annotated_frame, detections, control = detector.detect(frame) 
+                        final_frame = annotated_frame 
+                    except Exception as e: 
+                        log(f"AI Error: {e}") 
+                  
+                # 5. Send to Web (Queue)
+                try: 
+                    ret, buffer = cv2.imencode('.jpg', final_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    if ret: 
+                        if frame_queue.full(): 
+                            try: frame_queue.get_nowait()
+                            except Empty: pass
+                        frame_queue.put(buffer.tobytes()) 
+                except:
+                    pass
+            else:
+                time.sleep(0.01) # Prevent CPU spin if no frame yet
+    
+    except KeyboardInterrupt:
+        # Graceful shutdown on Ctrl+C
+        log("Video process interrupted by user (Ctrl+C)")
+        if stream_reader:
+            stream_reader.stop()
+        return
