@@ -41,8 +41,8 @@ class MJPEGStreamReader:
         self.frame_count = 0
         self.last_stats_time = time.time()
         self.connection_attempts = 0
-        self.max_reconnect_attempts = 5
-        self.reconnect_delay = 2.0
+        self.max_reconnect_attempts = 10  # 增加重試次數
+        self.reconnect_delay = 3.0  # 增加延遲避免過度重連
         
         # Threading
         self.running = False
@@ -148,11 +148,21 @@ class MJPEGStreamReader:
                     iterator = None
                     continue
                 except (requests.exceptions.ConnectionError, ConnectionResetError) as e:
-                    # Specific handling for connection reset (10054)
-                    print(f"[STREAM] Connection lost: {e}")
+                    # Specific handling for connection reset (10054) - very common with ESP32
+                    if not hasattr(self, '_last_connection_error_time'):
+                        self._last_connection_error_time = 0
+                    
+                    # Only print error once per 10 seconds to avoid spam
+                    now = time.time()
+                    if now - self._last_connection_error_time > 10:
+                        print(f"[STREAM] Connection lost: {type(e).__name__}")
+                        self._last_connection_error_time = now
+                    
                     self.connected = False
                     iterator = None
-                    time.sleep(1.0)
+                    # Exponential backoff: wait longer after repeated failures
+                    backoff_time = min(5.0, 0.5 * (2 ** min(self.connection_attempts, 4)))
+                    time.sleep(backoff_time)
                     continue
                 except Exception as e:
                     print(f"[STREAM] Read error: {e}")

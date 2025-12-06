@@ -919,17 +919,34 @@ if __name__ == '__main__':
     video_frame_queue = Queue(maxsize=3) # Limit buffer to reduce latency
     video_log_queue = Queue()
 
-    # Start Video Process
-    initial_config = build_initial_video_config(state)
-    p = Process(target=video_process_target, args=(video_cmd_queue, video_frame_queue, video_log_queue, initial_config))
-    p.daemon = True
-    p.start()
+    # Start Video Process (Optional - skip if camera unavailable)
+    video_process_enabled = os.getenv('DISABLE_VIDEO') != '1'
+    p = None
+    
+    if video_process_enabled:
+        try:
+            print("[INIT] Starting video process...")
+            initial_config = build_initial_video_config(state)
+            p = Process(target=video_process_target, args=(video_cmd_queue, video_frame_queue, video_log_queue, initial_config))
+            p.daemon = True
+            p.start()
+            print("[INIT] ✅ Video process started")
+        except Exception as e:
+            print(f"[INIT] ⚠️ Video process failed to start: {e}")
+            print("[INIT] Continuing without video stream...")
+            p = None
+    else:
+        print("[INIT] Video process disabled (DISABLE_VIDEO=1)")
 
     # Threads
     threading.Thread(target=udp_sensor_thread, daemon=True).start()
     threading.Thread(target=xbox_controller_thread, daemon=True).start()
-    threading.Thread(target=video_manager_thread, daemon=True).start()
-    threading.Thread(target=frame_receiver_thread, daemon=True).start()
+    
+    # Only start video threads if video process is running
+    if p:
+        threading.Thread(target=video_manager_thread, daemon=True).start()
+        threading.Thread(target=frame_receiver_thread, daemon=True).start()
+    
     threading.Thread(target=status_push_thread, daemon=True).start()
     threading.Thread(target=discovery_listener_thread, daemon=True).start()
 
@@ -943,7 +960,10 @@ if __name__ == '__main__':
     print("=" * 60)
 
     try:
-        socketio.run(app, host=config.WEB_HOST, port=config.WEB_PORT, debug=False, allow_unsafe_werkzeug=True)
+        # 開發模式：啟用 debug 以自動重載檔案變更
+        # ⚠️ 生產環境請改為 debug=False
+        socketio.run(app, host=config.WEB_HOST, port=config.WEB_PORT, debug=True, allow_unsafe_werkzeug=True)
     except KeyboardInterrupt:
-        video_cmd_queue.put((CMD_EXIT, None))
-        p.join()
+        if p and video_cmd_queue:
+            video_cmd_queue.put((CMD_EXIT, None))
+            p.join()
