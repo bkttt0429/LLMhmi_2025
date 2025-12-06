@@ -439,29 +439,47 @@ def _build_cmd_from_state(controller_state: dict) -> dict:
     return {"left": left_pwm, "right": right_pwm}
 
 def send_control_command(left: int, right: int):
-    # Send HTTP GET to ESP32
-    # http://192.168.4.1/control?left=XX&right=YY
-
-    target_ip = state.camera_ip or "192.168.4.1"
+    """
+    Send motor control command to ESP32-S3.
+    Endpoint: GET /motor?left=XX&right=YY
+    """
     target_ip = state.camera_ip or "192.168.4.1"
     url = f"http://{target_ip}/motor"
+    params = {"left": left, "right": right}
+    
+    # [DEBUG] Print what we're about to send
+    print(f"[CONTROL] 🚗 Sending to ESP32: {url} with params={params}")
+    add_log(f"[CONTROL] → {target_ip}/motor L:{left} R:{right}")
 
     try:
-        # Increased timeout to 0.5s to reduce flakiness
-        resp = state.control_session.get(url, params={"left": left, "right": right}, timeout=0.5)
+        # Send GET request with query parameters
+        resp = state.control_session.get(url, params=params, timeout=0.5)
+        
+        # [DEBUG] Print response details
+        print(f"[CONTROL] 📡 ESP32 Response: Status={resp.status_code}, Content={resp.text[:100]}")
+        
         if resp.status_code == 200:
+            add_log(f"[CONTROL] ✅ Success")
             return True
         else:
             add_log(f"[CONTROL] ⚠️ Failed: HTTP {resp.status_code}")
+            print(f"[CONTROL] ❌ ESP32 rejected command with status {resp.status_code}")
             return False
+            
     except requests.exceptions.Timeout:
-        add_log(f"[CONTROL] ⚠️ Timeout sending to {target_ip}")
+        add_log(f"[CONTROL] ⚠️ Timeout to {target_ip}")
+        print(f"[CONTROL] ⏱️ Timeout: ESP32 at {target_ip} did not respond in 0.5s")
         return False
-    except requests.exceptions.ConnectionError:
+        
+    except requests.exceptions.ConnectionError as e:
         add_log(f"[CONTROL] ❌ Connection Error to {target_ip}")
+        print(f"[CONTROL] 🔌 Connection Error: Cannot reach ESP32 at {target_ip}")
+        print(f"[CONTROL]    Details: {e}")
         return False
+        
     except requests.exceptions.RequestException as e:
         add_log(f"[CONTROL] ❌ Error: {e}")
+        print(f"[CONTROL] 💥 Request Exception: {e}")
         return False
 
 def video_manager_thread():
@@ -830,16 +848,44 @@ def api_control():
     Handle motor control commands from the frontend.
     Expected JSON: {"left": int, "right": int}
     """
-    data = request.json
+    # [DEBUG] Print everything about the request
+    print("=" * 60)
+    print("[API] 📥 Received /api/control request")
+    print(f"[API] Content-Type: {request.content_type}")
+    print(f"[API] Headers: {dict(request.headers)}")
+    print(f"[API] Raw Data: {request.data}")
+    print(f"[API] request.json: {request.json}")
+    
+    # Try to get JSON data
+    try:
+        data = request.json
+        if data is None:
+            print("[API] ⚠️ request.json is None, trying get_json(force=True)")
+            data = request.get_json(force=True)
+    except Exception as e:
+        print(f"[API] ❌ Error parsing JSON: {e}")
+        return jsonify({"error": f"Invalid JSON: {str(e)}"}), 400
+    
+    print(f"[API] Parsed data: {data}")
+    
+    if data is None:
+        print("[API] ❌ Failed to parse request body as JSON")
+        return jsonify({"error": "Request body must be valid JSON"}), 400
+    
     left = data.get('left')
     right = data.get('right')
-
+    
+    print(f"[API] Extracted values: left={left}, right={right}")
+    
     if left is None or right is None:
+        print(f"[API] ❌ Missing required fields")
         return jsonify({"error": "Missing left or right values"}), 400
 
     if send_control_command(left, right):
+        print(f"[API] ✅ Command sent successfully")
         return jsonify({"status": "ok", "left": left, "right": right})
     else:
+        print(f"[API] ❌ Failed to send to ESP32")
         return jsonify({"error": "Failed to send command to ESP32"}), 500
 
 if __name__ == '__main__':

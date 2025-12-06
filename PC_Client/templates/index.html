@@ -497,16 +497,65 @@
         let controllerLinked = false;
         let lastXboxUpdate = 0;
 
+        // Keyboard state tracking
+        let keyPressed = {};
+
         window.onload = () => {
             initWebSocket();
             resizeCanvas();
             requestAnimationFrame(animationLoop);
-            // Removed startStatusPolling(); replaced with SocketIO events
             log("System Initialized. Dual-Link Mode Active.");
-
-            // Initial Model Fetch
             fetchModels();
+
+            // Add keyboard event listeners
+            setupKeyboardControls();
         };
+
+        function setupKeyboardControls() {
+            // Track which keys are currently pressed
+            document.addEventListener('keydown', (e) => {
+                const key = e.key.toUpperCase();
+
+                // Prevent repeated keydown events when holding
+                if (keyPressed[key]) return;
+                keyPressed[key] = true;
+
+                console.log(`[KEYBOARD] Key DOWN: ${key}`);
+
+                // Map keys to commands
+                switch (key) {
+                    case 'W':
+                        sendCmd('F');
+                        break;
+                    case 'S':
+                        sendCmd('S');
+                        break;
+                    case 'A':
+                        sendCmd('L');
+                        break;
+                    case 'D':
+                        sendCmd('R');
+                        break;
+                    case 'X':
+                        sendCmd('B');
+                        break;
+                }
+            });
+
+            document.addEventListener('keyup', (e) => {
+                const key = e.key.toUpperCase();
+                keyPressed[key] = false;
+
+                console.log(`[KEYBOARD] Key UP: ${key}`);
+
+                // Send stop command when key released
+                if (['W', 'A', 'S', 'D', 'X'].includes(key)) {
+                    sendCmd('S');
+                }
+            });
+
+            console.log('[KEYBOARD] Event listeners installed');
+        }
 
         async function fetchModels() {
             try {
@@ -694,46 +743,62 @@
             if (icon) icon.style.opacity = '1';
             lastXboxUpdate = Date.now();
 
+
             // === 1. Read Inputs ===
             // Standard Gamepad Mapping:
             // Axes[0] = Left Stick X (-1 Left, +1 Right)
             // Axes[1] = Left Stick Y (-1 Up, +1 Down)
-            let x = gp.axes[0];
-            let y = gp.axes[1];
+            let rawX = gp.axes[0];
+            let rawY = gp.axes[1];
+
+            // [DEBUG] Log raw stick values
+            if (Math.abs(rawX) > 0.15 || Math.abs(rawY) > 0.15) {
+                console.log(`[GAMEPAD] 🕹️ STICK RAW → axisX:${rawX.toFixed(2)}, axisY:${rawY.toFixed(2)}`);
+            }
 
             // === 2. Deadzone Processing ===
-            // Filter out small noise to prevent drift
             const DEADZONE = 0.1;
-            if (Math.abs(x) < DEADZONE) x = 0;
-            if (Math.abs(y) < DEADZONE) y = 0;
+            let x = Math.abs(rawX) < DEADZONE ? 0 : rawX;
+            let y = Math.abs(rawY) < DEADZONE ? 0 : rawY;
 
-            // Note: Standard Y axis is inverted (Up is negative)
-            // We usually want Up to be positive for speed calculations
-            y = -y;
+            // === 3. Axis Correction ===
+            // [CRITICAL FIX] User reported: "左前右後上左下右"
+            // Translation: Left stick → Forward, Right stick → Back, Up stick → Left, Down stick → Right
+            // This means the axes are COMPLETELY SWAPPED!
 
-            // Update Visuals
-            updateXboxVisual(x, -y, gp.buttons[10] && gp.buttons[10].pressed);
+            // SWAP X and Y
+            let steer = -y;     // Y-axis becomes steering (invert: up=-1 should turn left, so negate)
+            let throttle = -x;  // X-axis becomes throttle (invert: right=+1 should go forward, so negate)
 
-            // === 3. Differential Drive Mixing Algorithm ===
-            // Mix X (Steering) and Y (Throttle) into Left/Right motor speeds
-            // Algorithm: 
-            // Left  = Throttle + Steering
-            // Right = Throttle - Steering
-            // Then clamp to valid range and scale to PWM
+            if (Math.abs(steer) > 0.1 || Math.abs(throttle) > 0.1) {
+                console.log(`[GAMEPAD] 🔄 SWAPPED → Steer:${steer.toFixed(2)}, Throttle:${throttle.toFixed(2)}`);
+            }
 
-            let leftVal = y + x;
-            let rightVal = y - x;
+            // Update Visuals (use corrected values)
+            updateXboxVisual(steer, throttle, gp.buttons[10] && gp.buttons[10].pressed);
 
-            // Clamp to -1.0 to 1.0 buffer first
+            // === 4. Differential Drive Mixing ===
+            let leftVal = throttle + steer;
+            let rightVal = throttle - steer;
+
+            if (Math.abs(leftVal) > 0.1 || Math.abs(rightVal) > 0.1) {
+                console.log(`[GAMEPAD] ⚙️ MIXED → L:${leftVal.toFixed(2)}, R:${rightVal.toFixed(2)}`);
+            }
+
+            // Clamp and scale
             leftVal = Math.max(-1, Math.min(1, leftVal));
             rightVal = Math.max(-1, Math.min(1, rightVal));
 
-            // Scale to PWM Range (-255 to 255)
             const MAX_PWM = 255;
             let leftPWM = Math.round(leftVal * MAX_PWM);
             let rightPWM = Math.round(rightVal * MAX_PWM);
 
-            // === 4. Throttling & Sending ===
+            if (leftPWM !== 0 || rightPWM !== 0) {
+                console.log(`[GAMEPAD] 📤 PWM → L:${leftPWM}, R:${rightPWM}`);
+            }
+
+
+            // === 5. Throttling & Sending ===
             // Only send if time interval passed OR immediate stop
             // [FIX] Input Priority: Only send if joystick is active OR just became inactive
             const isStickActive = (leftPWM !== 0 || rightPWM !== 0);
@@ -809,6 +874,7 @@
         }
 
         function sendCmd(cmd) {
+            console.log(`[KEYBOARD] sendCmd called with: ${cmd}`);
             highlightKey(cmd);
 
             // Map commands to differential drive PWM (-255 to 255)
@@ -831,15 +897,31 @@
                     left = 0; right = 0;
                     break;
                 default:
+                    console.log(`[KEYBOARD] Unknown command: ${cmd}`);
                     return; // Ignore unknown commands
             }
+
+            console.log(`[KEYBOARD] Sending: L=${left}, R=${right}`);
 
             // Send through your backend API
             fetch('/api/control', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ left: left, right: right })
-            }).catch(e => console.error('Control error:', e));
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.text().then(text => {
+                            console.error(`[KEYBOARD] Backend error ${response.status}:`, text);
+                            throw new Error(`HTTP ${response.status}: ${text}`);
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('[KEYBOARD] Command sent successfully:', data);
+                })
+                .catch(e => console.error('[KEYBOARD] Control error:', e));
         }
 
         function highlightKey(cmd) {
