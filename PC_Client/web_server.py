@@ -803,13 +803,29 @@ def api_camera_settings():
             add_log(f"[Control] Exception: {e}")
             return jsonify({"error": str(e)}), 503
 
+@app.route('/api/control', methods=['POST'])
+def api_control():
+    """
+    Handle motor control commands from the frontend.
+    Expected JSON: {"left": int, "right": int}
+    """
+    data = request.json
+    left = data.get('left')
+    right = data.get('right')
+
+    if left is None or right is None:
+        return jsonify({"error": "Missing left or right values"}), 400
+
+    if send_control_command(left, right):
+        return jsonify({"status": "ok", "left": left, "right": right})
+    else:
+        return jsonify({"error": "Failed to send command to ESP32"}), 500
+
 if __name__ == '__main__':
     # Initialize Multiprocessing Queues
     video_cmd_queue = Queue()
     video_frame_queue = Queue(maxsize=3) # Limit buffer to reduce latency
     video_log_queue = Queue()
-
-    initial_config = build_initial_video_config(state)
 
     # Start Video Process
     p = Process(target=video_process_target, args=(video_cmd_queue, video_frame_queue, video_log_queue, initial_config))

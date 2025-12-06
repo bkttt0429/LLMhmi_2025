@@ -38,6 +38,7 @@ esp_err_t app_camera_init(void)
     config.frame_size = FRAMESIZE_SVGA;
     config.jpeg_quality = 12;
     config.fb_count = 1;
+    config.fb_location = CAMERA_FB_IN_DRAM; // Default to internal RAM
 
     // Detect PSRAM and optimize
     // Crucial for N16R8 module
@@ -45,7 +46,8 @@ esp_err_t app_camera_init(void)
         ESP_LOGI(TAG, "PSRAM found, optimizing buffers...");
         config.frame_size = FRAMESIZE_SVGA; // Lower res for higher FPS
         config.jpeg_quality = 14; // Slightly lower quality for higher FPS
-        config.fb_count = 3; // Triple buffer for smooth stream
+        config.fb_count = 3; // Triple buffer in PSRAM
+        config.fb_location = CAMERA_FB_IN_PSRAM; // ⭐ Force frame buffers into PSRAM
         config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
     } else {
         ESP_LOGW(TAG, "No PSRAM found, using minimal config");

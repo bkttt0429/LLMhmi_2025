@@ -65,15 +65,23 @@ class TestMJPEGStreamReader(unittest.TestCase):
             # If our frame is in chunk 15, it won't be found.
             # It returns None.
 
-            print("Calling get_frame()...")
-            frame = reader.get_frame()
+            print("Polling reader.read() for frame...")
+            import time
+            start_time = time.time()
+            frame = None
+            while time.time() - start_time < 2.0:
+                frame = reader.read()
+                if frame is not None:
+                    break
+                time.sleep(0.01)
 
             if frame is None:
-                print("FAILURE: get_frame() returned None prematurely (Bug Reproduced)")
+                print("FAILURE: Threaded reader did not produce a frame within timeout.")
             else:
-                print("SUCCESS: get_frame() returned the frame")
-
-            self.assertIsNotNone(frame, "get_frame should return a frame, but returned None (stutter bug)")
+                print("SUCCESS: Threaded reader successfully returned the frame")
+            
+            reader.stop()
+            self.assertIsNotNone(frame, "Reader should return a frame")
 
 if __name__ == '__main__':
     unittest.main()

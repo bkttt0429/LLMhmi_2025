@@ -53,10 +53,10 @@ class MJPEGStreamReader:
 
         # Session
         self.session = requests.Session()
-        if self.source_ip:
-            self.session.mount('http://', SourceAddressAdapter(self.source_ip))
-            self.session.mount('https://', SourceAddressAdapter(self.source_ip))
-            print(f"[STREAM] Binding to source interface: {self.source_ip}")
+        # if self.source_ip:
+        #     self.session.mount('http://', SourceAddressAdapter(self.source_ip))
+        #     self.session.mount('https://', SourceAddressAdapter(self.source_ip))
+        #     print(f"[STREAM] Binding to source interface: {self.source_ip}")
 
         self.start()
 
@@ -154,13 +154,28 @@ class MJPEGStreamReader:
                     continue
 
                 # Find JPEG markers
-                a = self.bytes.find(b'\xff\xd8')
-                b = self.bytes.find(b'\xff\xd9')
-
-                if a != -1 and b != -1 and b > a:
+                while True:
+                    a = self.bytes.find(b'\xff\xd8')
+                    if a == -1:
+                        # No start marker, keep last few bytes just in case, discard rest to save memory
+                        if len(self.bytes) > 65536:
+                            self.bytes = self.bytes[-4096:]
+                        break
+                    
+                    # Discard data before start marker
+                    if a > 0:
+                        self.bytes = self.bytes[a:]
+                        a = 0
+                    
+                    b = self.bytes.find(b'\xff\xd9')
+                    if b == -1:
+                        # Start found but no end yet, wait for more data
+                        break
+                        
+                    # We have a full frame candidate
                     jpg = self.bytes[a:b+2]
                     self.bytes = self.bytes[b+2:]
-
+                    
                     # Decode
                     try:
                         frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
