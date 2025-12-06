@@ -496,6 +496,7 @@
         let lastFrameTime = 0;
         let controllerLinked = false;
         let lastXboxUpdate = 0;
+        let lastKeyboardActivity = 0;  // Track keyboard input for priority
 
         // Keyboard state tracking
         let keyPressed = {};
@@ -511,6 +512,7 @@
             setupKeyboardControls();
         };
 
+
         function setupKeyboardControls() {
             // Track which keys are currently pressed
             document.addEventListener('keydown', (e) => {
@@ -519,6 +521,9 @@
                 // Prevent repeated keydown events when holding
                 if (keyPressed[key]) return;
                 keyPressed[key] = true;
+
+                // Update keyboard activity timestamp for input priority
+                lastKeyboardActivity = Date.now();
 
                 console.log(`[KEYBOARD] Key DOWN: ${key}`);
 
@@ -756,26 +761,16 @@
                 console.log(`[GAMEPAD] 🕹️ STICK RAW → axisX:${rawX.toFixed(2)}, axisY:${rawY.toFixed(2)}`);
             }
 
-            // === 2. Deadzone Processing ===
-            const DEADZONE = 0.1;
-            let x = Math.abs(rawX) < DEADZONE ? 0 : rawX;
-            let y = Math.abs(rawY) < DEADZONE ? 0 : rawY;
-
-            // === 3. Axis Correction ===
-            // [FIXED] Correct Standard Mapping:
-            // axes[0] (X) = Steering (Left/Right): -1 = Left, +1 = Right
-            // axes[1] (Y) = Throttle (Forward/Back): -1 = Up/Forward, +1 = Down/Back
-
-            // Standard gamepad Y-axis: -1 is UP, +1 is DOWN
-            // We want: UP (Y=-1) = Forward (positive throttle)
-            // So we NEGATE Y for throttle
-            let steer = x;      // X-axis controls steering (no need to swap!)
-            let throttle = -y;  // Y-axis controls throttle (negate because -1 is up)
-
-            if (Math.abs(steer) > 0.1 || Math.abs(throttle) > 0.1) {
-                console.log(`[GAMEPAD] 📍 CORRECTED → Steer:${steer.toFixed(2)}, Throttle:${throttle.toFixed(2)}`);
+            // === 1.1 Input Priority Check ===
+            // If keyboard was used recently (within 500ms), suppress gamepad
+            if (Date.now() - lastKeyboardActivity < 500) {
+                // If gamepad was active, we might need to send a stop? 
+                // But keyboard handles its own stop when keyup.
+                // Just return to avoid conflict.
+                return;
             }
 
+            // === 2. Deadzone Processing ===
             // Update Visuals (use corrected values)
             updateXboxVisual(steer, throttle, gp.buttons[10] && gp.buttons[10].pressed);
 

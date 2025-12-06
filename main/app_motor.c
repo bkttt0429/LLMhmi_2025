@@ -80,17 +80,16 @@ void app_motor_set_pwm(int left_val, int right_val)
 {
     // Input range: -255 to 255
     // Map to 1000..2000
-    
-    // [CRITICAL FIX] Motors are physically swapped!
-    // Swap left and right values here to compensate
-    int l_us = map_range(right_val, -255, 255, SERVO_MIN_US, SERVO_MAX_US);  // Use right_val for left motor
-    int r_us = map_range(left_val, -255, 255, SERVO_MIN_US, SERVO_MAX_US);   // Use left_val for right motor
 
-    ledc_set_duty(PWM_MODE, LEFT_CHANNEL, us_to_duty(l_us));
+    // [Diagnostic Fix]
+    // Swap applied due to crossed wiring
+    int l_us = map_range(right_val, -255, 255, SERVO_MAX_US, SERVO_MIN_US); // Inverted
+    int r_us = map_range(left_val, -255, 255, SERVO_MIN_US, SERVO_MAX_US);
+
+    ledc_set_duty(PWM_MODE, LEFT_CHANNEL, us_to_duty(l_us));   
     ledc_update_duty(PWM_MODE, LEFT_CHANNEL);
 
-    ledc_set_duty(PWM_MODE, RIGHT_CHANNEL, us_to_duty(r_us));
+    ledc_set_duty(PWM_MODE, RIGHT_CHANNEL, us_to_duty(r_us));  
     ledc_update_duty(PWM_MODE, RIGHT_CHANNEL);
-
-    // ESP_LOGD(TAG, "Motor Set: In(%d, %d) -> Out(%d, %d)us", left_val, right_val, l_us, r_us);
 }
+

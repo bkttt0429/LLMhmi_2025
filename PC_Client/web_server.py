@@ -273,6 +273,7 @@ class SystemState:
         self.frame_buffer = None # Now stores JPEG bytes directly
         self.frame_lock = threading.Lock()
         self.stream_connected = False
+        self.last_api_control_time = 0.0  # [Input Priority] Track last API/Keyboard command
         
         # 建立一個綁定到 Camera Net Interface 的 session 用於發送 HTTP 控制指令到 ESP32
         self.control_session = requests.Session()
@@ -376,7 +377,7 @@ class XboxController:
         hat_x, hat_y = self.joystick.get_hat(0)
         return {
             "left_stick_x": left_stick_x,
-            "left_stick_y": -left_stick_y, # Invert Y so up is positive
+            "left_stick_y": left_stick_y, # [FIX] Removed inversion to match motor direction
             "button_a": button_a_pressed,
             "button_b": button_b_pressed,
             "button_x": button_x_pressed,
@@ -674,6 +675,13 @@ def xbox_controller_thread():
             time.sleep(0.5)
             continue
 
+        # [Input Priority] If API (Keyboard) was used recently, suppress Joystick
+        if time.time() - state.last_api_control_time < 0.5:
+            # Optionally send stop if we were moving? 
+            # But the keyboard is likely sending commands, so we should just shut up.
+            time.sleep(0.1)
+            continue
+
         controller_state = controller.get_input()
         source = "hardware"
 
@@ -880,6 +888,9 @@ def api_control():
     if left is None or right is None:
         print(f"[API] ❌ Missing required fields")
         return jsonify({"error": "Missing left or right values"}), 400
+
+    # [Input Priority] Mark this command as active
+    state.last_api_control_time = time.time()
 
     if send_control_command(left, right):
         print(f"[API] ✅ Command sent successfully")
