@@ -1,9 +1,14 @@
 <!DOCTYPE html>
+<!-- VERSION: 2025-12-07-FIX-SENDCMD-v2 - CRITICAL UPDATE -->
 <html lang="zh-TW">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Force browser to reload JS/CSS (no cache) -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>TACTICAL COMMAND v15.0 [DUAL-LINK]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
@@ -878,6 +883,9 @@
         function sendCmd(cmd) {
             console.log(`[KEYBOARD] sendCmd called with: ${cmd}`);
             highlightKey(cmd);
+
+            // [Input Priority] Update keyboard activity timestamp
+            lastKeyboardActivity = Date.now();
 
             // Map commands to differential drive PWM (-255 to 255)
             let left = 0, right = 0;

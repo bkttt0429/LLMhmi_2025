@@ -40,6 +40,9 @@ from network_utils import SourceAddressAdapter
 # 初始化 Flask 和 SocketIO
 template_dir = os.path.join(BASE_DIR, 'templates')
 app = Flask(__name__, template_folder=template_dir, static_folder=template_dir)
+# CRITICAL: Disable template caching to force browser reload
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 BRIDGE_CACHE_FILE = Path(BASE_DIR) / ".last_bridge_host"
@@ -671,63 +674,71 @@ def xbox_controller_thread():
     using_browser_stream = False
 
     while state.is_running:
-        if state.is_flashing:
-            time.sleep(0.5)
-            continue
+        try:
+            if state.is_flashing:
+                time.sleep(0.5)
+                continue
 
-        # [Input Priority] If API (Keyboard) was used recently, suppress Joystick
-        if time.time() - state.last_api_control_time < 0.5:
-            # Optionally send stop if we were moving? 
-            # But the keyboard is likely sending commands, so we should just shut up.
-            time.sleep(0.1)
-            continue
-
-        controller_state = controller.get_input()
-        source = "hardware"
-
-        if controller_state == "QUIT":
-            state.is_running = False
-            break
-
-        if not controller_state:
-            recent_browser_input = browser_controller_state["data"]
-            if recent_browser_input and time.time() - browser_controller_state["timestamp"] < 1.0:
-                controller_state = recent_browser_input
-                source = "browser"
-                if not using_browser_stream: using_browser_stream = True
-            else:
-                using_browser_stream = False
-                if controller_ready: controller_ready = False
+            # [Input Priority] If API (Keyboard) was used recently, suppress Joystick
+            # (Checks if last WASD command was within 0.5s)
+            if time.time() - state.last_api_control_time < 0.5:
                 time.sleep(0.1)
                 continue
 
-        if not controller_ready and source == "hardware":
-            controller_ready = True
+            controller_state = controller.get_input()
+            source = "hardware"
 
-        # Calculate PWM
-        pwm_dict = _build_cmd_from_state(controller_state)
-        current_pwm = (pwm_dict["left"], pwm_dict["right"])
+            if controller_state == "QUIT":
+                state.is_running = False
+                break
 
-        # Send if changed significantly or every X ms to keep alive?
-        # Let's send if changed or every 100ms.
-        # For now, simple logic: send every cycle (50Hz max) but throttled slightly?
+            if not controller_state:
+                recent_browser_input = browser_controller_state["data"]
+                if recent_browser_input and time.time() - browser_controller_state["timestamp"] < 1.0:
+                    controller_state = recent_browser_input
+                    source = "browser"
+                    if not using_browser_stream: using_browser_stream = True
+                else:
+                    using_browser_stream = False
+                    if controller_ready: controller_ready = False
+                    time.sleep(0.1)
+                    continue
 
-        # Simple threshold to avoid flooding network with noise
-        if abs(current_pwm[0] - last_pwm[0]) > 2 or abs(current_pwm[1] - last_pwm[1]) > 2:
-             send_control_command(current_pwm[0], current_pwm[1])
-             last_pwm = current_pwm
-        elif current_pwm == (0, 0) and last_pwm != (0, 0):
-             send_control_command(0, 0)
-             last_pwm = (0, 0)
+            if not controller_ready and source == "hardware":
+                controller_ready = True
 
-        # Emit to UI
-        controller_state_with_cmd = dict(controller_state)
-        controller_state_with_cmd["cmd"] = f"L:{current_pwm[0]} R:{current_pwm[1]}"
-        controller_state_with_cmd["source"] = source
-        socketio.emit('controller_data', controller_state_with_cmd)
+            # Calculate PWM
+            pwm_dict = _build_cmd_from_state(controller_state)
+            current_pwm = (pwm_dict["left"], pwm_dict["right"])
+
+            # Send if changed significantly
+            if abs(current_pwm[0] - last_pwm[0]) > 2 or abs(current_pwm[1] - last_pwm[1]) > 2:
+                 send_control_command(current_pwm[0], current_pwm[1])
+                 last_pwm = current_pwm
+            elif current_pwm == (0, 0) and last_pwm != (0, 0):
+                 send_control_command(0, 0)
+                 last_pwm = (0, 0)
+
+            # Emit to UI
+            try:
+                controller_state_with_cmd = dict(controller_state)
+                controller_state_with_cmd["cmd"] = f"L:{current_pwm[0]} R:{current_pwm[1]}"
+                controller_state_with_cmd["source"] = source
+                socketio.emit('controller_data', controller_state_with_cmd)
+            except Exception:
+                pass
+
+        except Exception as e:
+            # Catch generic errors (like Pygame video system not init) and retry
+            # print(f"[XBOX] Loop Error: {e}")
+            time.sleep(1)
 
         time.sleep(0.05) # ~20Hz updates
-    pygame.quit()
+    
+    try:
+        pygame.quit()
+    except:
+        pass
 
 @app.route('/')
 def index():
@@ -856,48 +867,51 @@ def api_control():
     Handle motor control commands from the frontend.
     Expected JSON: {"left": int, "right": int}
     """
-    # [DEBUG] Print everything about the request
-    print("=" * 60)
-    print("[API] 📥 Received /api/control request")
-    print(f"[API] Content-Type: {request.content_type}")
-    print(f"[API] Headers: {dict(request.headers)}")
-    print(f"[API] Raw Data: {request.data}")
-    print(f"[API] request.json: {request.json}")
-    
-    # Try to get JSON data
     try:
-        data = request.json
-        if data is None:
-            print("[API] ⚠️ request.json is None, trying get_json(force=True)")
-            data = request.get_json(force=True)
+        # [DEBUG] Print everything about the request
+        # print("=" * 60)
+        # print("[API] 📥 Received /api/control request")
+        # print(f"[API] Raw Data: {request.data}")
+       
+        data = request.get_json(silent=True)
+        if not data:
+            # Fallback for some browsers or bad headers
+            try:
+                data = json.loads(request.data)
+            except:
+                pass
+        
+        if not data:
+             # Try form data
+            if request.form:
+                 data = request.form.to_dict()
+
+        if not data:
+            print(f"[API] ❌ Failed to parse JSON. Raw: {request.data}")
+            return jsonify({"error": "Invalid JSON", "raw": str(request.data)}), 400
+
+        left = data.get('left')
+        right = data.get('right')
+
+        # Convert to int if strings
+        if left is not None: left = int(left)
+        if right is not None: right = int(right)
+        
+        if left is None or right is None:
+            print(f"[API] ❌ Missing params in {data}")
+            return jsonify({"error": "Missing left/right", "data": data}), 400
+            
+        # [Input Priority] Mark this command as active
+        state.last_api_control_time = time.time()
+
+        if send_control_command(left, right):
+            return jsonify({"status": "ok", "left": left, "right": right})
+        else:
+            return jsonify({"error": "Failed to send to ESP32"}), 500
+
     except Exception as e:
-        print(f"[API] ❌ Error parsing JSON: {e}")
-        return jsonify({"error": f"Invalid JSON: {str(e)}"}), 400
-    
-    print(f"[API] Parsed data: {data}")
-    
-    if data is None:
-        print("[API] ❌ Failed to parse request body as JSON")
-        return jsonify({"error": "Request body must be valid JSON"}), 400
-    
-    left = data.get('left')
-    right = data.get('right')
-    
-    print(f"[API] Extracted values: left={left}, right={right}")
-    
-    if left is None or right is None:
-        print(f"[API] ❌ Missing required fields")
-        return jsonify({"error": "Missing left or right values"}), 400
-
-    # [Input Priority] Mark this command as active
-    state.last_api_control_time = time.time()
-
-    if send_control_command(left, right):
-        print(f"[API] ✅ Command sent successfully")
-        return jsonify({"status": "ok", "left": left, "right": right})
-    else:
-        print(f"[API] ❌ Failed to send to ESP32")
-        return jsonify({"error": "Failed to send command to ESP32"}), 500
+        print(f"[API] 💥 Exception: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     # Initialize Multiprocessing Queues
