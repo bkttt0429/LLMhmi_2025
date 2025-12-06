@@ -605,11 +605,36 @@
 
         function sendCmd(cmd) {
             highlightKey(cmd);
+            
+            // Map commands to differential drive PWM (-255 to 255)
+            let left = 0, right = 0;
+            
+            switch(cmd) {
+                case 'F': // Forward
+                    left = 200; right = 200;
+                    break;
+                case 'B': // Backward  
+                    left = -200; right = -200;
+                    break;
+                case 'L': // Turn Left
+                    left = -150; right = 150;
+                    break;
+                case 'R': // Turn Right
+                    left = 150; right = -150;
+                    break;
+                case 'S': // Stop
+                    left = 0; right = 0;
+                    break;
+                default:
+                    return; // Ignore unknown commands
+            }
+            
+            // Send through your backend API
             fetch('/api/control', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ cmd: cmd })
-            }).catch(e => {});
+                body: JSON.stringify({ left: left, right: right })
+            }).catch(e => console.error('Control error:', e));
         }
 
         function highlightKey(cmd) {

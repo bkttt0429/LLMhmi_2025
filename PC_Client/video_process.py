@@ -53,10 +53,10 @@ class MJPEGStreamReader:
 
         # Session
         self.session = requests.Session()
-        # if self.source_ip:
-        #     self.session.mount('http://', SourceAddressAdapter(self.source_ip))
-        #     self.session.mount('https://', SourceAddressAdapter(self.source_ip))
-        #     print(f"[STREAM] Binding to source interface: {self.source_ip}")
+        if self.source_ip:
+            self.session.mount('http://', SourceAddressAdapter(self.source_ip))
+            self.session.mount('https://', SourceAddressAdapter(self.source_ip))
+            print(f"[STREAM] Binding to source interface: {self.source_ip}")
 
         self.start()
 
@@ -146,6 +146,13 @@ class MJPEGStreamReader:
                     print("[STREAM] Stream ended, reconnecting...")
                     self.connected = False
                     iterator = None
+                    continue
+                except (requests.exceptions.ConnectionError, ConnectionResetError) as e:
+                    # Specific handling for connection reset (10054)
+                    print(f"[STREAM] Connection lost: {e}")
+                    self.connected = False
+                    iterator = None
+                    time.sleep(1.0)
                     continue
                 except Exception as e:
                     print(f"[STREAM] Read error: {e}")
