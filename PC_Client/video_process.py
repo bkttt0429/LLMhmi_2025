@@ -315,16 +315,16 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
         except Empty:
             pass
 
-        # 2. Status Check (Every 10s)
-        if time.time() - last_status_check > 10: 
-            target_ip = esp32_ip
-            if stream_reader and stream_reader.url:
-                 try:
-                     parsed = stream_reader.url.split('//')[1].split(':')[0]
-                     if parsed: target_ip = parsed
-                 except: pass
-            query_esp32_status(target_ip)
-            last_status_check = time.time() 
+        # 2. Status Check (Removed to prevent blocking video loop)
+        # if time.time() - last_status_check > 10: 
+        #     target_ip = esp32_ip
+        #     if stream_reader and stream_reader.url:
+        #          try:
+        #              parsed = stream_reader.url.split('//')[1].split(':')[0]
+        #              if parsed: target_ip = parsed
+        #          except: pass
+        #     # query_esp32_status(target_ip) # This was blocking!
+        #     last_status_check = time.time() 
          
         # 3. Get Latest Frame (Instant)
         frame = None

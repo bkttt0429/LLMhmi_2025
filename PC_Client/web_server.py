@@ -35,6 +35,7 @@ from ai_detector import YOLO_AVAILABLE
 # 導入 Video Process
 from video_process import video_process_target, CMD_SET_URL, CMD_SET_AI, CMD_SET_MODEL, CMD_EXIT
 from video_config import build_initial_video_config
+from network_utils import SourceAddressAdapter
 
 # 初始化 Flask 和 SocketIO
 template_dir = os.path.join(BASE_DIR, 'templates')
@@ -275,7 +276,14 @@ class SystemState:
         
         # 建立一個綁定到 Camera Net Interface 的 session 用於發送 HTTP 控制指令到 ESP32
         self.control_session = requests.Session()
-        print("[INIT] Control Session created (Default Routing)")
+        if self.camera_net_ip:
+            try:
+                self.control_session.mount('http://', SourceAddressAdapter(self.camera_net_ip))
+                print(f"[INIT] Control Session bound to {self.camera_net_ip}")
+            except Exception as e:
+                print(f"[INIT] Failed to bind Control Session: {e}")
+        else:
+            print("[INIT] Control Session created (Default Routing)")
 
     def print_network_summary(self):
         print("="*60)
@@ -435,12 +443,25 @@ def send_control_command(left: int, right: int):
     # http://192.168.4.1/control?left=XX&right=YY
 
     target_ip = state.camera_ip or "192.168.4.1"
-    url = f"http://{target_ip}/control"
+    target_ip = state.camera_ip or "192.168.4.1"
+    url = f"http://{target_ip}/motor"
 
     try:
-        state.control_session.get(url, params={"left": left, "right": right}, timeout=0.1)
-        return True
-    except requests.exceptions.RequestException:
+        # Increased timeout to 0.5s to reduce flakiness
+        resp = state.control_session.get(url, params={"left": left, "right": right}, timeout=0.5)
+        if resp.status_code == 200:
+            return True
+        else:
+            add_log(f"[CONTROL] ⚠️ Failed: HTTP {resp.status_code}")
+            return False
+    except requests.exceptions.Timeout:
+        add_log(f"[CONTROL] ⚠️ Timeout sending to {target_ip}")
+        return False
+    except requests.exceptions.ConnectionError:
+        add_log(f"[CONTROL] ❌ Connection Error to {target_ip}")
+        return False
+    except requests.exceptions.RequestException as e:
+        add_log(f"[CONTROL] ❌ Error: {e}")
         return False
 
 def video_manager_thread():
@@ -828,6 +849,7 @@ if __name__ == '__main__':
     video_log_queue = Queue()
 
     # Start Video Process
+    initial_config = build_initial_video_config(state)
     p = Process(target=video_process_target, args=(video_cmd_queue, video_frame_queue, video_log_queue, initial_config))
     p.daemon = True
     p.start()
