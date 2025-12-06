@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -8,7 +9,7 @@
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-        
+
         body {
             background-color: #050505;
             color: #00ff9d;
@@ -27,8 +28,9 @@
         }
 
         .scan-line {
-            width: 100%; height: 100%;
-            background: linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.3) 50%);
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, transparent 50%, rgba(0, 0, 0, 0.3) 50%);
             background-size: 100% 4px;
             pointer-events: none;
             position: absolute;
@@ -41,13 +43,28 @@
             color: #00ff9d;
             background: rgba(0, 20, 10, 0.6);
             transition: all 0.1s;
-            display: flex; justify-content: center; align-items: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             cursor: pointer;
             user-select: none;
         }
-        .btn-cy:hover { background: #00ff9d; color: #000; box-shadow: 0 0 15px #00ff9d; }
-        .btn-cy:active { transform: scale(0.95); }
-        .btn-active { background: #00ff9d; color: #000; box-shadow: 0 0 15px #00ff9d; }
+
+        .btn-cy:hover {
+            background: #00ff9d;
+            color: #000;
+            box-shadow: 0 0 15px #00ff9d;
+        }
+
+        .btn-cy:active {
+            transform: scale(0.95);
+        }
+
+        .btn-active {
+            background: #00ff9d;
+            color: #000;
+            box-shadow: 0 0 15px #00ff9d;
+        }
 
         /* Nav Bar Styles */
         .nav-bar {
@@ -84,71 +101,109 @@
         }
 
         @media (min-width: 640px) {
-            .nav-bar { gap: 10px; padding: 10px 20px; }
-            .nav-btn { padding: 10px 20px; font-size: 0.9rem; gap: 8px; }
+            .nav-bar {
+                gap: 10px;
+                padding: 10px 20px;
+            }
+
+            .nav-btn {
+                padding: 10px 20px;
+                font-size: 0.9rem;
+                gap: 8px;
+            }
         }
 
-        .nav-btn:hover { background: #00ff9d; color: #000; box-shadow: 0 0 15px #00ff9d; }
-        .nav-btn.active { background: #00ff9d; color: #000; box-shadow: 0 0 20px #00ff9d; }
-        
+        .nav-btn:hover {
+            background: #00ff9d;
+            color: #000;
+            box-shadow: 0 0 15px #00ff9d;
+        }
+
+        .nav-btn.active {
+            background: #00ff9d;
+            color: #000;
+            box-shadow: 0 0 20px #00ff9d;
+        }
+
         /* Xbox Visualizer */
         .xbox-card {
-            background: radial-gradient(circle at 20% 20%, rgba(0,255,157,0.06), transparent 35%),
-                        radial-gradient(circle at 80% 0%, rgba(0,255,255,0.06), transparent 30%),
-                        rgba(5, 15, 10, 0.85);
-            border: 1px solid rgba(0,255,157,0.2);
-            box-shadow: 0 0 25px rgba(0,255,157,0.08);
+            background: radial-gradient(circle at 20% 20%, rgba(0, 255, 157, 0.06), transparent 35%),
+                radial-gradient(circle at 80% 0%, rgba(0, 255, 255, 0.06), transparent 30%),
+                rgba(5, 15, 10, 0.85);
+            border: 1px solid rgba(0, 255, 157, 0.2);
+            box-shadow: 0 0 25px rgba(0, 255, 157, 0.08);
         }
+
         .xbox-stick {
-            width: 64px; height: 64px;
+            width: 64px;
+            height: 64px;
             border: 1px solid #0f766e;
             border-radius: 50%;
             background: radial-gradient(circle, #0b1f1a 0%, #04100c 65%);
-            box-shadow: inset 0 0 12px rgba(0,255,157,0.35);
+            box-shadow: inset 0 0 12px rgba(0, 255, 157, 0.35);
             transition: transform 0.1s ease-out;
         }
+
         .xbox-stick::after {
             content: '';
             position: absolute;
-            top: 50%; left: 50%;
-            width: 14px; height: 14px;
+            top: 50%;
+            left: 50%;
+            width: 14px;
+            height: 14px;
             background: #00ff9d;
             border-radius: 50%;
             transform: translate(-50%, -50%);
-            box-shadow: 0 0 8px rgba(0,255,157,0.6);
+            box-shadow: 0 0 8px rgba(0, 255, 157, 0.6);
         }
+
         .xbox-pulse {
             animation: pulse 1.2s infinite;
         }
+
         @keyframes pulse {
-            0% { opacity: 0.35; }
-            50% { opacity: 1; }
-            100% { opacity: 0.35; }
+            0% {
+                opacity: 0.35;
+            }
+
+            50% {
+                opacity: 1;
+            }
+
+            100% {
+                opacity: 0.35;
+            }
         }
     </style>
 </head>
-<body class="h-screen flex flex-col p-2 sm:p-4 gap-4 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
 
-    <header class="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-green-500/30 pb-2 shrink-0 gap-2">
+<body
+    class="h-screen flex flex-col p-2 sm:p-4 gap-4 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
+
+    <header
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-green-500/30 pb-2 shrink-0 gap-2">
         <div>
-            <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-widest text-green-400 drop-shadow-[0_0_5px_rgba(0,255,157,0.8)]">SHIM INTERFACE <span class="text-xs sm:text-sm text-gray-500">v15.0 DUAL-LINK</span></h1>
+            <h1
+                class="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-widest text-green-400 drop-shadow-[0_0_5px_rgba(0,255,157,0.8)]">
+                SHIM INTERFACE <span class="text-xs sm:text-sm text-gray-500">v15.0 DUAL-LINK</span></h1>
             <div class="text-[10px] sm:text-xs text-gray-400 tracking-wider flex items-center gap-4 flex-wrap">
                 <div class="flex items-center gap-1">
-                    <span>CONTROL(UDP):</span> 
+                    <span>CONTROL(UDP):</span>
                     <span id="car-ip-display" class="text-yellow-500 font-bold">--.--.--.--</span>
                 </div>
                 <div class="flex items-center gap-1">
-                    <span>VIDEO:</span> 
+                    <span>VIDEO:</span>
                     <span id="cam-ip-display" class="text-blue-400 font-bold">--.--.--.--</span>
                 </div>
-                <span id="gamepad-status" class="opacity-30 transition-opacity flex items-center gap-1">🎮 GAMEPAD</span>
+                <span id="gamepad-status" class="opacity-30 transition-opacity flex items-center gap-1">🎮
+                    GAMEPAD</span>
             </div>
         </div>
         <div id="clock" class="text-lg sm:text-2xl text-green-600">00:00:00</div>
     </header>
 
     <div id="main-view" class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0 pb-20">
-        
+
         <div class="lg:col-span-8 flex flex-col gap-2 relative cyber-border rounded p-1 min-h-[300px]">
             <div class="flex justify-between px-2 text-[10px] sm:text-xs text-gray-500 font-bold flex-wrap gap-2">
                 <div class="flex gap-2 items-center text-green-600">
@@ -156,16 +211,20 @@
                 </div>
                 <span>FEED: <span class="text-green-400 animate-pulse">LIVE</span></span>
             </div>
-            
-            <div class="flex-1 bg-black relative overflow-hidden flex items-center justify-center border border-gray-800 group">
+
+            <div
+                class="flex-1 bg-black relative overflow-hidden flex items-center justify-center border border-gray-800 group">
                 <div class="scan-line"></div>
-                <img src="/video_feed" class="w-full h-full object-contain" onerror="this.style.display='none'; document.getElementById('no-sig').style.display='flex'">
-                
+                <img src="/video_feed" class="w-full h-full object-contain"
+                    onerror="this.style.display='none'; document.getElementById('no-sig').style.display='flex'">
+
                 <div id="no-sig" class="hidden absolute inset-0 flex-col items-center justify-center bg-black/80 z-20">
-                    <div class="text-2xl sm:text-4xl text-red-500 font-bold border-4 border-red-500 p-4 sm:p-6 animate-pulse">NO SIGNAL</div>
+                    <div
+                        class="text-2xl sm:text-4xl text-red-500 font-bold border-4 border-red-500 p-4 sm:p-6 animate-pulse">
+                        NO SIGNAL</div>
                     <div class="text-red-400 mt-2 text-xs sm:text-sm">CHECK ESP32-S3 (CAMERA)</div>
                 </div>
-                
+
                 <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
                     <div class="w-[40px] h-[40px] border border-green-500 rounded-full absolute"></div>
                     <div class="w-[200px] h-[1px] bg-green-500"></div>
@@ -173,21 +232,25 @@
                 </div>
             </div>
 
-            <div id="log-box" class="h-24 sm:h-32 bg-black border-t border-gray-700 p-2 font-mono text-[10px] sm:text-xs overflow-y-auto text-gray-400 leading-tight">
+            <div id="log-box"
+                class="h-24 sm:h-32 bg-black border-t border-gray-700 p-2 font-mono text-[10px] sm:text-xs overflow-y-auto text-gray-400 leading-tight">
                 <div class="text-green-700">> Initializing Dual-Link Interface...</div>
             </div>
         </div>
 
         <div class="lg:col-span-4 flex flex-col gap-4">
-            
+
             <div class="cyber-border p-2 sm:p-4 flex flex-col items-center justify-center relative grow-0">
                 <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">SONAR (ESP12F)</div>
-                
-                <div class="relative w-32 h-32 sm:w-40 sm:h-40 lg:w-56 lg:h-56 rounded-full border border-green-900 bg-black/80 shadow-[inset_0_0_20px_rgba(0,50,0,0.5)]">
-                     <canvas id="radar-canvas-main" class="absolute inset-0 w-full h-full rounded-full"></canvas>
+
+                <div
+                    class="relative w-32 h-32 sm:w-40 sm:h-40 lg:w-56 lg:h-56 rounded-full border border-green-900 bg-black/80 shadow-[inset_0_0_20px_rgba(0,50,0,0.5)]">
+                    <canvas id="radar-canvas-main" class="absolute inset-0 w-full h-full rounded-full"></canvas>
                 </div>
-                
-                <div id="dist-val" class="text-xl sm:text-2xl lg:text-3xl font-bold mt-2 text-green-400 drop-shadow-[0_0_5px_rgba(0,255,0,0.5)]">--.-- CM</div>
+
+                <div id="dist-val"
+                    class="text-xl sm:text-2xl lg:text-3xl font-bold mt-2 text-green-400 drop-shadow-[0_0_5px_rgba(0,255,0,0.5)]">
+                    --.-- CM</div>
             </div>
 
             <div class="cyber-border p-3 sm:p-6 flex-1 flex flex-col justify-center gap-4 sm:gap-6 relative">
@@ -195,29 +258,29 @@
 
                 <div class="grid grid-cols-3 gap-2 sm:gap-3 w-full max-w-[180px] sm:max-w-[240px] mx-auto">
                     <div></div>
-                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl" 
-                            onmousedown="sendCmd('F')" onmouseup="sendCmd('S')"
-                            ontouchstart="sendCmd('F')" ontouchend="sendCmd('S')" id="btn-w">W</button>
+                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
+                        onmousedown="sendCmd('F')" onmouseup="sendCmd('S')" ontouchstart="sendCmd('F')"
+                        ontouchend="sendCmd('S')" id="btn-w">W</button>
                     <div></div>
-                    
+
                     <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
-                            onmousedown="sendCmd('L')" onmouseup="sendCmd('S')"
-                            ontouchstart="sendCmd('L')" ontouchend="sendCmd('S')" id="btn-a">A</button>
+                        onmousedown="sendCmd('L')" onmouseup="sendCmd('S')" ontouchstart="sendCmd('L')"
+                        ontouchend="sendCmd('S')" id="btn-a">A</button>
                     <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
-                            onmousedown="sendCmd('S')"
-                            ontouchstart="sendCmd('S')" id="btn-s">S</button>
+                        onmousedown="sendCmd('S')" ontouchstart="sendCmd('S')" id="btn-s">S</button>
                     <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
-                            onmousedown="sendCmd('R')" onmouseup="sendCmd('S')"
-                            ontouchstart="sendCmd('R')" ontouchend="sendCmd('S')" id="btn-d">D</button>
-                    
+                        onmousedown="sendCmd('R')" onmouseup="sendCmd('S')" ontouchstart="sendCmd('R')"
+                        ontouchend="sendCmd('S')" id="btn-d">D</button>
+
                     <div></div>
                     <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
-                            onmousedown="sendCmd('B')" onmouseup="sendCmd('S')"
-                            ontouchstart="sendCmd('B')" ontouchend="sendCmd('S')" id="btn-x">X</button>
+                        onmousedown="sendCmd('B')" onmouseup="sendCmd('S')" ontouchstart="sendCmd('B')"
+                        ontouchend="sendCmd('S')" id="btn-x">X</button>
                     <div></div>
                 </div>
 
-                <button class="btn-cy w-full py-2 sm:py-3 rounded tracking-widest text-xs sm:text-sm" onclick="toggleLight()">TOGGLE LIGHTS (ESP32 CAM)</button>
+                <button class="btn-cy w-full py-2 sm:py-3 rounded tracking-widest text-xs sm:text-sm"
+                    onclick="toggleLight()">TOGGLE LIGHTS (ESP32 CAM)</button>
             </div>
 
             <div class="xbox-card rounded p-3 sm:p-4 flex flex-col gap-3 relative">
@@ -227,7 +290,8 @@
                     <div class="space-y-1 text-xs sm:text-sm text-gray-300">
                         <div class="flex items-center gap-2"><span class="text-green-400 font-mono">LS</span>：移動控制</div>
                         <div class="flex items-center gap-2"><span class="text-green-400 font-mono">X</span>：緊急煞車</div>
-                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">A</span>：補光燈 (CAM)</div>
+                        <div class="flex items-center gap-2"><span class="text-green-400 font-mono">A</span>：補光燈 (CAM)
+                        </div>
                     </div>
                 </div>
                 <div class="flex items-center justify-between text-[10px] sm:text-xs text-gray-400">
@@ -242,7 +306,7 @@
     <!-- Settings View -->
     <div id="settings-view" class="flex-1 overflow-auto p-2 sm:p-4 pb-20" style="display:none;">
         <div class="max-w-3xl mx-auto space-y-4">
-            
+
             <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
                 <div class="text-green-400 font-bold mb-3 flex items-center gap-2 text-sm sm:text-base">
                     <span class="text-xl">📡</span> DUAL-LINK CONNECTION
@@ -251,16 +315,21 @@
                     <div class="p-3 border border-green-900/50 rounded bg-green-900/10">
                         <label class="block text-xs text-green-400 mb-1 font-bold">🚗 Car Control IP (ESP12F)</label>
                         <div class="text-[10px] text-gray-500 mb-2">接收 UDP 指令的遙控車 (Port 4210)</div>
-                        <input id="settings-car-ip" type="text" class="w-full bg-black text-green-400 border border-green-900 px-2 py-2 rounded focus:outline-none focus:border-green-500 text-sm font-mono" placeholder="192.168.x.x">
+                        <input id="settings-car-ip" type="text"
+                            class="w-full bg-black text-green-400 border border-green-900 px-2 py-2 rounded focus:outline-none focus:border-green-500 text-sm font-mono"
+                            placeholder="192.168.x.x">
                     </div>
-                    
+
                     <div class="p-3 border border-blue-900/50 rounded bg-blue-900/10">
                         <label class="block text-xs text-blue-400 mb-1 font-bold">📹 Camera Stream IP (ESP32-S3)</label>
                         <div class="text-[10px] text-gray-500 mb-2">提供影像串流 (Port 81)</div>
-                        <input id="settings-cam-ip" type="text" class="w-full bg-black text-blue-400 border border-blue-900 px-2 py-2 rounded focus:outline-none focus:border-blue-500 text-sm font-mono" placeholder="192.168.x.x">
+                        <input id="settings-cam-ip" type="text"
+                            class="w-full bg-black text-blue-400 border border-blue-900 px-2 py-2 rounded focus:outline-none focus:border-blue-500 text-sm font-mono"
+                            placeholder="192.168.x.x">
                     </div>
 
-                    <button onclick="applySettings()" class="btn-cy w-full py-3 rounded text-sm font-bold">APPLY DUAL IP SETTINGS</button>
+                    <button onclick="applySettings()" class="btn-cy w-full py-3 rounded text-sm font-bold">APPLY DUAL IP
+                        SETTINGS</button>
                 </div>
             </div>
 
@@ -269,16 +338,21 @@
                 <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">SYSTEM TOOLS</div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div class="flex flex-col gap-2">
-                        <button onclick="toggleAI()" id="ai-toggle-btn" class="btn-cy py-2 rounded text-xs sm:text-sm">ACTIVATE AI HUD</button>
-                        <button onclick="exportLogs()" class="btn-cy py-2 rounded text-xs sm:text-sm">EXPORT SYSTEM LOGS</button>
-                        <button onclick="showNetInfo()" class="btn-cy py-2 rounded text-xs sm:text-sm text-blue-300 border-blue-500">SHOW NET INFO</button>
+                        <button onclick="toggleAI()" id="ai-toggle-btn"
+                            class="btn-cy py-2 rounded text-xs sm:text-sm">ACTIVATE AI HUD</button>
+                        <button onclick="exportLogs()" class="btn-cy py-2 rounded text-xs sm:text-sm">EXPORT SYSTEM
+                            LOGS</button>
+                        <button onclick="showNetInfo()"
+                            class="btn-cy py-2 rounded text-xs sm:text-sm text-blue-300 border-blue-500">SHOW NET
+                            INFO</button>
                     </div>
 
                     <!-- AI Model Selector -->
                     <div class="flex flex-col gap-2 p-2 border border-green-900/30 rounded">
                         <label class="text-xs text-green-400 font-bold">🧠 AI Model Selection</label>
                         <div class="flex gap-2">
-                            <select id="model-selector" class="bg-black text-green-400 border border-green-800 rounded px-2 py-1 text-xs flex-1">
+                            <select id="model-selector"
+                                class="bg-black text-green-400 border border-green-800 rounded px-2 py-1 text-xs flex-1">
                                 <option value="yolov13l.pt" selected>YOLOv13-Large (Default)</option>
                                 <option value="yolov8n.pt">YOLOv8-Nano (Fast)</option>
                                 <option value="yolov8s.pt">YOLOv8-Small</option>
@@ -300,7 +374,8 @@
                     <!-- Selectors -->
                     <div class="flex flex-col gap-1">
                         <label class="text-gray-400">Resolution</label>
-                        <select id="cfg-framesize" onchange="updateCameraSetting('framesize', this.value)" class="bg-black border border-green-900 text-green-400 p-1 rounded">
+                        <select id="cfg-framesize" onchange="updateCameraSetting('framesize', this.value)"
+                            class="bg-black border border-green-900 text-green-400 p-1 rounded">
                             <option value="11">VGA (640x480)</option>
                             <option value="10">HVGA (480x320)</option>
                             <option value="9">CIF (400x296)</option>
@@ -312,7 +387,8 @@
 
                     <div class="flex flex-col gap-1">
                         <label class="text-gray-400">Special Effect</label>
-                        <select id="cfg-special_effect" onchange="updateCameraSetting('special_effect', this.value)" class="bg-black border border-green-900 text-green-400 p-1 rounded">
+                        <select id="cfg-special_effect" onchange="updateCameraSetting('special_effect', this.value)"
+                            class="bg-black border border-green-900 text-green-400 p-1 rounded">
                             <option value="0">No Effect</option>
                             <option value="1">Negative</option>
                             <option value="2">Grayscale</option>
@@ -325,7 +401,8 @@
 
                     <div class="flex flex-col gap-1">
                         <label class="text-gray-400">WB Mode</label>
-                        <select id="cfg-wb_mode" onchange="updateCameraSetting('wb_mode', this.value)" class="bg-black border border-green-900 text-green-400 p-1 rounded">
+                        <select id="cfg-wb_mode" onchange="updateCameraSetting('wb_mode', this.value)"
+                            class="bg-black border border-green-900 text-green-400 p-1 rounded">
                             <option value="0">Auto</option>
                             <option value="1">Sunny</option>
                             <option value="2">Cloudy</option>
@@ -337,42 +414,63 @@
                     <!-- Sliders -->
                     <div class="col-span-full grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-gray-800 pt-2">
                         <div class="flex flex-col gap-1">
-                            <div class="flex justify-between"><label>Quality (10-63)</label><span id="val-quality" class="text-gray-500">--</span></div>
-                            <input type="range" id="cfg-quality" min="10" max="63" step="1" onchange="updateCameraSetting('quality', this.value)" class="accent-green-500">
+                            <div class="flex justify-between"><label>Quality (10-63)</label><span id="val-quality"
+                                    class="text-gray-500">--</span></div>
+                            <input type="range" id="cfg-quality" min="10" max="63" step="1"
+                                onchange="updateCameraSetting('quality', this.value)" class="accent-green-500">
                         </div>
                         <div class="flex flex-col gap-1">
-                            <div class="flex justify-between"><label>Brightness (-2 to 2)</label><span id="val-brightness" class="text-gray-500">--</span></div>
-                            <input type="range" id="cfg-brightness" min="-2" max="2" step="1" onchange="updateCameraSetting('brightness', this.value)" class="accent-green-500">
+                            <div class="flex justify-between"><label>Brightness (-2 to 2)</label><span
+                                    id="val-brightness" class="text-gray-500">--</span></div>
+                            <input type="range" id="cfg-brightness" min="-2" max="2" step="1"
+                                onchange="updateCameraSetting('brightness', this.value)" class="accent-green-500">
                         </div>
                         <div class="flex flex-col gap-1">
-                            <div class="flex justify-between"><label>Contrast (-2 to 2)</label><span id="val-contrast" class="text-gray-500">--</span></div>
-                            <input type="range" id="cfg-contrast" min="-2" max="2" step="1" onchange="updateCameraSetting('contrast', this.value)" class="accent-green-500">
+                            <div class="flex justify-between"><label>Contrast (-2 to 2)</label><span id="val-contrast"
+                                    class="text-gray-500">--</span></div>
+                            <input type="range" id="cfg-contrast" min="-2" max="2" step="1"
+                                onchange="updateCameraSetting('contrast', this.value)" class="accent-green-500">
                         </div>
                         <div class="flex flex-col gap-1">
-                            <div class="flex justify-between"><label>Saturation (-2 to 2)</label><span id="val-saturation" class="text-gray-500">--</span></div>
-                            <input type="range" id="cfg-saturation" min="-2" max="2" step="1" onchange="updateCameraSetting('saturation', this.value)" class="accent-green-500">
+                            <div class="flex justify-between"><label>Saturation (-2 to 2)</label><span
+                                    id="val-saturation" class="text-gray-500">--</span></div>
+                            <input type="range" id="cfg-saturation" min="-2" max="2" step="1"
+                                onchange="updateCameraSetting('saturation', this.value)" class="accent-green-500">
                         </div>
                     </div>
 
                     <!-- Toggles -->
-                    <div class="col-span-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 border-t border-gray-800 pt-2">
-                        <button id="btn-awb" onclick="toggleCamBool('awb')" class="btn-cy py-1 text-[10px] rounded">AWB</button>
-                        <button id="btn-aec" onclick="toggleCamBool('aec')" class="btn-cy py-1 text-[10px] rounded">AEC (Sensor)</button>
-                        <button id="btn-aec2" onclick="toggleCamBool('aec2')" class="btn-cy py-1 text-[10px] rounded">AEC (DSP)</button>
-                        <button id="btn-agc" onclick="toggleCamBool('agc')" class="btn-cy py-1 text-[10px] rounded">AGC</button>
-                        <button id="btn-bpc" onclick="toggleCamBool('bpc')" class="btn-cy py-1 text-[10px] rounded">BPC</button>
-                        <button id="btn-wpc" onclick="toggleCamBool('wpc')" class="btn-cy py-1 text-[10px] rounded">WPC</button>
-                        <button id="btn-raw_gma" onclick="toggleCamBool('raw_gma')" class="btn-cy py-1 text-[10px] rounded">Raw GMA</button>
-                        <button id="btn-lenc" onclick="toggleCamBool('lenc')" class="btn-cy py-1 text-[10px] rounded">Lens Corr</button>
-                        <button id="btn-hmirror" onclick="toggleCamBool('hmirror')" class="btn-cy py-1 text-[10px] rounded">H-Mirror</button>
-                        <button id="btn-vflip" onclick="toggleCamBool('vflip')" class="btn-cy py-1 text-[10px] rounded">V-Flip</button>
-                        <button id="btn-dcw" onclick="toggleCamBool('dcw')" class="btn-cy py-1 text-[10px] rounded">DCW</button>
-                        <button id="btn-colorbar" onclick="toggleCamBool('colorbar')" class="btn-cy py-1 text-[10px] rounded">Colorbar</button>
+                    <div
+                        class="col-span-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 border-t border-gray-800 pt-2">
+                        <button id="btn-awb" onclick="toggleCamBool('awb')"
+                            class="btn-cy py-1 text-[10px] rounded">AWB</button>
+                        <button id="btn-aec" onclick="toggleCamBool('aec')" class="btn-cy py-1 text-[10px] rounded">AEC
+                            (Sensor)</button>
+                        <button id="btn-aec2" onclick="toggleCamBool('aec2')"
+                            class="btn-cy py-1 text-[10px] rounded">AEC (DSP)</button>
+                        <button id="btn-agc" onclick="toggleCamBool('agc')"
+                            class="btn-cy py-1 text-[10px] rounded">AGC</button>
+                        <button id="btn-bpc" onclick="toggleCamBool('bpc')"
+                            class="btn-cy py-1 text-[10px] rounded">BPC</button>
+                        <button id="btn-wpc" onclick="toggleCamBool('wpc')"
+                            class="btn-cy py-1 text-[10px] rounded">WPC</button>
+                        <button id="btn-raw_gma" onclick="toggleCamBool('raw_gma')"
+                            class="btn-cy py-1 text-[10px] rounded">Raw GMA</button>
+                        <button id="btn-lenc" onclick="toggleCamBool('lenc')"
+                            class="btn-cy py-1 text-[10px] rounded">Lens Corr</button>
+                        <button id="btn-hmirror" onclick="toggleCamBool('hmirror')"
+                            class="btn-cy py-1 text-[10px] rounded">H-Mirror</button>
+                        <button id="btn-vflip" onclick="toggleCamBool('vflip')"
+                            class="btn-cy py-1 text-[10px] rounded">V-Flip</button>
+                        <button id="btn-dcw" onclick="toggleCamBool('dcw')"
+                            class="btn-cy py-1 text-[10px] rounded">DCW</button>
+                        <button id="btn-colorbar" onclick="toggleCamBool('colorbar')"
+                            class="btn-cy py-1 text-[10px] rounded">Colorbar</button>
                     </div>
 
                 </div>
             </div>
-            
+
         </div>
     </div>
 
@@ -391,7 +489,7 @@
         let socket;
         let wsConnected = false;
         let lastLogs = [];
-        
+
         // Canvas State
         const radarBlips = [];
         let radarAngle = 0;
@@ -424,28 +522,28 @@
                         selector.appendChild(opt);
                     });
                 }
-            } catch(e) {
+            } catch (e) {
                 console.log("Failed to fetch models", e);
             }
         }
 
         async function applyModel() {
             const model = document.getElementById('model-selector').value;
-            if(!model) return;
+            if (!model) return;
             log(`Switching AI model to ${model}...`);
             try {
                 const res = await fetch('/api/set_model', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ model: model })
                 });
                 const data = await res.json();
-                if(data.status === 'ok') {
+                if (data.status === 'ok') {
                     log(`Model switched to ${model}`);
                 } else {
                     log(`Failed to switch model: ${data.msg}`);
                 }
-            } catch(e) {
+            } catch (e) {
                 log(`Error switching model: ${e}`);
             }
         }
@@ -454,7 +552,7 @@
 
         function resizeCanvas() {
             const mainC = document.getElementById('radar-canvas-main');
-            if(mainC) {
+            if (mainC) {
                 mainC.width = mainC.parentElement.clientWidth;
                 mainC.height = mainC.parentElement.clientHeight;
             }
@@ -464,7 +562,7 @@
             socket = io({ transports: ['websocket'] });
             socket.on('connect', () => { wsConnected = true; log("WS Connected"); });
             socket.on('disconnect', () => { wsConnected = false; log("WS Disconnected"); });
-            
+
             // Handle status updates pushed from server (replaces polling)
             socket.on('status_update', (data) => {
                 updateUI(data);
@@ -479,7 +577,7 @@
                     highlightKey(data.cmd);
                 }
                 const icon = document.getElementById('gamepad-status');
-                if(icon) icon.style.opacity = '1';
+                if (icon) icon.style.opacity = '1';
             });
         }
 
@@ -488,25 +586,25 @@
             const carIpDisplay = document.getElementById('car-ip-display');
             const camIpDisplay = document.getElementById('cam-ip-display');
 
-            if(data.car_ip) {
+            if (data.car_ip) {
                 carIpDisplay.innerText = data.car_ip;
                 carIpDisplay.className = "text-green-400 font-bold font-mono";
                 // 同步更新 Settings 欄位
                 const setCar = document.getElementById('settings-car-ip');
-                if(setCar && !setCar.value) setCar.value = data.car_ip;
+                if (setCar && !setCar.value) setCar.value = data.car_ip;
             }
 
-            if(data.camera_ip) {
+            if (data.camera_ip) {
                 camIpDisplay.innerText = data.camera_ip;
                 camIpDisplay.className = "text-blue-400 font-bold font-mono";
                 // 同步更新 Settings 欄位
                 const setCam = document.getElementById('settings-cam-ip');
-                if(setCam && !setCam.value) setCam.value = data.camera_ip;
+                if (setCam && !setCam.value) setCam.value = data.camera_ip;
             }
 
             // 更新 AI 狀態
             const aiStatus = document.getElementById('ai-status');
-            if(data.ai_status) {
+            if (data.ai_status) {
                 aiStatus.innerText = "AI: ACTIVE";
                 aiStatus.className = "text-green-400 font-bold animate-pulse";
                 document.getElementById('ai-toggle-btn').innerText = "DEACTIVATE AI";
@@ -518,12 +616,12 @@
 
             // 更新距離
             const distVal = document.getElementById('dist-val');
-            if(data.dist !== undefined) {
+            if (data.dist !== undefined) {
                 distVal.innerText = data.dist.toFixed(2) + " CM";
             }
 
             // Logs
-            if(data.logs) {
+            if (data.logs) {
                 const serialized = JSON.stringify(data.logs);
                 if (serialized !== JSON.stringify(lastLogs)) {
                     lastLogs = data.logs.slice();
@@ -542,16 +640,16 @@
         function applySettings() {
             const carIp = document.getElementById('settings-car-ip').value;
             const camIp = document.getElementById('settings-cam-ip').value;
-            
+
             // 分別發送設定
-            if(carIp) {
+            if (carIp) {
                 fetch('/api/set_ip', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ car_ip: carIp })
                 });
             }
-            if(camIp) {
+            if (camIp) {
                 fetch('/api/set_ip', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -567,49 +665,156 @@
             const dt = timestamp - lastFrameTime;
             lastFrameTime = timestamp;
             drawRadar(document.getElementById('radar-canvas-main'), timestamp);
-            
+
             // Gamepad heartbeat check
-            if(Date.now() - lastXboxUpdate > 2000) {
+            if (Date.now() - lastXboxUpdate > 2000) {
                 const icon = document.getElementById('gamepad-status');
-                if(icon) icon.style.opacity = '0.3';
+                if (icon) icon.style.opacity = '0.3';
             }
-            
+
+            updateJoystickLoop();
             requestAnimationFrame(animationLoop);
         }
 
+        // === Xbox Controller Logic ===
+        let lastGamepadCmdTime = 0;
+        let wasJoystickActive = false;
+        const CMD_INTERVAL = 50; // Throttle to 20Hz
+
+        function updateJoystickLoop() {
+            // Get Gamepads (Standard Mapping)
+            // Index 0 is usually the first connected controller
+            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+            const gp = gamepads[0]; // Focus on the first controller
+
+            if (!gp || !gp.connected) return;
+
+            // Mark as active
+            const icon = document.getElementById('gamepad-status');
+            if (icon) icon.style.opacity = '1';
+            lastXboxUpdate = Date.now();
+
+            // === 1. Read Inputs ===
+            // Standard Gamepad Mapping:
+            // Axes[0] = Left Stick X (-1 Left, +1 Right)
+            // Axes[1] = Left Stick Y (-1 Up, +1 Down)
+            let x = gp.axes[0];
+            let y = gp.axes[1];
+
+            // === 2. Deadzone Processing ===
+            // Filter out small noise to prevent drift
+            const DEADZONE = 0.1;
+            if (Math.abs(x) < DEADZONE) x = 0;
+            if (Math.abs(y) < DEADZONE) y = 0;
+
+            // Note: Standard Y axis is inverted (Up is negative)
+            // We usually want Up to be positive for speed calculations
+            y = -y;
+
+            // Update Visuals
+            updateXboxVisual(x, -y, gp.buttons[10] && gp.buttons[10].pressed);
+
+            // === 3. Differential Drive Mixing Algorithm ===
+            // Mix X (Steering) and Y (Throttle) into Left/Right motor speeds
+            // Algorithm: 
+            // Left  = Throttle + Steering
+            // Right = Throttle - Steering
+            // Then clamp to valid range and scale to PWM
+
+            let leftVal = y + x;
+            let rightVal = y - x;
+
+            // Clamp to -1.0 to 1.0 buffer first
+            leftVal = Math.max(-1, Math.min(1, leftVal));
+            rightVal = Math.max(-1, Math.min(1, rightVal));
+
+            // Scale to PWM Range (-255 to 255)
+            const MAX_PWM = 255;
+            let leftPWM = Math.round(leftVal * MAX_PWM);
+            let rightPWM = Math.round(rightVal * MAX_PWM);
+
+            // === 4. Throttling & Sending ===
+            // Only send if time interval passed OR immediate stop
+            // [FIX] Input Priority: Only send if joystick is active OR just became inactive
+            const isStickActive = (leftPWM !== 0 || rightPWM !== 0);
+
+            if (!isStickActive && !wasJoystickActive) {
+                // Joystick is idle and was already idle. Do NOT send anything.
+                // This allows Keyboard (WASD) commands to pass through.
+                return;
+            }
+
+            const now = Date.now();
+            if (isStickActive || (now - lastGamepadCmdTime > CMD_INTERVAL) || !wsConnected) { // wsConnected check is dummy here, mainly logic below
+
+                // Allow sending if: 
+                // 1. Stick is moving (Active)
+                // 2. Stick JUST stopped (wasActive=true, isActive=false) - Send ONE (0,0)
+                // 3. Throttle condition met
+
+                if (isStickActive || wasJoystickActive) {
+                    if ((now - lastGamepadCmdTime > CMD_INTERVAL) || (wasJoystickActive && !isStickActive)) {
+
+                        // Construct payload
+                        const payload = { left: leftPWM, right: rightPWM };
+
+                        // Visual Debug
+                        document.getElementById('xbox-cmd').innerText = `L:${leftPWM} R:${rightPWM}`;
+
+                        // Send 
+                        fetch('/api/control', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        }).catch(e => { /* Ignore fetch errors */ });
+
+                        lastGamepadCmdTime = now;
+                    }
+                }
+            }
+
+            wasJoystickActive = isStickActive;
+
+            // Button Bindings for Lights (A Button = Index 0)
+            if (gp.buttons[0] && gp.buttons[0].pressed) {
+                // Debounce could be added here, but toggleLight handles state
+                // For simple press-and-hold or toggle
+            }
+        }
+
         function drawRadar(canvas, time) {
-            if(!canvas) return;
+            if (!canvas) return;
             const ctx = canvas.getContext('2d');
             const w = canvas.width, h = canvas.height;
-            const cx = w/2, cy = h/2, radius = Math.min(w,h)/2 - 2;
-            
-            ctx.clearRect(0,0,w,h);
-            
+            const cx = w / 2, cy = h / 2, radius = Math.min(w, h) / 2 - 2;
+
+            ctx.clearRect(0, 0, w, h);
+
             // Grid
             ctx.strokeStyle = 'rgba(0, 255, 157, 0.2)';
             ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.stroke();
-            ctx.beginPath(); ctx.arc(cx, cy, radius*0.5, 0, Math.PI*2); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(cx, cy-radius); ctx.lineTo(cx, cy+radius); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(cx-radius, cy); ctx.lineTo(cx+radius, cy); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, radius * 0.5, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy); ctx.stroke();
 
             // Sweep
             radarAngle = (time / 2000 * Math.PI * 2) % (Math.PI * 2);
-            const grad = ctx.createConicGradient(radarAngle - Math.PI/2, cx, cy);
+            const grad = ctx.createConicGradient(radarAngle - Math.PI / 2, cx, cy);
             grad.addColorStop(0, 'rgba(0, 255, 157, 0)');
             grad.addColorStop(0.8, 'rgba(0, 255, 157, 0.1)');
             grad.addColorStop(1, 'rgba(0, 255, 157, 0.4)');
             ctx.fillStyle = grad;
-            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.fill();
         }
 
         function sendCmd(cmd) {
             highlightKey(cmd);
-            
+
             // Map commands to differential drive PWM (-255 to 255)
             let left = 0, right = 0;
-            
-            switch(cmd) {
+
+            switch (cmd) {
                 case 'F': // Forward
                     left = 200; right = 200;
                     break;
@@ -628,7 +833,7 @@
                 default:
                     return; // Ignore unknown commands
             }
-            
+
             // Send through your backend API
             fetch('/api/control', {
                 method: 'POST',
@@ -638,9 +843,9 @@
         }
 
         function highlightKey(cmd) {
-            const map = {'F':'btn-w', 'L':'btn-a', 'S':'btn-s', 'R':'btn-d', 'B':'btn-x'};
+            const map = { 'F': 'btn-w', 'L': 'btn-a', 'S': 'btn-s', 'R': 'btn-d', 'B': 'btn-x' };
             const id = map[cmd];
-            if(id) {
+            if (id) {
                 const btn = document.getElementById(id);
                 btn.classList.add('btn-active');
                 setTimeout(() => btn.classList.remove('btn-active'), 150);
@@ -649,13 +854,13 @@
 
         function updateXboxVisual(x, y, pressed) {
             const stick = document.getElementById('xbox-stick');
-            if(!stick) return;
+            if (!stick) return;
             const clamp = (v) => Math.max(-1, Math.min(1, v));
             const offset = 12;
             const dx = clamp(x) * offset;
             const dy = -clamp(y) * offset;
             stick.style.transform = `translate(${dx}px, ${dy}px)`;
-            if(pressed) stick.style.boxShadow = "0 0 15px #fff";
+            if (pressed) stick.style.boxShadow = "0 0 15px #fff";
             else stick.style.boxShadow = "inset 0 0 12px rgba(0,255,157,0.35)";
         }
 
@@ -683,13 +888,13 @@
                 const data = await res.json();
                 let msg = "=== NETWORK INTERFACES ===\n\n";
 
-                if(data.camera_net) {
+                if (data.camera_net) {
                     msg += `[CAMERA NET] (ESP32)\nName: ${data.camera_net.name}\nIP: ${data.camera_net.ip}\nMAC: ${data.camera_net.mac}\n\n`;
                 } else {
                     msg += `[CAMERA NET] Not Detected\n\n`;
                 }
 
-                if(data.internet_net) {
+                if (data.internet_net) {
                     msg += `[INTERNET/CAR NET]\nName: ${data.internet_net.name}\nIP: ${data.internet_net.ip}\nMAC: ${data.internet_net.mac}\n\n`;
                 } else {
                     msg += `[INTERNET/CAR NET] Not Detected\n\n`;
@@ -705,7 +910,7 @@
 
                 alert(msg);
                 log("Network Info retrieved.");
-            } catch(e) {
+            } catch (e) {
                 alert("Failed to fetch network info");
             }
         }
@@ -716,23 +921,23 @@
         async function fetchCameraSettings() {
             try {
                 const res = await fetch('/api/camera_settings');
-                if(!res.ok) return;
+                if (!res.ok) return;
                 const data = await res.json();
 
                 // Update UI elements
                 const updateVal = (id, val) => {
                     const el = document.getElementById(id);
-                    if(el) {
+                    if (el) {
                         el.value = val;
                         // Trigger onchange manually if needed, or just update UI
                         const display = document.getElementById('val-' + id.replace('cfg-', ''));
-                        if(display) display.innerText = val;
+                        if (display) display.innerText = val;
                     }
                 };
 
                 // Selects & Sliders
                 ['framesize', 'special_effect', 'wb_mode', 'quality', 'brightness', 'contrast', 'saturation'].forEach(key => {
-                    if(data[key] !== undefined) {
+                    if (data[key] !== undefined) {
                         updateVal('cfg-' + key, data[key]);
                         camState[key] = data[key];
                     }
@@ -740,19 +945,19 @@
 
                 // Toggles
                 ['awb', 'aec', 'aec2', 'agc', 'bpc', 'wpc', 'raw_gma', 'lenc', 'hmirror', 'vflip', 'dcw', 'colorbar'].forEach(key => {
-                    if(data[key] !== undefined) {
+                    if (data[key] !== undefined) {
                         camState[key] = data[key];
                         const btn = document.getElementById('btn-' + key);
-                        if(btn) {
-                             if(data[key] == 1) btn.classList.add('btn-active');
-                             else btn.classList.remove('btn-active');
+                        if (btn) {
+                            if (data[key] == 1) btn.classList.add('btn-active');
+                            else btn.classList.remove('btn-active');
                         }
                     }
                 });
 
                 log("Camera settings synced.");
 
-            } catch(e) {
+            } catch (e) {
                 log("Failed to sync camera settings.");
             }
         }
@@ -761,15 +966,15 @@
             // Update local state and UI display immediately
             camState[varName] = val;
             const display = document.getElementById('val-' + varName);
-            if(display) display.innerText = val;
+            if (display) display.innerText = val;
 
             try {
                 await fetch('/api/camera_settings', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({var: varName, val: Number(val)})
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ var: varName, val: Number(val) })
                 });
-            } catch(e) {
+            } catch (e) {
                 log(`Failed to set ${varName}`);
             }
         }
@@ -780,8 +985,8 @@
 
             // Toggle visual state
             const btn = document.getElementById('btn-' + varName);
-            if(btn) {
-                if(newVal) btn.classList.add('btn-active');
+            if (btn) {
+                if (newVal) btn.classList.add('btn-active');
                 else btn.classList.remove('btn-active');
             }
 
@@ -792,18 +997,18 @@
             currentView = view;
             document.getElementById('main-view').style.display = view === 'main' ? 'grid' : 'none';
             document.getElementById('settings-view').style.display = view === 'settings' ? 'block' : 'none';
-            
+
             document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
             document.getElementById('nav-' + view).classList.add('active');
 
-            if(view === 'settings') {
+            if (view === 'settings') {
                 fetchCameraSettings();
             }
         }
-        
+
         function log(msg) {
             const box = document.getElementById('log-box');
-            if(box) {
+            if (box) {
                 const time = new Date().toLocaleTimeString('en-GB');
                 const d = document.createElement('div');
                 d.innerHTML = `<span class="text-gray-600">[${time}]</span> ${msg}`;
@@ -814,16 +1019,16 @@
 
         // Keyboard
         document.addEventListener('keydown', (e) => {
-            if(e.repeat) return;
+            if (e.repeat) return;
             const k = e.key.toUpperCase();
             const map = {
-                'W':'F', 'A':'L', 'S':'S', 'D':'R', 'X':'B', ' ':'S', 
-                'Q':'Q', 'E':'E', 'Z':'Z', 'C':'C' 
+                'W': 'F', 'A': 'L', 'S': 'S', 'D': 'R', 'X': 'B', ' ': 'S',
+                'Q': 'Q', 'E': 'E', 'Z': 'Z', 'C': 'C'
             };
-            if(map[k]) sendCmd(map[k]);
+            if (map[k]) sendCmd(map[k]);
         });
         document.addEventListener('keyup', (e) => {
-            if(['W','A','D','X','Q','E','Z','C'].includes(e.key.toUpperCase())) sendCmd('S');
+            if (['W', 'A', 'D', 'X', 'Q', 'E', 'Z', 'C'].includes(e.key.toUpperCase())) sendCmd('S');
         });
 
         setInterval(() => {
@@ -831,4 +1036,5 @@
         }, 1000);
     </script>
 </body>
+
 </html>
