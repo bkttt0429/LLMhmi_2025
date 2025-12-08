@@ -23,6 +23,19 @@ CMD_SET_MODEL = "SET_MODEL"
 CMD_EXIT = "EXIT"
 
 
+def start_esp32_stream(esp32_ip):
+    """Send command to ESP32 to start the stream server."""
+    import requests
+    try:
+        url = f"http://{esp32_ip}/control"
+        params = {'var': 'stream', 'val': '1'}
+        resp = requests.get(url, params=params, timeout=3)
+        if resp.status_code == 200:
+            return True
+    except Exception as e:
+        pass
+    return False
+
 def query_esp32_status(ip): 
     """Query ESP32-S3 Real-time Status""" 
     try: 
@@ -80,15 +93,40 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
     last_stats_time = time.time()
     
     if video_url:
-        try:
-            # VidGear options for optimal performance
-            options = {
-                "THREADED_QUEUE_MODE": True,  # Enable threaded queue mode for better performance
-            }
-            stream = CamGear(source=video_url, logging=True, **options).start()
-            log(f"VidGear stream started: {video_url}")
-        except Exception as e:
-            log(f"Failed to start VidGear stream: {e}")
+        # [NOTE] ESP32 stream auto-activation is disabled because /control endpoint returns 500 error
+        # User must manually start stream from ESP32 web interface (http://10.243.115.133/)
+        # log(f"Activating ESP32 stream at {esp32_ip}...")
+        # if start_esp32_stream(esp32_ip):
+        #     log("✅ ESP32 stream activated")
+        #     time.sleep(1)
+        # else:
+        #     log("⚠️ Failed to activate ESP32 stream, trying anyway...")
+        
+        # VidGear options for optimal performance
+        options = {
+            "THREADED_QUEUE_MODE": True,  # Enable threaded queue mode for better performance
+        }
+        
+        # Try connecting with retry logic
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                log(f"Connecting to stream (attempt {attempt + 1}/{max_retries}): {video_url}")
+                stream = CamGear(source=video_url, logging=True, **options).start()
+                log(f"✅ VidGear stream connected: {video_url}")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    log(f"⚠️ Connection failed (attempt {attempt + 1}): {e}")
+                    log(f"Retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    log(f"❌ Failed to connect after {max_retries} attempts: {e}")
+                    log(f"💡 Please start stream manually from ESP32 web interface: http://{esp32_ip}/")
+                    stream = None
 
     last_status_check = 0
     

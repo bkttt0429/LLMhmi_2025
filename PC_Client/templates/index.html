@@ -55,14 +55,15 @@
             <div
                 class="flex-1 bg-black relative overflow-hidden flex items-center justify-center border border-gray-800 group">
                 <div class="scan-line"></div>
-                <img src="/video_feed" alt="Live video feed from ESP32-S3 camera" class="w-full h-full object-contain"
-                    onerror="this.style.display='none'; document.getElementById('no-sig').style.display='flex'">
+                <img id="video-stream" src="/video_feed" alt="Live video feed from ESP32-S3 camera"
+                    class="w-full h-full object-contain">
 
                 <div id="no-sig" class="hidden absolute inset-0 flex-col items-center justify-center bg-black/80 z-20">
                     <div
                         class="text-2xl sm:text-4xl text-red-500 font-bold border-4 border-red-500 p-4 sm:p-6 animate-pulse">
                         NO SIGNAL</div>
                     <div class="text-red-400 mt-2 text-xs sm:text-sm">CHECK ESP32-S3 (CAMERA)</div>
+                    <div class="text-gray-500 mt-2 text-[10px]">Retrying connection...</div>
                 </div>
 
                 <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
@@ -426,7 +427,38 @@
 
             // Initialize speed limiter
             initSpeedLimiter();
+
+            // Initialize video retry logic
+            initVideoRetry();
         };
+
+        function initVideoRetry() {
+            const img = document.getElementById('video-stream');
+            const noSig = document.getElementById('no-sig');
+            let retryTimeout = null;
+
+            if (!img || !noSig) return;
+
+            img.onerror = () => {
+                console.log("[VIDEO] Stream error/disconnect. Retrying in 2s...");
+                img.style.display = 'none';
+                noSig.style.display = 'flex';
+
+                if (retryTimeout) clearTimeout(retryTimeout);
+
+                retryTimeout = setTimeout(() => {
+                    // Cache bust to force reconnect
+                    img.src = "/video_feed?t=" + new Date().getTime();
+                    // Don't show immediately, wait for load
+                }, 2000);
+            };
+
+            img.onload = () => {
+                console.log("[VIDEO] Stream connected");
+                img.style.display = 'block';
+                noSig.style.display = 'none';
+            };
+        }
 
         // === Speed Limiter Initialization ===
         function initSpeedLimiter() {
@@ -641,22 +673,27 @@
             const carIp = document.getElementById('settings-car-ip').value;
             const camIp = document.getElementById('settings-cam-ip').value;
 
-            // 分別發送設定
-            if (carIp) {
-                fetch('/api/set_ip', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ car_ip: carIp })
-                });
-            }
-            if (camIp) {
-                fetch('/api/set_ip', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ cam_ip: camIp })
-                });
-            }
-            log(`Settings applied. CAR:${carIp}, CAM:${camIp}`);
+            // [DISABLED] /api/set_ip endpoint doesn't exist in web_server.py
+            // IP configuration is auto-detected from config.py
+            // To change IPs, edit config.py and restart the server
+
+            // if (carIp) {
+            //     fetch('/api/set_ip', {
+            //         method: 'POST',
+            //         headers: { 'Content-Type': 'application/json' },
+            //         body: JSON.stringify({ car_ip: carIp })
+            //     });
+            // }
+            // if (camIp) {
+            //     fetch('/api/set_ip', {
+            //         method: 'POST',
+            //         headers: { 'Content-Type': 'application/json' },
+            //         body: JSON.stringify({ cam_ip: camIp })
+            //     });
+            // }
+
+            log(`Settings view - Current CAR: ${carIp}, CAM: ${camIp} (read-only)`);
+            log(`To change IPs, edit config.py and restart server`);
             switchView('main');
         }
 
@@ -824,7 +861,13 @@
             if (!canvas) return;
             const ctx = canvas.getContext('2d');
             const w = canvas.width, h = canvas.height;
-            const cx = w / 2, cy = h / 2, radius = Math.min(w, h) / 2 - 2;
+            const cx = w / 2, cy = h / 2;
+            let radius = Math.min(w, h) / 2 - 2;
+
+            // Safety check: prevent negative radius
+            if (radius < 5) {
+                radius = Math.max(5, Math.min(w, h) / 2);
+            }
 
             ctx.clearRect(0, 0, w, h);
 

@@ -243,8 +243,10 @@ class SystemState:
             self.camera_ip = "192.168.4.1"
             print(f"[INIT] Auto-selected Camera IP: {self.camera_ip} (via {self.net_info['camera_net']['name']})")
         else:
-            self.camera_ip = getattr(config, "DEFAULT_STREAM_IP", "") or \
-                             (cached_bridge if cached_bridge else "")
+            # Use config defaults when no camera_net detected
+            self.camera_ip = cached_bridge or getattr(config, "DEFAULT_STREAM_IP", "") or getattr(config, "DEFAULT_CAR_IP", "")
+            if self.camera_ip:
+                print(f"[INIT] Using configured Camera IP: {self.camera_ip}")
 
         self.car_ip = getattr(config, "DEFAULT_CAR_IP", "boebot.local")
         self.current_ip = self.car_ip
@@ -509,13 +511,21 @@ def video_manager_thread():
 
 def frame_receiver_thread():
     """Reads JPEG bytes from the video process queue."""
+    log_counter = 0
+    print("[DEBUG] Frame Receiver Thread Started")
     while state.is_running:
         try:
             frame_bytes = video_frame_queue.get(timeout=0.1)
             with state.frame_lock:
                 state.frame_buffer = frame_bytes
                 state.stream_connected = True
+            
+            log_counter += 1
+            if log_counter % 50 == 0:
+                pass # print(f"[DEBUG] Frame Receiver: Received {log_counter} frames")
+
         except queue.Empty:
+            # print("[DEBUG] Frame Receiver: Queue Empty")
             pass
         except Exception as e:
             print(f"Frame Receive Error: {e}")
@@ -523,6 +533,8 @@ def frame_receiver_thread():
 def generate_frames():
     """Flask Stream Generator (reads raw JPEG bytes from buffer)"""
     no_signal_frame_bytes = None
+    frame_counter = 0
+    print("[DEBUG] generate_frames generator started")
     
     while state.is_running:
         frame_bytes = None
@@ -539,6 +551,9 @@ def generate_frames():
             frame_bytes = no_signal_frame_bytes
         
         if frame_bytes:
+            frame_counter += 1
+            if frame_counter % 50 == 0:
+                pass # print(f"[DEBUG] generate_frames yielding frame {frame_counter}")
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         
@@ -749,6 +764,10 @@ def index():
 def video_feed():
     return Response(generate_frames(), 
                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204  # No Content
 
 @socketio.on('connect')
 def handle_connect():
@@ -961,10 +980,28 @@ if __name__ == '__main__':
     print("=" * 60)
 
     try:
-        # 開發模式：啟用 debug 以自動重載檔案變更
-        # ⚠️ 生產環境請改為 debug=False
-        socketio.run(app, host=config.WEB_HOST, port=config.WEB_PORT, debug=True, allow_unsafe_werkzeug=True)
+        # [FIX] Disable debug mode to prevent WinError 10038 socket errors
+        # The reloader causes socket issues when combined with multiprocessing
+        # For development, manual restart is acceptable
+        socketio.run(
+            app, 
+            host=config.WEB_HOST, 
+            port=config.WEB_PORT, 
+            debug=False,  # Disabled to prevent socket errors
+            use_reloader=False,  # Prevent file watching socket issues
+            allow_unsafe_werkzeug=True
+        )
     except KeyboardInterrupt:
+        print("\n[INIT] 🛑 Shutting down gracefully...")
+        state.is_running = False
         if p and video_cmd_queue:
             video_cmd_queue.put((CMD_EXIT, None))
-            p.join()
+            p.join(timeout=3)
+        print("[INIT] ✅ Shutdown complete")
+    except OSError as e:
+        # Catch socket errors gracefully
+        print(f"\n[INIT] ⚠️ Socket error during shutdown: {e}")
+        print("[INIT] This is usually harmless. Server stopped.")
+        state.is_running = False
+        if p and video_cmd_queue:
+            video_cmd_queue.put((CMD_EXIT, None))
