@@ -84,7 +84,6 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
             # VidGear options for optimal performance
             options = {
                 "THREADED_QUEUE_MODE": True,  # Enable threaded queue mode for better performance
-                "STREAM_RESOLUTION": "480p"    # Match ESP32 default resolution
             }
             stream = CamGear(source=video_url, logging=True, **options).start()
             log(f"VidGear stream started: {video_url}")

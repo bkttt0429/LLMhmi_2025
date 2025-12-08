@@ -4,7 +4,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Force browser to reload JS/CSS (no cache) -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -55,7 +55,7 @@
             <div
                 class="flex-1 bg-black relative overflow-hidden flex items-center justify-center border border-gray-800 group">
                 <div class="scan-line"></div>
-                <img src="/video_feed" class="w-full h-full object-contain"
+                <img src="/video_feed" alt="Live video feed from ESP32-S3 camera" class="w-full h-full object-contain"
                     onerror="this.style.display='none'; document.getElementById('no-sig').style.display='flex'">
 
                 <div id="no-sig" class="hidden absolute inset-0 flex-col items-center justify-center bg-black/80 z-20">
@@ -196,7 +196,7 @@
     </div>
 
     <!-- Settings View -->
-    <div id="settings-view" class="flex-1 overflow-auto p-2 sm:p-4 pb-20" style="display:none;">
+    <div id="settings-view" class="flex-1 overflow-auto p-2 sm:p-4 pb-20 view-hidden">
         <div class="max-w-3xl mx-auto space-y-4">
 
             <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
@@ -243,7 +243,7 @@
                     <div class="flex flex-col gap-2 p-2 border border-green-900/30 rounded">
                         <label class="text-xs text-green-400 font-bold">🧠 AI Model Selection</label>
                         <div class="flex gap-2">
-                            <select id="model-selector"
+                            <select id="model-selector" title="Select AI model for object detection"
                                 class="bg-black text-green-400 border border-green-800 rounded px-2 py-1 text-xs flex-1">
                                 <option value="yolov13l.pt" selected>YOLOv13-Large (Default)</option>
                                 <option value="yolov8n.pt">YOLOv8-Nano (Fast)</option>
@@ -266,7 +266,8 @@
                     <!-- Selectors -->
                     <div class="flex flex-col gap-1">
                         <label class="text-gray-400">Resolution</label>
-                        <select id="cfg-framesize" onchange="updateCameraSetting('framesize', this.value)"
+                        <select id="cfg-framesize" title="Camera resolution setting"
+                            onchange="updateCameraSetting('framesize', this.value)"
                             class="bg-black border border-green-900 text-green-400 p-1 rounded">
                             <option value="11">VGA (640x480)</option>
                             <option value="10">HVGA (480x320)</option>
@@ -279,7 +280,8 @@
 
                     <div class="flex flex-col gap-1">
                         <label class="text-gray-400">Special Effect</label>
-                        <select id="cfg-special_effect" onchange="updateCameraSetting('special_effect', this.value)"
+                        <select id="cfg-special_effect" title="Camera special effect filter"
+                            onchange="updateCameraSetting('special_effect', this.value)"
                             class="bg-black border border-green-900 text-green-400 p-1 rounded">
                             <option value="0">No Effect</option>
                             <option value="1">Negative</option>
@@ -293,7 +295,8 @@
 
                     <div class="flex flex-col gap-1">
                         <label class="text-gray-400">WB Mode</label>
-                        <select id="cfg-wb_mode" onchange="updateCameraSetting('wb_mode', this.value)"
+                        <select id="cfg-wb_mode" title="Camera white balance mode"
+                            onchange="updateCameraSetting('wb_mode', this.value)"
                             class="bg-black border border-green-900 text-green-400 p-1 rounded">
                             <option value="0">Auto</option>
                             <option value="1">Sunny</option>
@@ -309,24 +312,30 @@
                             <div class="flex justify-between"><label>Quality (10-63)</label><span id="val-quality"
                                     class="text-gray-500">--</span></div>
                             <input type="range" id="cfg-quality" min="10" max="63" step="1"
+                                title="Camera image quality (10-63)" aria-label="Quality slider from 10 to 63"
                                 onchange="updateCameraSetting('quality', this.value)" class="accent-green-500">
                         </div>
                         <div class="flex flex-col gap-1">
                             <div class="flex justify-between"><label>Brightness (-2 to 2)</label><span
                                     id="val-brightness" class="text-gray-500">--</span></div>
                             <input type="range" id="cfg-brightness" min="-2" max="2" step="1"
+                                title="Camera brightness adjustment (-2 to 2)"
+                                aria-label="Brightness slider from -2 to 2"
                                 onchange="updateCameraSetting('brightness', this.value)" class="accent-green-500">
                         </div>
                         <div class="flex flex-col gap-1">
                             <div class="flex justify-between"><label>Contrast (-2 to 2)</label><span id="val-contrast"
                                     class="text-gray-500">--</span></div>
                             <input type="range" id="cfg-contrast" min="-2" max="2" step="1"
+                                title="Camera contrast adjustment (-2 to 2)" aria-label="Contrast slider from -2 to 2"
                                 onchange="updateCameraSetting('contrast', this.value)" class="accent-green-500">
                         </div>
                         <div class="flex flex-col gap-1">
                             <div class="flex justify-between"><label>Saturation (-2 to 2)</label><span
                                     id="val-saturation" class="text-gray-500">--</span></div>
                             <input type="range" id="cfg-saturation" min="-2" max="2" step="1"
+                                title="Camera saturation adjustment (-2 to 2)"
+                                aria-label="Saturation slider from -2 to 2"
                                 onchange="updateCameraSetting('saturation', this.value)" class="accent-green-500">
                         </div>
                     </div>
@@ -565,7 +574,10 @@
                     highlightKey(data.cmd);
                 }
                 const icon = document.getElementById('gamepad-status');
-                if (icon) icon.style.opacity = '1';
+                if (icon) {
+                    icon.classList.remove('gamepad-inactive');
+                    icon.classList.add('gamepad-active');
+                }
             });
         }
 
@@ -657,7 +669,10 @@
             // Gamepad heartbeat check
             if (Date.now() - lastXboxUpdate > 2000) {
                 const icon = document.getElementById('gamepad-status');
-                if (icon) icon.style.opacity = '0.3';
+                if (icon) {
+                    icon.classList.remove('gamepad-active');
+                    icon.classList.add('gamepad-inactive');
+                }
             }
 
             updateJoystickLoop();
@@ -679,7 +694,10 @@
 
             // Mark as active
             const icon = document.getElementById('gamepad-status');
-            if (icon) icon.style.opacity = '1';
+            if (icon) {
+                icon.classList.remove('gamepad-inactive');
+                icon.classList.add('gamepad-active');
+            }
             lastXboxUpdate = Date.now();
 
 
@@ -906,14 +924,17 @@
             const dx = clamp(x) * offset;
             const dy = clamp(y) * offset; // Keep Y as-is for visual representation
 
+            // Note: transform needs to stay as inline style for dynamic positioning
             stick.style.transform = `translate(${dx}px, ${dy}px)`;
 
-            // Enhanced visual feedback
+            // Enhanced visual feedback with CSS classes
             if (pressed) {
-                stick.style.boxShadow = "0 0 20px #fff, 0 0 10px #00ff9d";
+                stick.classList.add('xbox-stick-pressed');
+                stick.classList.remove('xbox-stick-normal');
                 stick.style.transform = `translate(${dx}px, ${dy}px) scale(0.9)`;
             } else {
-                stick.style.boxShadow = "inset 0 0 12px rgba(0,255,157,0.35)";
+                stick.classList.remove('xbox-stick-pressed');
+                stick.classList.add('xbox-stick-normal');
             }
 
             // Update coordinates display
@@ -929,11 +950,13 @@
             if (pressed) {
                 indicator.classList.remove('bg-gray-700');
                 indicator.classList.add('bg-green-400');
-                indicator.style.boxShadow = '0 0 8px #00ff9d';
+                indicator.classList.add('indicator-active');
+                indicator.classList.remove('indicator-inactive');
             } else {
                 indicator.classList.remove('bg-green-400');
                 indicator.classList.add('bg-gray-700');
-                indicator.style.boxShadow = 'none';
+                indicator.classList.remove('indicator-active');
+                indicator.classList.add('indicator-inactive');
             }
         }
 
@@ -1088,8 +1111,21 @@
 
         function switchView(view) {
             currentView = view;
-            document.getElementById('main-view').style.display = view === 'main' ? 'grid' : 'none';
-            document.getElementById('settings-view').style.display = view === 'settings' ? 'block' : 'none';
+            const mainView = document.getElementById('main-view');
+            const settingsView = document.getElementById('settings-view');
+
+            // Toggle view visibility with CSS classes
+            if (view === 'main') {
+                mainView.classList.remove('view-hidden');
+                mainView.classList.add('view-grid');
+                settingsView.classList.add('view-hidden');
+                settingsView.classList.remove('view-block');
+            } else {
+                mainView.classList.add('view-hidden');
+                mainView.classList.remove('view-grid');
+                settingsView.classList.remove('view-hidden');
+                settingsView.classList.add('view-block');
+            }
 
             document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
             document.getElementById('nav-' + view).classList.add('active');
