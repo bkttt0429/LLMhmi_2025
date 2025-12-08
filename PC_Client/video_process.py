@@ -91,6 +91,9 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
     stream = None
     frame_count = 0
     last_stats_time = time.time()
+    ai_frame_skip_counter = 0  # [OPTIMIZATION] Counter for AI frame skipping
+    AI_PROCESS_EVERY_N_FRAMES = 5  # Process AI on 1 out of every 5 frames
+    last_ai_result = None  # Cache last AI annotation
     
     if video_url:
         # [NOTE] ESP32 stream auto-activation is disabled because /control endpoint returns 500 error
@@ -105,6 +108,7 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
         # VidGear options for optimal performance
         options = {
             "THREADED_QUEUE_MODE": True,  # Enable threaded queue mode for better performance
+            "CAP_PROP_BUFFERSIZE": 1,  # Minimize buffer to reduce latency
         }
         
         # Try connecting with retry logic
@@ -167,6 +171,10 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
                                 detector = None
                         if detector:
                             detector.enabled = enable_ai
+                            if enable_ai:
+                                log(f"✅ AI enabled (processing 1/{AI_PROCESS_EVERY_N_FRAMES} frames)")
+                            else:
+                                log("AI disabled")
 
                     elif cmd == CMD_SET_MODEL:
                         # data should be {'model': 'path/to/model.pt'}
@@ -227,15 +235,24 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
             if frame is not None:
                 final_frame = frame
                   
-                # 4. AI Processing (May take time, but reader thread keeps buffer empty)
+                # 4. AI Processing (Optimized with frame skipping)
                 if detector and detector.enabled: 
-                    try: 
-                        # Note: detector.detect() is synchronous and might slow down THIS loop,
-                        # but the reader thread continues to drain the socket, preventing "lag/corruption".
-                        annotated_frame, detections, control = detector.detect(frame) 
-                        final_frame = annotated_frame 
-                    except Exception as e: 
-                        log(f"AI Error: {e}") 
+                    ai_frame_skip_counter += 1
+                    
+                    # Only process AI on every Nth frame
+                    if ai_frame_skip_counter >= AI_PROCESS_EVERY_N_FRAMES:
+                        ai_frame_skip_counter = 0
+                        try: 
+                            # Process AI detection
+                            annotated_frame, detections, control = detector.detect(frame) 
+                            last_ai_result = annotated_frame
+                            final_frame = annotated_frame 
+                        except Exception as e: 
+                            log(f"AI Error: {e}") 
+                    else:
+                        # Use cached AI result for frames we skip
+                        if last_ai_result is not None:
+                            final_frame = last_ai_result
                   
                 # 5. Send to Web (Queue)
                 try: 
