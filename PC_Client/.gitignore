@@ -1,0 +1,23 @@
+# Node.js
+node_modules/
+package-lock.json
+
+# Compiled CSS
+static/css/output.css
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

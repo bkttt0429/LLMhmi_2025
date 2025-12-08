@@ -1,0 +1,17 @@
+{
+    "name": "pc-client-frontend",
+    "version": "1.0.0",
+    "description": "Tailwind CSS build for SHIM Interface",
+    "scripts": {
+        "build:css": "npx tailwindcss -i ./static/css/input.css -o ./static/css/output.css --minify",
+        "watch:css": "npx tailwindcss -i ./static/css/input.css -o ./static/css/output.css --watch"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "devDependencies": {
+        "autoprefixer": "^10.4.16",
+        "postcss": "^8.4.32",
+        "tailwindcss": "^3.4.0"
+    }
+}

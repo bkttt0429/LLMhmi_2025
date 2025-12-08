@@ -39,7 +39,8 @@ from network_utils import SourceAddressAdapter
 
 # 初始化 Flask 和 SocketIO
 template_dir = os.path.join(BASE_DIR, 'templates')
-app = Flask(__name__, template_folder=template_dir, static_folder=template_dir)
+static_dir = os.path.join(BASE_DIR, 'static')
+app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
 # CRITICAL: Disable template caching to force browser reload
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 app.config['TEMPLATES_AUTO_RELOAD'] = True

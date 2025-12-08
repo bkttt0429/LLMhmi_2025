@@ -1,0 +1,310 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+/* Base Styles */
+body {
+    background-color: #050505;
+    color: #00ff9d;
+    font-family: 'Share Tech Mono', monospace;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+}
+
+/* --- Cyberpunk Visuals --- */
+.cyber-border {
+    border: 1px solid #333;
+    box-shadow: 0 0 10px rgba(0, 255, 157, 0.1);
+    background: rgba(10, 20, 20, 0.85);
+    backdrop-filter: blur(4px);
+}
+
+.scan-line {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(to bottom, transparent 50%, rgba(0, 0, 0, 0.3) 50%);
+    background-size: 100% 4px;
+    pointer-events: none;
+    position: absolute;
+    z-index: 10;
+}
+
+/* --- Buttons --- */
+.btn-cy {
+    border: 1px solid #00ff9d;
+    color: #00ff9d;
+    background: rgba(0, 20, 10, 0.6);
+    transition: all 0.1s;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+.btn-cy:hover {
+    background: #00ff9d;
+    color: #000;
+    box-shadow: 0 0 15px #00ff9d;
+}
+
+.btn-cy:active {
+    transform: scale(0.95);
+}
+
+.btn-active {
+    background: #00ff9d;
+    color: #000;
+    box-shadow: 0 0 15px #00ff9d;
+}
+
+/* Nav Bar Styles */
+.nav-bar {
+    position: fixed;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    display: flex;
+    gap: 6px;
+    padding: 8px 12px;
+    background: rgba(10, 20, 20, 0.95);
+    border: 1px solid #00ff9d;
+    border-radius: 50px;
+    box-shadow: 0 0 20px rgba(0, 255, 157, 0.3);
+    backdrop-filter: blur(10px);
+    flex-wrap: wrap;
+    max-width: 95vw;
+}
+
+.nav-btn {
+    padding: 8px 12px;
+    border: 1px solid #00ff9d;
+    background: rgba(0, 20, 10, 0.6);
+    color: #00ff9d;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+@media (min-width: 640px) {
+    .nav-bar {
+        gap: 10px;
+        padding: 10px 20px;
+    }
+
+    .nav-btn {
+        padding: 10px 20px;
+        font-size: 0.9rem;
+        gap: 8px;
+    }
+}
+
+.nav-btn:hover {
+    background: #00ff9d;
+    color: #000;
+    box-shadow: 0 0 15px #00ff9d;
+}
+
+.nav-btn.active {
+    background: #00ff9d;
+    color: #000;
+    box-shadow: 0 0 20px #00ff9d;
+}
+
+/* Xbox Visualizer */
+.xbox-card {
+    background: radial-gradient(circle at 20% 20%, rgba(0, 255, 157, 0.06), transparent 35%),
+        radial-gradient(circle at 80% 0%, rgba(0, 255, 255, 0.06), transparent 30%),
+        rgba(5, 15, 10, 0.85);
+    border: 1px solid rgba(0, 255, 157, 0.2);
+    box-shadow: 0 0 25px rgba(0, 255, 157, 0.08);
+}
+
+.xbox-stick {
+    width: 64px;
+    height: 64px;
+    border: 1px solid #0f766e;
+    border-radius: 50%;
+    background: radial-gradient(circle, #0b1f1a 0%, #04100c 65%);
+    box-shadow: inset 0 0 12px rgba(0, 255, 157, 0.35);
+    transition: transform 0.1s ease-out;
+}
+
+.xbox-stick::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 14px;
+    height: 14px;
+    background: #00ff9d;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 8px rgba(0, 255, 157, 0.6);
+}
+
+.xbox-pulse {
+    animation: pulse 1.2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 0.35;
+    }
+
+    50% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0.35;
+    }
+}
+
+/* === Module System (Draggable/Resizable) === */
+.module-container {
+    position: absolute;
+    min-width: 200px;
+    min-height: 150px;
+    background: rgba(10, 20, 20, 0.95);
+    border: 1px solid #00ff9d;
+    border-radius: 8px;
+    box-shadow: 0 0 20px rgba(0, 255, 157, 0.15);
+    backdrop-filter: blur(10px);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+    transition: box-shadow 0.2s;
+}
+
+.module-container:hover {
+    box-shadow: 0 0 30px rgba(0, 255, 157, 0.3);
+}
+
+.module-container.dragging {
+    opacity: 0.8;
+    cursor: move !important;
+    z-index: 1000;
+}
+
+.module-header {
+    padding: 8px 12px;
+    background: linear-gradient(to right, rgba(0, 255, 157, 0.1), transparent);
+    border-bottom: 1px solid rgba(0, 255, 157, 0.3);
+    cursor: move;
+    user-select: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-radius: 8px 8px 0 0;
+}
+
+.module-header:hover {
+    background: linear-gradient(to right, rgba(0, 255, 157, 0.2), transparent);
+}
+
+.module-title {
+    font-size: 11px;
+    font-weight: bold;
+    color: #00ff9d;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.module-body {
+    flex: 1;
+    overflow: auto;
+    padding: 12px;
+}
+
+.module-resize-handle {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 20px;
+    height: 20px;
+    cursor: nwse-resize;
+    z-index: 100;
+}
+
+.module-resize-handle::after {
+    content: '';
+    position: absolute;
+    bottom: 3px;
+    right: 3px;
+    width: 12px;
+    height: 12px;
+    border-right: 2px solid #00ff9d;
+    border-bottom: 2px solid #00ff9d;
+    opacity: 0.5;
+}
+
+.module-resize-handle:hover::after {
+    opacity: 1;
+}
+
+/* Speed Limiter Slider */
+.speed-limiter-container {
+    padding: 12px;
+    background: rgba(0, 20, 10, 0.4);
+    border: 1px solid rgba(0, 255, 157, 0.2);
+    border-radius: 6px;
+    margin-top: 8px;
+}
+
+.speed-slider {
+    width: 100%;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: linear-gradient(to right, #ff4444 0%, #ffaa00 50%, #00ff9d 100%);
+    outline: none;
+    border-radius: 3px;
+    opacity: 0.8;
+    transition: opacity 0.2s;
+}
+
+.speed-slider:hover {
+    opacity: 1;
+}
+
+.speed-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: #00ff9d;
+    border: 2px solid #0a1410;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(0, 255, 157, 0.6);
+}
+
+.speed-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: #00ff9d;
+    border: 2px solid #0a1410;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(0, 255, 157, 0.6);
+}
+
+.speed-value {
+    display: inline-block;
+    min-width: 45px;
+    text-align: right;
+    font-weight: bold;
+    color: #00ff9d;
+    font-family: 'Share Tech Mono', monospace;
+}
