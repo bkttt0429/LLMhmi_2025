@@ -1,19 +1,19 @@
 # ============================================ 
-# PC_Client/video_process.py - VidGear Optimized
-# Uses VidGear CamGear for high-performance streaming
+# PC_Client/video_process.py - MJPEG Optimized
+# Uses custom MJPEGStreamReader for ESP32-CAM streams
 # ============================================ 
 
 import cv2 
 import time 
-from vidgear.gears import CamGear
 import numpy as np 
 from queue import Empty 
 import sys
 import os
 import threading
 
-# Import the SourceAddressAdapter from network_utils (kept for control requests)
+# Import custom MJPEG reader and network utils
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from mjpeg_reader import MJPEGStreamReader
 from network_utils import SourceAddressAdapter
 
 # Commands
@@ -69,7 +69,20 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
         try: log_queue.put(f"[VideoProcess] {msg}")
         except: pass
  
-    log("Started (VidGear Optimized)")
+    # === CRITICAL: 在 multiprocessing 子進程中初始化 CUDA ===
+    # Windows 使用 spawn 模式，子進程需要重新初始化 CUDA
+    import torch
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.init()
+            torch.cuda.set_device(0)
+            log(f"✅ CUDA initialized in subprocess (Device: {torch.cuda.get_device_name(0)})")
+        except Exception as e:
+            log(f"⚠️ CUDA init failed in subprocess: {e}")
+    else:
+        log("⚠️ CUDA not available in subprocess")
+    
+    log("Started (MJPEG Optimized)")
      
     video_url = initial_config.get('url', '')
     ai_enabled = initial_config.get('ai_enabled', False) 
@@ -87,50 +100,32 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
         except Exception as e: 
             log(f"AI init failed: {e}") 
      
-    # Start VidGear CamGear stream
-    stream = None
+    # Start MJPEG Stream Reader
+    reader = None
     frame_count = 0
     last_stats_time = time.time()
     ai_frame_skip_counter = 0  # [OPTIMIZATION] Counter for AI frame skipping
     AI_PROCESS_EVERY_N_FRAMES = 5  # Process AI on 1 out of every 5 frames
-    last_ai_result = None  # Cache last AI annotation
+    last_ai_result = None  # Cache last AI result (JPEG bytes)
     
     if video_url:
-        # [NOTE] ESP32 stream auto-activation is disabled because /control endpoint returns 500 error
-        # User must manually start stream from ESP32 web interface (http://10.243.115.133/)
-        # log(f"Activating ESP32 stream at {esp32_ip}...")
-        # if start_esp32_stream(esp32_ip):
-        #     log("✅ ESP32 stream activated")
-        #     time.sleep(1)
-        # else:
-        #     log("⚠️ Failed to activate ESP32 stream, trying anyway...")
-        
-        # VidGear options for optimal performance
-        options = {
-            "THREADED_QUEUE_MODE": True,  # Enable threaded queue mode for better performance
-            "CAP_PROP_BUFFERSIZE": 1,  # Minimize buffer to reduce latency
-        }
-        
-        # Try connecting with retry logic
-        max_retries = 3
-        retry_delay = 2
-        
-        for attempt in range(max_retries):
-            try:
-                log(f"Connecting to stream (attempt {attempt + 1}/{max_retries}): {video_url}")
-                stream = CamGear(source=video_url, logging=True, **options).start()
-                log(f"✅ VidGear stream connected: {video_url}")
-                break
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    log(f"⚠️ Connection failed (attempt {attempt + 1}): {e}")
-                    log(f"Retrying in {retry_delay}s...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                else:
-                    log(f"❌ Failed to connect after {max_retries} attempts: {e}")
-                    log(f"💡 Please start stream manually from ESP32 web interface: http://{esp32_ip}/")
-                    stream = None
+        try:
+            # Create MJPEG reader optimized for ESP32-CAM
+            reader = MJPEGStreamReader(
+                url=video_url,
+                source_ip=source_ip,  # Bind to specific network interface
+                frame_queue_size=2,   # Small buffer = low latency
+                chunk_size=16384,     # 16KB for better efficiency
+                reconnect_delay=1.0,  # Faster initial reconnect
+                max_reconnect_delay=30.0,
+                connection_timeout=30,  # Longer timeout for ESP32
+                log_callback=log
+            )
+            reader.start()
+            log(f"✅ MJPEG Reader started: {video_url}")
+        except Exception as e:
+            log(f"❌ Failed to start reader: {e}")
+            reader = None
 
     last_status_check = 0
     
@@ -150,14 +145,25 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
                         new_url = data.get('url', '') if isinstance(data, dict) else data
                         video_url = new_url  # Update global url for reconnection logic
                         
-                        if stream:
-                            stream.stop()
+                        # Restart reader with new URL
+                        if reader:
+                            reader.stop()
                         
                         try:
-                            stream = CamGear(source=new_url, logging=True, **options).start()
+                            reader = MJPEGStreamReader(
+                                url=new_url,
+                                source_ip=source_ip,
+                                frame_queue_size=2,
+                                chunk_size=8192,
+                                reconnect_delay=2.0,
+                                max_reconnect_delay=30.0,
+                                log_callback=log
+                            )
+                            reader.start()
                             log(f"Switched stream to {new_url}")
                         except Exception as e:
                             log(f"Failed to switch stream: {e}")
+                            reader = None
                                 
                     elif cmd == CMD_SET_AI:
                         enable_ai = bool(data)
@@ -206,31 +212,31 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
             #     # query_esp32_status(target_ip) # This was blocking!
             #     last_status_check = time.time() 
               
-            # 3. Get Latest Frame from VidGear
+            # 3. Get Latest Frame from MJPEG Reader
             frame = None
-            if stream:
-                frame = stream.read()
+            frame_bytes = None
+            
+            if reader:
+                # Read JPEG bytes from reader (non-blocking)
+                frame_bytes = reader.read(timeout=0.1)
                 
-                # VidGear returns None when stream ends - try to reconnect
-                if frame is None and video_url:
-                    log("Stream ended, attempting reconnect...")
+                if frame_bytes:
+                    # Decode JPEG bytes to numpy array
                     try:
-                        stream.stop()
-                        time.sleep(2)
-                        stream = CamGear(source=video_url, logging=True, **options).start()
-                        log("Reconnected successfully")
+                        nparr = np.frombuffer(frame_bytes, np.uint8)
+                        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                     except Exception as e:
-                        log(f"Reconnection failed: {e}")
-                        time.sleep(5)  # Wait before next attempt
-                    continue
-                
-                # FPS Statistics
-                frame_count += 1
-                if frame_count % 100 == 0:
-                    elapsed = time.time() - last_stats_time
-                    fps = 100 / elapsed if elapsed > 0 else 0
-                    log(f"📊 Stream FPS: {fps:.1f}")
-                    last_stats_time = time.time()
+                        log(f"Frame decode error: {e}")
+                        frame = None
+                    
+                    # FPS Statistics
+                    if frame is not None:
+                        frame_count += 1
+                        if frame_count % 100 == 0:
+                            elapsed = time.time() - last_stats_time
+                            fps = 100 / elapsed if elapsed > 0 else 0
+                            log(f"📊 Stream FPS: {fps:.1f}")
+                            last_stats_time = time.time()
 
             if frame is not None:
                 final_frame = frame
@@ -245,14 +251,26 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
                         try: 
                             # Process AI detection
                             annotated_frame, detections, control = detector.detect(frame) 
-                            last_ai_result = annotated_frame
                             final_frame = annotated_frame 
+                            
+                            # 快取編碼後的 JPEG bytes（避免重複編碼）
+                            ret, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                            if ret:
+                                last_ai_result = buffer.tobytes()
                         except Exception as e: 
                             log(f"AI Error: {e}") 
                     else:
-                        # Use cached AI result for frames we skip
+                        # Use cached AI result (JPEG bytes) for frames we skip
                         if last_ai_result is not None:
-                            final_frame = last_ai_result
+                            # Send cached JPEG bytes directly - avoid re-encoding!
+                            try:
+                                if frame_queue.full():
+                                    try: frame_queue.get_nowait()
+                                    except Empty: pass
+                                frame_queue.put(last_ai_result)
+                                continue  # Skip normal encoding path
+                            except:
+                                pass
                   
                 # 5. Send to Web (Queue)
                 try: 
@@ -270,6 +288,6 @@ def video_process_target(cmd_queue, frame_queue, log_queue, initial_config):
     except KeyboardInterrupt:
         # Graceful shutdown on Ctrl+C
         log("Video process interrupted by user (Ctrl+C)")
-        if stream:
-            stream.stop()
+        if reader:
+            reader.stop()
         return

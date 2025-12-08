@@ -26,7 +26,13 @@ except ImportError:
 
 
 # === CUDA 效能優化 ===
+# 在 multiprocessing 環境中需要明確初始化 CUDA
 if torch.cuda.is_available():
+    # 強制在當前進程中初始化 CUDA
+    torch.cuda.init()
+    # 設定預設裝置
+    torch.cuda.set_device(0)
+    
     torch.backends.cudnn.benchmark = True  # 自動尋找最佳卷積演算法
     torch.backends.cudnn.deterministic = False  # 允許非確定性演算法以提升速度
     # 啟用 Tensor Core 優化 (Ampere+)
@@ -36,6 +42,9 @@ if torch.cuda.is_available():
     except AttributeError:
         pass
     print("✅ CUDA cuDNN 加速已啟用")
+    
+    # 清空快取確保乾淨狀態
+    torch.cuda.empty_cache()
 
 # 嘗試匯入 YOLO
 try:
@@ -72,39 +81,54 @@ class ObjectDetector:
             self._load_model(model_path)
 
     def _select_device(self):
-        """智能選擇運算裝置"""
+        """智能選擇運算裝置 (multiprocessing 友善)"""
+        # 在 multiprocessing 子進程中，需要重新檢查 CUDA
+        import os
+        print(f"[AI] Process ID: {os.getpid()}")
+        print(f"[AI] CUDA Available: {torch.cuda.is_available()}")
+        
         if torch.cuda.is_available():
-            device = 'cuda'
-            gpu_name = torch.cuda.get_device_name(0)
-            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-            compute_capability = torch.cuda.get_device_capability(0)
-            
-            print(f"🚀 AI Device: NVIDIA CUDA")
-            print(f"   └─ GPU: {gpu_name}")
-            print(f"   └─ VRAM: {gpu_memory:.1f} GB")
-            print(f"   └─ CUDA Version: {torch.version.cuda}")
-            print(f"   └─ Compute Capability: {compute_capability[0]}.{compute_capability[1]}")
-            print(f"   └─ cuDNN Benchmark: {'Enabled' if torch.backends.cudnn.benchmark else 'Disabled'}")
-            
-            # Check for Flash Attention support (PyTorch 2.0+)
             try:
-                # 簡單檢查是否存在 sdp_kernel 上下文管理器
-                if hasattr(torch.backends, 'cuda') and hasattr(torch.backends.cuda, 'sdp_kernel'):
-                     print(f"   └─ Flash Attention (SDPA): Available")
-            except:
-                pass
-
-            # 根據 VRAM 調整批次大小建議
-            if gpu_memory < 4:
-                print("   └─ ⚠️ 低 VRAM 檢測，建議使用 yolov8n.pt")
-                self.input_size = 320
-            elif gpu_memory >= 8:
-                print("   └─ ✅ 充足 VRAM，可使用更大模型")
-                self.input_size = 640
-            
-            # 清空 GPU 快取
-            torch.cuda.empty_cache()
-            print("   └─ GPU 快取已清空")
+                # 嘗試初始化 CUDA (multiprocessing 環境需要)
+                device = 'cuda'
+                _ = torch.zeros(1).cuda()  # 測試 CUDA 訪問
+                
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                compute_capability = torch.cuda.get_device_capability(0)
+                
+                print(f"🚀 AI Device: NVIDIA CUDA")
+                print(f"   └─ GPU: {gpu_name}")
+                print(f"   └─ VRAM: {gpu_memory:.1f} GB")
+                print(f"   └─ CUDA Version: {torch.version.cuda}")
+                print(f"   └─ Compute Capability: {compute_capability[0]}.{compute_capability[1]}")
+                print(f"   └─ cuDNN Benchmark: {'Enabled' if torch.backends.cudnn.benchmark else 'Disabled'}")
+                
+                # Check for Flash Attention support (PyTorch 2.0+)
+                try:
+                    # 簡單檢查是否存在 sdp_kernel 上下文管理器
+                    if hasattr(torch.backends, 'cuda') and hasattr(torch.backends.cuda, 'sdp_kernel'):
+                         print(f"   └─ Flash Attention (SDPA): Available")
+                except:
+                    pass
+    
+                # 根據 VRAM 調整批次大小建議
+                if gpu_memory < 4:
+                    print("   └─ ⚠️ 低 VRAM 檢測，建議使用 yolov8n.pt")
+                    self.input_size = 320
+                elif gpu_memory >= 8:
+                    print("   └─ ✅ 充足 VRAM，可使用更大模型")
+                    self.input_size = 640
+                
+                # 清空 GPU 快取
+                torch.cuda.empty_cache()
+                print("   └─ GPU 快取已清空")
+                
+            except Exception as e:
+                print(f"   └─ ⚠️ CUDA 訪問失敗: {e}")
+                print("   └─ 降級到 CPU 模式")
+                device = 'cpu'
+                self.process_every_n = 2  # CPU 模式自動跳幀
             
         elif torch.backends.mps.is_available():
             device = 'mps'
