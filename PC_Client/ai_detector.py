@@ -39,12 +39,32 @@ if torch.cuda.is_available():
     
     torch.backends.cudnn.benchmark = True  # 自動尋找最佳卷積演算法
     torch.backends.cudnn.deterministic = False  # 允許非確定性演算法以提升速度
+    
     # 啟用 Tensor Core 優化 (Ampere+)
     try:
         torch.set_float32_matmul_precision('high')
         print("✅ Tensor Core 優化已啟用 (Float32 MatMul Precision: High)")
     except AttributeError:
         pass
+    
+    # 啟用 Flash Attention (SDPA) - PyTorch 2.0+
+    try:
+        # 檢查是否支援 Scaled Dot Product Attention
+        if hasattr(torch.nn.functional, 'scaled_dot_product_attention'):
+            # 啟用 Flash Attention（記憶體高效的注意力機制）
+            # 這會自動使用 Flash Attention 2.0 (如果硬體支援)
+            torch.backends.cuda.enable_flash_sdp(True)
+            torch.backends.cuda.enable_mem_efficient_sdp(True)
+            torch.backends.cuda.enable_math_sdp(True)  # Fallback 到標準實作
+            print("✅ Flash Attention (SDPA) 已啟用")
+            print("   └─ Flash SDP: Enabled")
+            print("   └─ Memory Efficient SDP: Enabled")
+            print("   └─ Math SDP: Enabled (Fallback)")
+        else:
+            print("⚠️ Flash Attention 不支援 (需要 PyTorch 2.0+)")
+    except Exception as e:
+        print(f"⚠️ Flash Attention 啟用失敗: {e}")
+    
     print("✅ CUDA cuDNN 加速已啟用")
     
     # 清空快取確保乾淨狀態
