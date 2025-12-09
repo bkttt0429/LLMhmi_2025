@@ -76,7 +76,7 @@ void app_motor_init(void)
     ledc_channel_config(&ledc_channel_right);
 }
 
-void app_motor_set_pwm(int left_val, int right_val)
+void set_motor_speed(int left_val, int right_val)
 {
     // Input range: -255 to 255
     // Map to 1000..2000
