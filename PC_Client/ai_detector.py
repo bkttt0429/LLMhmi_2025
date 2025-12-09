@@ -5,6 +5,10 @@ import torch
 import sys
 import os
 
+# === Fix OpenMP Conflict ===
+# 解決 libiomp5md.dll 衝突（常見於 NumPy + PyTorch + OpenCV 環境）
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
 # === Add Local YOLO Path ===
 # Prioritize local yolov13-main folder if it exists
 base_dir = os.path.dirname(os.path.abspath(__file__))
