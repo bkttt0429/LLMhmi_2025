@@ -29,45 +29,25 @@ except ImportError:
     sys.modules["huggingface_hub.hub_mixin"] = MagicMock()
 
 
+# 程式碼 6-4：GPU 加速環境配置 (Code 6-4)
 # === CUDA 效能優化 ===
-# 在 multiprocessing 環境中需要明確初始化 CUDA
 if torch.cuda.is_available():
     # 強制在當前進程中初始化 CUDA
     torch.cuda.init()
-    # 設定預設裝置
     torch.cuda.set_device(0)
-    
-    torch.backends.cudnn.benchmark = True  # 自動尋找最佳卷積演算法
-    torch.backends.cudnn.deterministic = False  # 允許非確定性演算法以提升速度
-    
-    # 啟用 Tensor Core 優化 (Ampere+)
+
+    # 啟用 cuDNN 自動優化
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = False
+
+    # 啟用 Tensor Core 優化 (Ampere+ 架構)
     try:
         torch.set_float32_matmul_precision('high')
-        print("✅ Tensor Core 優化已啟用 (Float32 MatMul Precision: High)")
+        print("✅ Tensor Core 優化已啟用")
     except AttributeError:
         pass
-    
-    # 啟用 Flash Attention (SDPA) - PyTorch 2.0+
-    try:
-        # 檢查是否支援 Scaled Dot Product Attention
-        if hasattr(torch.nn.functional, 'scaled_dot_product_attention'):
-            # 啟用 Flash Attention（記憶體高效的注意力機制）
-            # 這會自動使用 Flash Attention 2.0 (如果硬體支援)
-            torch.backends.cuda.enable_flash_sdp(True)
-            torch.backends.cuda.enable_mem_efficient_sdp(True)
-            torch.backends.cuda.enable_math_sdp(True)  # Fallback 到標準實作
-            print("✅ Flash Attention (SDPA) 已啟用")
-            print("   └─ Flash SDP: Enabled")
-            print("   └─ Memory Efficient SDP: Enabled")
-            print("   └─ Math SDP: Enabled (Fallback)")
-        else:
-            print("⚠️ Flash Attention 不支援 (需要 PyTorch 2.0+)")
-    except Exception as e:
-        print(f"⚠️ Flash Attention 啟用失敗: {e}")
-    
-    print("✅ CUDA cuDNN 加速已啟用")
-    
-    # 清空快取確保乾淨狀態
+
+    # 清空 GPU 快取確保乾淨狀態
     torch.cuda.empty_cache()
 
 # 嘗試匯入 YOLO
@@ -78,28 +58,29 @@ except ImportError as e:
     print(f"⚠️ 警告: 無法載入 ultralytics ({e})。請確認 'yolov13-main' 資料夾存在或已安裝 'pip install ultralytics'")
     YOLO_AVAILABLE = False
 
+# 程式碼 6-3：AI 物件偵測類別初始化 (Code 6-3)
 class ObjectDetector:
-    def __init__(self, model_path='./models/yolov13l.pt'):
+    def __init__(self, model_path='./yolov13l.pt'):
         self.model = None
         self.enabled = False
         self.frame_count = 0
         self.total_inference_time = 0
         self.model_path = model_path
-        
-        # === 裝置選擇與詳細資訊 ===
+
+        # === 智能裝置選擇 (GPU/CPU) ===
         self.device = self._select_device()
-        
+
         # === 控制參數 ===
-        self.base_v = 0.6          # 基礎速度
-        self.max_w = 2.0           # 最大角速度
-        self.conf_th = 0.4         # 信心度閾值
-        self.target_class = None   # 目標類別 (None = 所有類別)
-        
+        self.base_v = 0.6  # 基礎速度
+        self.max_w = 2.0   # 最大角速度
+        self.conf_th = 0.4 # 信心度閾值
+        self.target_class = None # 目標類別 (None = 所有類別)
+
         # === 效能優化參數 ===
-        self.skip_frames = 0       # 跳幀計數器 (0 = 每幀都處理)
-        self.process_every_n = 1   # 每 N 幀處理一次 (1 = 不跳幀)
-        self.input_size = 640      # YOLO 輸入尺寸 (320/640/1280)
-        
+        self.skip_frames = 0     # 跳幀計數器
+        self.process_every_n = 1 # 每 N 幀處理一次
+        self.input_size = 640    # YOLO 輸入尺寸
+
         # === 模型載入 ===
         if YOLO_AVAILABLE:
             self._load_model(model_path)
@@ -303,14 +284,15 @@ class ObjectDetector:
             # 使用 SDPA (Flash Attention) 上下文 (如果可用)
             # PyTorch 2.0+ 自動啟用，但我們可以嘗試強制最佳路徑 (如果需要)
 
+            # 程式碼 6-5：YOLO 推論執行 (Code 6-5)
             results = self.model.track(
                 frame, 
-                device=self.device,
-                persist=True,           # 保持追蹤 ID
-                conf=self.conf_th,      # 信心度閾值
-                verbose=False,          # 不顯示詳細 log
-                imgsz=self.input_size,  # 輸入尺寸
-                half=self.device=='cuda' # GPU 使用半精度加速
+                device=self.device,      # 使用 GPU 或 CPU
+                persist=True,            # 保持追蹤 ID
+                conf=self.conf_th,       # 信心度閾值 (0.4)
+                verbose=False,           # 不顯示詳細 log
+                imgsz=self.input_size,   # 輸入尺寸 (640)
+                half=self.device=='cuda' # GPU 使用半精度加速 (FP16)
             )
             result = results[0]
             

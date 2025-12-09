@@ -488,49 +488,40 @@
         }
 
 
+        // 程式碼 6-6：鍵盤事件監聽與優先權控制 (Code 6-6)
         function setupKeyboardControls() {
-            // Track which keys are currently pressed
+            // 追蹤按鍵狀態
             document.addEventListener('keydown', (e) => {
                 const key = e.key.toUpperCase();
 
-                // Prevent repeated keydown events when holding
+                // 防止重複觸發 (按住時)
                 if (keyPressed[key]) return;
                 keyPressed[key] = true;
 
-                // Update keyboard activity timestamp for input priority
+                // 更新鍵盤活動時間戳 (用於輸入優先權判斷)
                 lastKeyboardActivity = Date.now();
 
                 console.log(`[KEYBOARD] Key DOWN: ${key}`);
 
-                // Map keys to commands
+                // 映射按鍵至控制指令
                 switch (key) {
-                    case 'W':
-                        sendCmd('F');
-                        break;
-                    case 'S':
-                        sendCmd('S');
-                        break;
-                    case 'A':
-                        sendCmd('L');
-                        break;
-                    case 'D':
-                        sendCmd('R');
-                        break;
-                    case 'X':
-                        sendCmd('B');
-                        break;
+                    case 'W': sendCmd('F'); break; // 前進
+                    case 'A': sendCmd('L'); break; // 左轉
+                    case 'D': sendCmd('R'); break; // 右轉
+                    case 'X': sendCmd('B'); break; // 後退
+                    case 'S': sendCmd('S'); break; // 停止
                 }
             });
 
+            // 按鍵釋放時發送停止指令
             document.addEventListener('keyup', (e) => {
                 const key = e.key.toUpperCase();
                 keyPressed[key] = false;
 
                 console.log(`[KEYBOARD] Key UP: ${key}`);
 
-                // Send stop command when key released
                 if (['W', 'A', 'S', 'D', 'X'].includes(key)) {
-                    sendCmd('S');
+                    sendCmd('S'); // 釋放按鍵即停止
                 }
             });
 
@@ -750,12 +741,11 @@
                 console.log(`[GAMEPAD] 🕹️ STICK RAW → axisX:${rawX.toFixed(2)}, axisY:${rawY.toFixed(2)}`);
             }
 
-            // === 1.1 Input Priority Check ===
-            // If keyboard was used recently (within 500ms), suppress gamepad
+            // 程式碼 6-8：Xbox 抑制手把訊號手把輸入優先權檢查 (Code 6-8)
+            // === 輸入優先權檢查 ===
+            // 如果鍵盤在 500ms 內使用過，抑制手把輸入
             if (Date.now() - lastKeyboardActivity < 500) {
-                // If gamepad was active, we might need to send a stop? 
-                // But keyboard handles its own stop when keyup.
-                // Just return to avoid conflict.
+                // 鍵盤擁有最高優先權，直接返回
                 return;
             }
 

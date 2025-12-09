@@ -406,31 +406,26 @@ state.add_log = add_log
 
 def _calculate_differential_drive(x: float, y: float) -> tuple[int, int]:
     """
-    Mix X/Y joystick inputs to Differential Drive (Tank Drive) PWM values.
-    x: -1.0 (Left) to 1.0 (Right)
-    y: -1.0 (Backward) to 1.0 (Forward)
-    Returns: (left_pwm, right_pwm) range -255 to 255
+    將搖桿 X/Y 輸入轉換為差速驅動 PWM 值 (Code 6-2)
+
+    參數:
+        x (float): 橫向輸入 -1.0 (左) 至 1.0 (右)
+        y (float): 縱向輸入 -1.0 (後) 至 1.0 (前)
+
+    回傳:
+        tuple[int, int]: (左輪 PWM, 右輪 PWM) 範圍 -255 ~ 255
     """
+    # 坦克式轉向公式
+    left = y + x  # 左輪 = 油門 + 轉向
+    right = y - x # 右輪 = 油門 - 轉向
 
-    # Simple Mixing
-    # Left = Throttle + Turn
-    # Right = Throttle - Turn
-
-    # Scale inputs to avoid clipping too early?
-    # Actually clipping is fine, it just means max speed reached.
-
-    # Apply Turn Factor if x is dominant?
-    # Let's keep it simple first.
-
-    left = y + x
-    right = y - x
-
-    # Normalize if exceeding 1.0
+    # 正規化至 [-1.0, 1.0] 避免溢位
     magnitude = max(abs(left), abs(right))
     if magnitude > 1.0:
         left /= magnitude
         right /= magnitude
 
+    # 轉換為 PWM 值 (±255)
     left_pwm = int(left * PWM_MAX)
     right_pwm = int(right * PWM_MAX)
 
@@ -447,8 +442,14 @@ def _build_cmd_from_state(controller_state: dict) -> dict:
 
 def send_control_command(left: int, right: int):
     """
-    Send motor control command to ESP32-S3.
-    Endpoint: GET /motor?left=XX&right=YY
+    發送馬達控制指令至 ESP32-S3 (Code 6-1)
+
+    參數:
+        left (int): 左側馬達 PWM 值 (-255 ~ 255)
+        right (int): 右側馬達 PWM 值 (-255 ~ 255)
+
+    回傳:
+        bool: 指令發送成功與否
     """
     target_ip = state.camera_ip or "192.168.4.1"
     url = f"http://{target_ip}/motor"
@@ -459,7 +460,7 @@ def send_control_command(left: int, right: int):
     add_log(f"[CONTROL] → {target_ip}/motor L:{left} R:{right}")
 
     try:
-        # Send GET request with query parameters
+        # 使用預先綁定網卡的 Session 發送請求
         resp = state.control_session.get(url, params=params, timeout=0.5)
         
         # [DEBUG] Print response details

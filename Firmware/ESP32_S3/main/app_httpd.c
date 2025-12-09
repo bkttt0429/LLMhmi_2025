@@ -157,7 +157,7 @@ static esp_err_t motor_handler(httpd_req_t *req)
             right_val = atoi(param);
         }
 
-        app_motor_set_pwm(left_val, right_val);
+        set_motor_speed(left_val, right_val);
         httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
         httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
     } else {
