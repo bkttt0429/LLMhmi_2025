@@ -1370,7 +1370,7 @@
                     0.1,
                     1000
                 );
-                window.camera3D.position.set(3, 3, 5);
+                window.camera3D.position.set(8, 8, 8);
 
                 // Renderer
                 window.renderer3D = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -1490,89 +1490,108 @@
                         
                     // Scale fix
                     window.robotModel.scale.set(15, 15, 15);
-                    // Reset position for calculation
                     window.robotModel.position.set(0, 0, 0); 
-                    
-                    console.log('[3D] Starting Auto-Rigging Process...');
+                    window.robotModel.updateMatrixWorld(true);
 
-                    // 1. Calculate Model Bounding Box to determine height segments
-                    const box = new THREE.Box3().setFromObject(window.robotModel);
-                    const minY = box.min.y;
-                    const maxY = box.max.y;
-                    const height = maxY - minY;
-                    
-                    console.log(`[3D] Model Height Range: ${ minY.toFixed(2) } to ${ maxY.toFixed(2) } (H: ${ height.toFixed(2)
-        })`);
+                    // FORCE MATERIAL OVERRIDE (Fix invisible model)
+                    const cyberMaterial = new THREE.MeshStandardMaterial({
+                        color: 0x00ff99,
+                        emissive: 0x004400,
+                        metalness: 0.8,
+                        roughness: 0.2,
+                        wireframe: false,
+                        side: THREE.DoubleSide
+                    });
 
-                    // 2. Create Virtual Kinematic Chain
-                    const virtualBase = new THREE.Group();
-                    virtualBase.name = 'Virtual_Base';
-                    
-                    const virtualShoulder = new THREE.Group();
-                    virtualShoulder.name = 'Virtual_Shoulder';
-                    
-                    const virtualElbow = new THREE.Group();
-                    virtualElbow.name = 'Virtual_Elbow';
-
-                    // Hierarchy: Base -> Shoulder -> Elbow
-                    virtualBase.add(virtualShoulder);
-                    virtualShoulder.add(virtualElbow);
-                    
-                    // Shoulder pivot estimate (approx 30% up)
-                    virtualShoulder.position.y = minY + height * 0.3;
-                    // Elbow pivot estimate (approx 70% up)
-                    virtualElbow.position.y = (minY + height * 0.7) - virtualShoulder.position.y;
-
-                    // 3. Segment Parts by Height
-                    // We need to collect meshes first to avoid issues while modifying the tree
-                    const meshes = [];
                     window.robotModel.traverse((child) => {
                         if (child.isMesh) {
-                            meshes.push(child);
+                            child.material = cyberMaterial;
                             child.castShadow = true;
                             child.receiveShadow = true;
                         }
                     });
 
-                    console.log('[3D] Processing ' + meshes.length + ' parts...');
+                    // Debug Helpers
+                    const axesHelper = new THREE.AxesHelper(5);
+                    window.scene3D.add(axesHelper);
+                    const boxHelper = new THREE.BoxHelper(window.robotModel, 0xffff00);
+                    window.scene3D.add(boxHelper);
+                    
+                    try {
+                        console.log('[3D] Starting Auto-Rigging Process...');
 
-                    // Thresholds
-                    const shoulderThreshold = minY + height * 0.4; // Below this is base
-                    const elbowThreshold = minY + height * 0.75;    // Below this is shoulder, above is elbow
+                        // 1. Calculate Model Bounding Box
+                        const box = new THREE.Box3().setFromObject(window.robotModel);
+                        const size = box.getSize(new THREE.Vector3());
+                        const center = box.getCenter(new THREE.Vector3());
+                        const minY = box.min.y;
+                        const maxY = box.max.y;
+                        const height = size.y;
 
-                    meshes.forEach(mesh => {
-                        // Get mesh world position (center)
-                        const meshBox = new THREE.Box3().setFromObject(mesh);
-                        const centerY = (meshBox.min.y + meshBox.max.y) / 2;
+                        // Camera Auto-Fit
+                        const maxDim = Math.max(size.x, size.y, size.z);
+                        const fov = window.camera3D.fov * (Math.PI / 180);
+                        let cameraZ = Math.abs(maxDim / 2 * Math.tan(fov * 2)); // Basic fit distance
+                        cameraZ *= 2.0; // Zoom out a bit
+                        window.camera3D.position.set(center.x + cameraZ, center.y + cameraZ/2, center.z + cameraZ);
+                        window.camera3D.lookAt(center);
+                        
+                        console.log('[3D] Auto-Fit Camera:', window.camera3D.position);
+                        console.log('[3D] Model Height Range: ' + minY.toFixed(2) + ' to ' + maxY.toFixed(2) + ' (H: ' + height.toFixed(2) + ')');
 
-                        if (centerY < shoulderThreshold) {
-                            // Belongs to Base
-                            virtualBase.attach(mesh);
-                        } else if (centerY < elbowThreshold) {
-                            // Belongs to Shoulder
-                            virtualShoulder.attach(mesh);
-                        } else {
-                            // Belongs to Elbow
-                            virtualElbow.attach(mesh);
-                        }
-                    });
+                        // 2. Create Virtual Kinematic Chain
+                        const virtualBase = new THREE.Group(); virtualBase.name = 'Virtual_Base';
+                        const virtualShoulder = new THREE.Group(); virtualShoulder.name = 'Virtual_Shoulder';
+                        const virtualElbow = new THREE.Group(); virtualElbow.name = 'Virtual_Elbow';
 
-                    // Assign to global control variables
-                    window.basePart = virtualBase;
-                    window.shoulderPart = virtualShoulder;
-                    window.elbowPart = virtualElbow;
+                        virtualBase.add(virtualShoulder);
+                        virtualShoulder.add(virtualElbow);
+                        
+                        // Pivot estimates
+                        virtualShoulder.position.y = minY + height * 0.3;
+                        virtualElbow.position.y = (minY + height * 0.7) - virtualShoulder.position.y;
 
-                    // 4. Final Scene Setup
-                    // Move the rigged arm to correct floor position
-                    virtualBase.position.set(0, -3, 0);
-                    window.scene3D.add(virtualBase);
+                        // 3. Segment Parts
+                        const meshes = [];
+                        window.robotModel.traverse((child) => {
+                            if (child.isMesh) {
+                                meshes.push(child);
+                                child.castShadow = true;
+                                child.receiveShadow = true;
+                            }
+                        });
 
-                    console.log('[3D] Auto-Rigging Complete. Virtual Joints created.');
-                    console.log('Base:', virtualBase);
-                    console.log('Shoulder:', virtualShoulder);
-                    console.log('Elbow:', virtualElbow);
-                        console.log('[3D] GLB model loaded successfully');
-                        const statusEl = document.getElementById('3d-status');
+                        const shoulderThreshold = minY + height * 0.4;
+                        const elbowThreshold = minY + height * 0.75;
+
+                        meshes.forEach(mesh => {
+                            const meshBox = new THREE.Box3().setFromObject(mesh);
+                            const centerY = (meshBox.min.y + meshBox.max.y) / 2;
+
+                            if (centerY < shoulderThreshold) virtualBase.attach(mesh);
+                            else if (centerY < elbowThreshold) virtualShoulder.attach(mesh);
+                            else virtualElbow.attach(mesh);
+                        });
+
+                        window.basePart = virtualBase;
+                        window.shoulderPart = virtualShoulder;
+                        window.elbowPart = virtualElbow;
+
+                        // 4. Final Scene Setup
+                        virtualBase.position.set(0, -3, 0); // Floor alignment
+                        window.scene3D.add(virtualBase);
+                        
+                        console.log('[3D] Auto-Rigging Complete. Virtual Joints created.');
+
+                    } catch (e) {
+                        console.error('[3D] Auto-Rigging Failed:', e);
+                        // Fallback: Just add the original model
+                        window.scene3D.add(window.robotModel);
+                        window.robotModel.position.set(0, -3, 0);
+                    }
+
+                    console.log('[3D] GLB model loaded successfully');
+                    const statusEl = document.getElementById('3d-status');
                         const modeEl = document.getElementById('model-mode');
                         if (statusEl) statusEl.textContent = 'ACTIVE';
                         if (modeEl) modeEl.textContent = 'GLB MODEL';
@@ -1630,7 +1649,7 @@
                 console.log('[3D] Robot Arm Simulator initialized');
             `;
 
-        document.body.appendChild(script);
+            document.body.appendChild(script);
         }
 
         function updateAngleDisplays() {
