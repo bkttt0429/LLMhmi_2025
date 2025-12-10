@@ -15,6 +15,28 @@
     <link rel="stylesheet" href="/static/css/output.css">
 
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
+    <!-- Three.js Import Maps for 3D Robot Arm -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <style>
+        /* Force grid layout in case Tailwind classes are missing */
+        @media (min-width: 1024px) {
+            .lg\:col-span-10 {
+                grid-column: span 10 / span 10 !important;
+            }
+
+            .lg\:col-span-2 {
+                grid-column: span 2 / span 2 !important;
+            }
+        }
+    </style>
 </head>
 
 <body
@@ -376,9 +398,101 @@
         </div>
     </div>
 
+    <!-- 3D Robot Arm View -->
+    <div id="robot-view" class="flex-1 overflow-hidden p-2 sm:p-4 gap-4 view-hidden pb-20">
+        <div class="h-full grid grid-cols-1 lg:grid-cols-12 gap-4" style="min-height: 500px;">
+            <!-- 3D Canvas -->
+            <div class="lg:col-span-10 cyber-border rounded p-2 relative flex flex-col" style="min-height: 400px;">
+                <div
+                    class="flex justify-between px-2 text-[10px] sm:text-xs text-gray-500 font-bold flex-wrap gap-2 mb-2">
+                    <div class="flex gap-2 items-center text-green-600">
+                        3D SIMULATION: <span class="text-green-400" id="3d-status">INITIALIZING</span>
+                    </div>
+                    <span>RIGHT STICK: <span class="text-cyan-400 animate-pulse">ROBOT ARM</span></span>
+                </div>
+                <div id="canvas-3d-container" class="flex-1 bg-black relative overflow-hidden border border-gray-800"
+                    style="min-height: 350px;">
+                    <div class="scan-line"></div>
+                    <!-- Three.js canvas will be appended here -->
+                </div>
+            </div>
+
+            <!-- Telemetry Panel -->
+            <div class="lg:col-span-2 flex flex-col gap-4">
+
+                <!-- Joint Angles -->
+                <div class="cyber-border p-3 sm:p-4 flex flex-col gap-3 relative">
+                    <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">JOINT TELEMETRY</div>
+                    <div class="mt-4 space-y-3">
+                        <div class="flex justify-between items-center">
+                            <span class="text-[11px] text-gray-400">BASE (底座)</span>
+                            <span class="text-green-400 font-mono text-sm font-bold" id="angle-base">0.0°</span>
+                        </div>
+                        <div class="w-full h-1 bg-gray-800 rounded overflow-hidden">
+                            <div class="h-full bg-gradient-to-r from-cyan-500 to-green-400 transition-all duration-100"
+                                id="bar-base" style="width: 50%; margin-left: 25%;"></div>
+                        </div>
+
+                        <div class="flex justify-between items-center mt-3">
+                            <span class="text-[11px] text-gray-400">SHOULDER (大臂)</span>
+                            <span class="text-green-400 font-mono text-sm font-bold" id="angle-shoulder">0.0°</span>
+                        </div>
+                        <div class="w-full h-1 bg-gray-800 rounded overflow-hidden">
+                            <div class="h-full bg-gradient-to-r from-cyan-500 to-green-400 transition-all duration-100"
+                                id="bar-shoulder" style="width: 50%; margin-left: 25%;"></div>
+                        </div>
+
+                        <div class="flex justify-between items-center mt-3">
+                            <span class="text-[11px] text-gray-400">ELBOW (小臂)</span>
+                            <span class="text-green-400 font-mono text-sm font-bold" id="angle-elbow">0.0°</span>
+                        </div>
+                        <div class="w-full h-1 bg-gray-800 rounded overflow-hidden">
+                            <div class="h-full bg-gradient-to-r from-cyan-500 to-green-400 transition-all duration-100"
+                                id="bar-elbow" style="width: 50%; margin-left: 25%;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Control Info -->
+                <div class="cyber-border p-3 sm:p-4 flex flex-col gap-2 relative">
+                    <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">CONTROL MAP</div>
+                    <div class="mt-4 space-y-2 text-[11px] text-gray-400">
+                        <div class="flex items-center gap-2">
+                            <span class="text-cyan-400 font-mono font-bold">RS-X</span> → 底座旋轉
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-cyan-400 font-mono font-bold">RS-Y</span> → 大臂/小臂
+                        </div>
+                        <div class="flex items-center gap-2 text-yellow-400 text-[10px] mt-3">
+                            <span>💡</span> 使用右搖桿控制
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Model Status -->
+                <div class="cyber-border p-3 sm:p-4 flex flex-col gap-2 relative">
+                    <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">MODEL STATUS</div>
+                    <div class="mt-4 space-y-2 text-[11px]">
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Mode:</span>
+                            <span class="text-green-400 font-bold" id="model-mode">PLACEHOLDER</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Parts:</span>
+                            <span class="text-cyan-400 font-mono" id="model-parts">3/3</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="nav-bar">
         <button onclick="switchView('main')" class="nav-btn active" id="nav-main">
             <span>🎮</span> <span class="hidden sm:inline">COMMAND</span>
+        </button>
+        <button onclick="switchView('robot')" class="nav-btn" id="nav-robot">
+            <span>🤖</span> <span class="hidden sm:inline">3D VIEW</span>
         </button>
         <button onclick="switchView('settings')" class="nav-btn" id="nav-settings">
             <span>⚙</span> <span class="hidden sm:inline">SYSTEM</span>
@@ -1156,26 +1270,32 @@
             currentView = view;
             const mainView = document.getElementById('main-view');
             const settingsView = document.getElementById('settings-view');
+            const robotView = document.getElementById('robot-view');
 
-            // Toggle view visibility with CSS classes
+            // Hide all views
+            mainView.classList.add('view-hidden');
+            mainView.classList.remove('view-grid');
+            settingsView.classList.add('view-hidden');
+            settingsView.classList.remove('view-block');
+            robotView.classList.add('view-hidden');
+
+            // Show selected view
             if (view === 'main') {
                 mainView.classList.remove('view-hidden');
                 mainView.classList.add('view-grid');
-                settingsView.classList.add('view-hidden');
-                settingsView.classList.remove('view-block');
-            } else {
-                mainView.classList.add('view-hidden');
-                mainView.classList.remove('view-grid');
+            } else if (view === 'robot') {
+                robotView.classList.remove('view-hidden');
+                if (!window.robot3DInitialized) {
+                    initRobot3D();
+                }
+            } else if (view === 'settings') {
                 settingsView.classList.remove('view-hidden');
                 settingsView.classList.add('view-block');
+                fetchCameraSettings();
             }
 
             document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
             document.getElementById('nav-' + view).classList.add('active');
-
-            if (view === 'settings') {
-                fetchCameraSettings();
-            }
         }
 
         function log(msg) {
@@ -1206,6 +1326,376 @@
         setInterval(() => {
             document.getElementById('clock').innerText = new Date().toLocaleTimeString();
         }, 1000);
+
+        // ==================== 3D ROBOT ARM SIMULATOR ====================
+        // Three.js Integration for Robot Arm Visualization
+
+        let robot3DInitialized = false;
+        let scene3D, camera3D, renderer3D, controls3D;
+        let robotModel, basePart, shoulderPart, elbowPart;
+        let targetBaseAngle = 0, targetShoulderAngle = 0, targetElbowAngle = 0;
+        let currentBaseAngle = 0, currentShoulderAngle = 0, currentElbowAngle = 0;
+        const controlSpeed = 0.03;
+        const smoothFactor = 0.1;
+
+        function initRobot3D() {
+            if (robot3DInitialized) return;
+            robot3DInitialized = true;
+            console.log('[3D] Initializing Robot Arm Simulator...');
+
+            // Load Three.js scene with Import Maps
+            const script = document.createElement('script');
+            script.type = 'module';
+            script.textContent = `
+                import * as THREE from 'three';
+                import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+                import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+                console.log('[3D] Three.js modules loaded');
+
+                // Scene Setup
+                window.scene3D = new THREE.Scene();
+                window.scene3D.background = new THREE.Color(0x0a0a0a);
+
+                // Camera
+                const container = document.getElementById('canvas-3d-container');
+                if (!container) {
+                    console.error('[3D] Canvas container not found!');
+                    throw new Error('[3D] Canvas container not found');
+                }
+                
+                window.camera3D = new THREE.PerspectiveCamera(
+                    45,
+                    container.clientWidth / container.clientHeight,
+                    0.1,
+                    1000
+                );
+                window.camera3D.position.set(3, 3, 5);
+
+                // Renderer
+                window.renderer3D = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+                window.renderer3D.setSize(container.clientWidth, container.clientHeight);
+                window.renderer3D.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                window.renderer3D.shadowMap.enabled = true;
+                window.renderer3D.shadowMap.type = THREE.PCFSoftShadowMap;
+                window.renderer3D.toneMapping = THREE.ACESFilmicToneMapping;
+                window.renderer3D.toneMappingExposure = 1.2;
+                container.appendChild(window.renderer3D.domElement);
+
+                // Controls
+                window.controls3D = new OrbitControls(window.camera3D, window.renderer3D.domElement);
+                window.controls3D.enableDamping = true;
+                window.controls3D.dampingFactor = 0.05;
+                window.controls3D.minDistance = 3;
+                window.controls3D.maxDistance = 20;
+
+                // Lighting - Cyber style
+                const ambientLight = new THREE.AmbientLight(0x00ff99, 0.4);
+                window.scene3D.add(ambientLight);
+
+                const mainLight = new THREE.DirectionalLight(0x00ffaa, 1.2);
+                mainLight.position.set(10, 15, 10);
+                mainLight.castShadow = true;
+                mainLight.shadow.mapSize.width = 2048;
+                mainLight.shadow.mapSize.height = 2048;
+                window.scene3D.add(mainLight);
+
+                const fillLight = new THREE.DirectionalLight(0x00ddff, 0.5);
+                fillLight.position.set(-5, 5, -5);
+                window.scene3D.add(fillLight);
+
+                const rimLight = new THREE.PointLight(0x00ff99, 0.8, 30);
+                rimLight.position.set(0, 8, -8);
+                window.scene3D.add(rimLight);
+
+                // Grid - Cyber style
+                const gridHelper = new THREE.GridHelper(20, 20, 0x00ff99, 0x003322);
+                gridHelper.material.opacity = 0.3;
+                gridHelper.material.transparent = true;
+                window.scene3D.add(gridHelper);
+
+                // Ground
+                const groundGeometry = new THREE.PlaneGeometry(20, 20);
+                const groundMaterial = new THREE.ShadowMaterial({ opacity: 0.4 });
+                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+                ground.rotation.x = -Math.PI / 2;
+                ground.receiveShadow = true;
+                window.scene3D.add(ground);
+
+                // Create Placeholder Robot (Cyber Style)
+                function createCyberRobot() {
+                    const robotGroup = new THREE.Group();
+                    
+                    // Base (Glowing Cyan)
+                    const baseGeo = new THREE.CylinderGeometry(0.8, 1, 0.3, 16);
+                    const baseMat = new THREE.MeshStandardMaterial({ 
+                        color: 0x001a1a,
+                        emissive: 0x00ff99,
+                        emissiveIntensity: 0.3,
+                        metalness: 0.8,
+                        roughness: 0.2
+                    });
+                    window.basePart = new THREE.Mesh(baseGeo, baseMat);
+                    window.basePart.castShadow = true;
+                    window.basePart.receiveShadow = true;
+                    window.basePart.position.y = 0.15;
+                    robotGroup.add(window.basePart);
+                    
+                    // Shoulder (Glowing Green)
+                    const shoulderGeo = new THREE.BoxGeometry(0.4, 2, 0.4);
+                    const shoulderMat = new THREE.MeshStandardMaterial({ 
+                        color: 0x003300,
+                        emissive: 0x00ff66,
+                        emissiveIntensity: 0.4,
+                        metalness: 0.7,
+                        roughness: 0.3
+                    });
+                    window.shoulderPart = new THREE.Mesh(shoulderGeo, shoulderMat);
+                    window.shoulderPart.castShadow = true;
+                    window.shoulderPart.position.set(0, 1.3, 0);
+                    window.basePart.add(window.shoulderPart);
+                    
+                    // Elbow (Glowing Cyan)
+                    const elbowGeo = new THREE.BoxGeometry(0.3, 1.5, 0.3);
+                    const elbowMat = new THREE.MeshStandardMaterial({ 
+                        color: 0x001a33,
+                        emissive: 0x00aaff,
+                        emissiveIntensity: 0.4,
+                        metalness: 0.7,
+                        roughness: 0.3
+                    });
+                    window.elbowPart = new THREE.Mesh(elbowGeo, elbowMat);
+                    window.elbowPart.castShadow = true;
+                    window.elbowPart.position.set(0, 1.5, 0);
+                    window.shoulderPart.add(window.elbowPart);
+                    
+                    window.scene3D.add(robotGroup);
+                    window.robotModel = robotGroup;
+                    
+                    console.log('[3D] Cyber-styled placeholder robot created');
+                    const statusEl = document.getElementById('3d-status');
+                    const modeEl = document.getElementById('model-mode');
+                    if (statusEl) statusEl.textContent = 'ACTIVE';
+                    if (modeEl) modeEl.textContent = 'PLACEHOLDER';
+                }
+
+                // Try to load GLB model, fallback to placeholder
+                const gltfLoader = new GLTFLoader();
+                const modelPath = './models/eezybotarm.glb';
+                
+                gltfLoader.load(
+                    modelPath,
+                    (gltf) => {
+                        window.robotModel = gltf.scene;
+                        
+                    // Scale fix
+                    window.robotModel.scale.set(15, 15, 15);
+                    // Reset position for calculation
+                    window.robotModel.position.set(0, 0, 0); 
+                    
+                    console.log('[3D] Starting Auto-Rigging Process...');
+
+                    // 1. Calculate Model Bounding Box to determine height segments
+                    const box = new THREE.Box3().setFromObject(window.robotModel);
+                    const minY = box.min.y;
+                    const maxY = box.max.y;
+                    const height = maxY - minY;
+                    
+                    console.log(`[3D] Model Height Range: ${ minY.toFixed(2) } to ${ maxY.toFixed(2) } (H: ${ height.toFixed(2)
+        })`);
+
+                    // 2. Create Virtual Kinematic Chain
+                    const virtualBase = new THREE.Group();
+                    virtualBase.name = 'Virtual_Base';
+                    
+                    const virtualShoulder = new THREE.Group();
+                    virtualShoulder.name = 'Virtual_Shoulder';
+                    
+                    const virtualElbow = new THREE.Group();
+                    virtualElbow.name = 'Virtual_Elbow';
+
+                    // Hierarchy: Base -> Shoulder -> Elbow
+                    virtualBase.add(virtualShoulder);
+                    virtualShoulder.add(virtualElbow);
+                    
+                    // Shoulder pivot estimate (approx 30% up)
+                    virtualShoulder.position.y = minY + height * 0.3;
+                    // Elbow pivot estimate (approx 70% up)
+                    virtualElbow.position.y = (minY + height * 0.7) - virtualShoulder.position.y;
+
+                    // 3. Segment Parts by Height
+                    // We need to collect meshes first to avoid issues while modifying the tree
+                    const meshes = [];
+                    window.robotModel.traverse((child) => {
+                        if (child.isMesh) {
+                            meshes.push(child);
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                        }
+                    });
+
+                    console.log('[3D] Processing ' + meshes.length + ' parts...');
+
+                    // Thresholds
+                    const shoulderThreshold = minY + height * 0.4; // Below this is base
+                    const elbowThreshold = minY + height * 0.75;    // Below this is shoulder, above is elbow
+
+                    meshes.forEach(mesh => {
+                        // Get mesh world position (center)
+                        const meshBox = new THREE.Box3().setFromObject(mesh);
+                        const centerY = (meshBox.min.y + meshBox.max.y) / 2;
+
+                        if (centerY < shoulderThreshold) {
+                            // Belongs to Base
+                            virtualBase.attach(mesh);
+                        } else if (centerY < elbowThreshold) {
+                            // Belongs to Shoulder
+                            virtualShoulder.attach(mesh);
+                        } else {
+                            // Belongs to Elbow
+                            virtualElbow.attach(mesh);
+                        }
+                    });
+
+                    // Assign to global control variables
+                    window.basePart = virtualBase;
+                    window.shoulderPart = virtualShoulder;
+                    window.elbowPart = virtualElbow;
+
+                    // 4. Final Scene Setup
+                    // Move the rigged arm to correct floor position
+                    virtualBase.position.set(0, -3, 0);
+                    window.scene3D.add(virtualBase);
+
+                    console.log('[3D] Auto-Rigging Complete. Virtual Joints created.');
+                    console.log('Base:', virtualBase);
+                    console.log('Shoulder:', virtualShoulder);
+                    console.log('Elbow:', virtualElbow);
+                        console.log('[3D] GLB model loaded successfully');
+                        const statusEl = document.getElementById('3d-status');
+                        const modeEl = document.getElementById('model-mode');
+                        if (statusEl) statusEl.textContent = 'ACTIVE';
+                        if (modeEl) modeEl.textContent = 'GLB MODEL';
+                    },
+                    undefined,
+                    (error) => {
+                        console.warn('[3D] GLB load failed, using placeholder:', error);
+                        createCyberRobot();
+                    }
+                );
+
+                // Fallback to placeholder after timeout
+                setTimeout(() => {
+                    if (!window.robotModel) {
+                        createCyberRobot();
+                    }
+                }, 2000);
+
+                // Animation Loop
+                function animate3D() {
+                    requestAnimationFrame(animate3D);
+                    
+                    if (window.controls3D) window.controls3D.update();
+                    
+                    // Update robot angles with smooth interpolation
+                    window.currentBaseAngle = THREE.MathUtils.lerp(window.currentBaseAngle, window.targetBaseAngle, 0.1);
+                    window.currentShoulderAngle = THREE.MathUtils.lerp(window.currentShoulderAngle, window.targetShoulderAngle, 0.1);
+                    window.currentElbowAngle = THREE.MathUtils.lerp(window.currentElbowAngle, window.targetElbowAngle, 0.1);
+
+                    if (window.basePart) window.basePart.rotation.y = window.currentBaseAngle;
+                    if (window.shoulderPart) window.shoulderPart.rotation.x = window.currentShoulderAngle;
+                    if (window.elbowPart) window.elbowPart.rotation.x = window.currentElbowAngle;
+
+                    // Update UI telemetry
+                    if (typeof updateAngleDisplays === 'function') {
+                        updateAngleDisplays();
+                    }
+                    
+                    if (window.renderer3D && window.scene3D && window.camera3D) {
+                        window.renderer3D.render(window.scene3D, window.camera3D);
+                    }
+                }
+                animate3D();
+
+                // Resize handler
+                window.addEventListener('resize', () => {
+                    const container = document.getElementById('canvas-3d-container');
+                    if (container && window.camera3D && window.renderer3D) {
+                        window.camera3D.aspect = container.clientWidth / container.clientHeight;
+                        window.camera3D.updateProjectionMatrix();
+                        window.renderer3D.setSize(container.clientWidth, container.clientHeight);
+                    }
+                });
+
+                console.log('[3D] Robot Arm Simulator initialized');
+            `;
+
+        document.body.appendChild(script);
+        }
+
+        function updateAngleDisplays() {
+            const toDeg = (rad) => (rad * 180 / Math.PI).toFixed(1);
+
+            // Update text displays
+            const baseEl = document.getElementById('angle-base');
+            const shoulderEl = document.getElementById('angle-shoulder');
+            const elbowEl = document.getElementById('angle-elbow');
+
+            if (baseEl) baseEl.textContent = toDeg(currentBaseAngle) + '°';
+            if (shoulderEl) shoulderEl.textContent = toDeg(currentShoulderAngle) + '°';
+            if (elbowEl) elbowEl.textContent = toDeg(currentElbowAngle) + '°';
+
+            // Update progress bars (centered at 50%)
+            const updateBar = (id, angle, maxAngle) => {
+                const bar = document.getElementById(id);
+                if (bar) {
+                    const percent = ((angle / maxAngle) + 1) / 2 * 100; // Map -1~1 to 0~100
+                    bar.style.width = Math.abs(angle / maxAngle) * 50 + '%';
+                    bar.style.marginLeft = (angle < 0 ? (50 - Math.abs(angle / maxAngle) * 50) : 50) + '%';
+                }
+            };
+
+            updateBar('bar-base', currentBaseAngle, Math.PI);
+            updateBar('bar-shoulder', currentShoulderAngle, Math.PI / 2);
+            updateBar('bar-elbow', currentElbowAngle, Math.PI / 2);
+        }
+
+        // Update robot arm from gamepad (right stick)
+        function updateRobotArmFromGamepad() {
+            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+            const gp = gamepads[0];
+
+            if (!gp || !gp.connected || currentView !== 'robot') return;
+
+            // Right stick: axes[2] = X (left/right), axes[3] = Y (up/down)
+            const rightX = gp.axes[2] || 0;
+            const rightY = gp.axes[3] || 0;
+
+            // Deadzone
+            const deadzone = 0.15;
+            const applyDeadzone = (val) => Math.abs(val) < deadzone ? 0 : val;
+
+            const filteredX = applyDeadzone(rightX);
+            const filteredY = applyDeadzone(rightY);
+
+            // Incremental control
+            targetBaseAngle += filteredX * controlSpeed;
+            targetShoulderAngle += filteredY * controlSpeed;
+            targetElbowAngle += filteredY * controlSpeed * 0.5; // Follow shoulder movement
+
+            // Clamp angles
+            targetBaseAngle = Math.max(-Math.PI, Math.min(Math.PI, targetBaseAngle));
+            targetShoulderAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, targetShoulderAngle));
+            targetElbowAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, targetElbowAngle));
+        }
+
+        // Hook into existing game loop
+        const originalUpdateJoystick = window.updateJoystickLoop;
+        window.updateJoystickLoop = function () {
+            if (originalUpdateJoystick) originalUpdateJoystick();
+            updateRobotArmFromGamepad();
+        };
+
     </script>
 </body>
 

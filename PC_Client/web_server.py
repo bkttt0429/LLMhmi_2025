@@ -17,7 +17,7 @@ import json
 import websocket
 from queue import SimpleQueue, Empty
 from serial.tools import list_ports
-from flask import Flask, render_template, Response, request, jsonify
+from flask import Flask, render_template, Response, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit
 from multiprocessing import Process, Queue
 
@@ -768,6 +768,16 @@ def video_feed():
 @app.route('/favicon.ico')
 def favicon():
     return '', 204  # No Content
+
+@app.route('/models/<path:filename>')
+def serve_models(filename):
+    models_dir = os.path.join(BASE_DIR, 'models')
+    print(f"[DEBUG] Serving model: {filename} from {models_dir}")
+    try:
+        return send_from_directory(models_dir, filename)
+    except Exception as e:
+        print(f"[ERROR] Failed to serve model: {e}")
+        return str(e), 404
 
 @socketio.on('connect')
 def handle_connect():
