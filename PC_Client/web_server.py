@@ -383,7 +383,11 @@ class XboxController:
         hat_x, hat_y = self.joystick.get_hat(0)
         return {
             "left_stick_x": left_stick_x,
-            "left_stick_y": left_stick_y, # [FIX] Removed inversion to match motor direction
+            "left_stick_y": left_stick_y,
+            "right_stick_x": self.joystick.get_axis(2), # Right Stick X (Usually)
+            "right_stick_y": self.joystick.get_axis(3), # Right Stick Y (Usually)
+            "trigger_l": self.joystick.get_axis(4) if self.joystick.get_numaxes() > 4 else 0, # Left Trigger (Sometimes Axis 2 on old drivers)
+            "trigger_r": self.joystick.get_axis(5) if self.joystick.get_numaxes() > 5 else 0, # Right Trigger
             "button_a": button_a_pressed,
             "button_b": button_b_pressed,
             "button_x": button_x_pressed,
@@ -765,19 +769,23 @@ def video_feed():
     return Response(generate_frames(), 
                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.route('/favicon.ico')
-def favicon():
-    return '', 204  # No Content
+@app.route('/robot_arm_simulator.html')
+def robot_simulator():
+    """Serve the simulator with cache disabled"""
+    response = send_from_directory(BASE_DIR, 'robot_arm_simulator.html')
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 @app.route('/models/<path:filename>')
 def serve_models(filename):
     models_dir = os.path.join(BASE_DIR, 'models')
-    print(f"[DEBUG] Serving model: {filename} from {models_dir}")
-    try:
-        return send_from_directory(models_dir, filename)
-    except Exception as e:
-        print(f"[ERROR] Failed to serve model: {e}")
-        return str(e), 404
+    return send_from_directory(models_dir, filename)
+
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204  # No Content
 
 @socketio.on('connect')
 def handle_connect():
@@ -937,7 +945,8 @@ def api_control():
         if send_control_command(left, right):
             return jsonify({"status": "ok", "left": left, "right": right})
         else:
-            return jsonify({"error": "Failed to send to ESP32"}), 500
+            # 503 Service Unavailable is more appropriate for "Device Unreachable" than 500
+            return jsonify({"error": "ESP32 Unreachable"}), 503
 
     except Exception as e:
         print(f"[API] 💥 Exception: {e}")

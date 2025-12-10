@@ -402,13 +402,19 @@
     <div id="robot-view" class="flex-1 overflow-hidden p-2 sm:p-4 gap-4 view-hidden pb-20">
         <div class="h-full grid grid-cols-1 lg:grid-cols-12 gap-4" style="min-height: 500px;">
             <!-- 3D Canvas -->
-            <div class="lg:col-span-10 cyber-border rounded p-2 relative flex flex-col" style="min-height: 400px;">
+            <div id="canvas-wrapper" class="lg:col-span-10 cyber-border rounded p-2 relative flex flex-col"
+                style="min-height: 400px;">
                 <div
                     class="flex justify-between px-2 text-[10px] sm:text-xs text-gray-500 font-bold flex-wrap gap-2 mb-2">
                     <div class="flex gap-2 items-center text-green-600">
                         3D SIMULATION: <span class="text-green-400" id="3d-status">INITIALIZING</span>
                     </div>
-                    <span>RIGHT STICK: <span class="text-cyan-400 animate-pulse">ROBOT ARM</span></span>
+                    <div class="flex gap-4">
+                        <button onclick="toggle3DUI()"
+                            class="text-gray-400 hover:text-white border border-gray-700 px-2 rounded bg-black/50">TOGGLE
+                            UI</button>
+                        <span>RIGHT STICK: <span class="text-cyan-400 animate-pulse">ROBOT ARM</span></span>
+                    </div>
                 </div>
                 <div id="canvas-3d-container" class="flex-1 bg-black relative overflow-hidden border border-gray-800"
                     style="min-height: 350px;">
@@ -418,7 +424,7 @@
             </div>
 
             <!-- Telemetry Panel -->
-            <div class="lg:col-span-2 flex flex-col gap-4">
+            <div id="telemetry-panel" class="lg:col-span-2 flex flex-col gap-4">
 
                 <!-- Joint Angles -->
                 <div class="cyber-border p-3 sm:p-4 flex flex-col gap-3 relative">
@@ -714,7 +720,10 @@
             socket.on('controller_data', (data) => {
                 controllerLinked = true;
                 lastXboxUpdate = Date.now();
+
+                // Update Visuals
                 updateXboxVisual(data.left_stick_x || 0, data.left_stick_y || 0, data.stick_pressed || false);
+
                 if (data.cmd) {
                     document.getElementById('xbox-cmd').innerText = data.cmd;
                     highlightKey(data.cmd);
@@ -723,6 +732,30 @@
                 if (icon) {
                     icon.classList.remove('gamepad-inactive');
                     icon.classList.add('gamepad-active');
+                }
+
+                // === ROBOT ARM CONTROL (Right Stick) ===
+                if (currentView === 'robot' && window.robot3DInitialized) {
+                    // Deadzone for robot arm
+                    const DEADZONE = 0.15;
+                    const rx = Math.abs(data.right_stick_x) < DEADZONE ? 0 : data.right_stick_x;
+                    const ry = Math.abs(data.right_stick_y) < DEADZONE ? 0 : data.right_stick_y;
+
+                    if (rx !== 0 || ry !== 0) {
+                        const speed = 0.05; // Rotation speed
+
+                        // Base Rotation (Yaw) - RS X
+                        // Invert if necessary
+                        window.targetBaseAngle -= rx * speed;
+
+                        // Shoulder/Elbow (Pitch) - RS Y
+                        // Simple mapping: Up/Down moves shoulder
+                        window.targetShoulderAngle += ry * speed;
+
+                        // Clamp angles (Optional but good for safety)
+                        // window.targetBaseAngle = Math.max(-Math.PI, Math.min(Math.PI, window.targetBaseAngle));
+                        // window.targetShoulderAngle = Math.max(-1.5, Math.min(1.5, window.targetShoulderAngle));
+                    }
                 }
             });
         }
@@ -1048,6 +1081,16 @@
             })
                 .then(response => {
                     if (!response.ok) {
+                        if (response.status === 503) {
+                            // [SUPPRESS] 503 is "Device Unreachable" (common when ESP32 is off)
+                            // Warn only once per 5 seconds to avoid spam
+                            const now = Date.now();
+                            if (!window._last503Warn || now - window._last503Warn > 5000) {
+                                console.warn(`[KEYBOARD] Device Unreachable (503) - Check ESP32 Connection`);
+                                window._last503Warn = now;
+                            }
+                            return {}; // Return empty object to prevent downstream errors
+                        }
                         return response.text().then(text => {
                             console.error(`[KEYBOARD] Backend error ${response.status}:`, text);
                             throw new Error(`HTTP ${response.status}: ${text}`);
@@ -1318,6 +1361,9 @@
                 'Q': 'Q', 'E': 'E', 'Z': 'Z', 'C': 'C'
             };
             if (map[k]) sendCmd(map[k]);
+
+            // Robot Reset Key
+            if (k === 'R') resetRobotArm();
         });
         document.addEventListener('keyup', (e) => {
             if (['W', 'A', 'D', 'X', 'Q', 'E', 'Z', 'C'].includes(e.key.toUpperCase())) sendCmd('S');
@@ -1333,10 +1379,31 @@
         let robot3DInitialized = false;
         let scene3D, camera3D, renderer3D, controls3D;
         let robotModel, basePart, shoulderPart, elbowPart;
-        let targetBaseAngle = 0, targetShoulderAngle = 0, targetElbowAngle = 0;
-        let currentBaseAngle = 0, currentShoulderAngle = 0, currentElbowAngle = 0;
+
+        // CRITICAL: Expose to window for Three.js module and Socket access
+        window.targetBaseAngle = 0; window.targetShoulderAngle = 0; window.targetElbowAngle = 0;
+        window.currentBaseAngle = 0; window.currentShoulderAngle = 0; window.currentElbowAngle = 0;
+
         const controlSpeed = 0.03;
         const smoothFactor = 0.1;
+
+        function toggle3DUI() {
+            const panel = document.getElementById('telemetry-panel');
+            const canvasContainer = document.getElementById('canvas-wrapper');
+            if (panel && canvasContainer) {
+                if (panel.classList.contains('hidden')) {
+                    panel.classList.remove('hidden');
+                    canvasContainer.classList.remove('lg:col-span-12');
+                    canvasContainer.classList.add('lg:col-span-10');
+                } else {
+                    panel.classList.add('hidden');
+                    canvasContainer.classList.remove('lg:col-span-10');
+                    canvasContainer.classList.add('lg:col-span-12');
+                }
+                // Trigger resize
+                setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+            }
+        }
 
         function initRobot3D() {
             if (robot3DInitialized) return;
@@ -1488,33 +1555,34 @@
                     (gltf) => {
                         window.robotModel = gltf.scene;
                         
-                    // Scale fix
-                    window.robotModel.scale.set(15, 15, 15);
+                    // Scale fix - MOVED TO END
+                    // window.robotModel.scale.set(15, 15, 15); // Don't scale yet!
                     window.robotModel.position.set(0, 0, 0); 
                     
                     // CRITICAL FIX: Add to scene FIRST to ensure World Matrices are valid for 'attach'
                     window.scene3D.add(window.robotModel);
                     
-                    // Debug Helpers
-                    const axesHelper = new THREE.AxesHelper(5);
-                    window.scene3D.add(axesHelper);
-                    const boxHelper = new THREE.BoxHelper(window.robotModel, 0xffff00);
-                    window.scene3D.add(boxHelper);
-
-                    // Force Matrix Update
+                    // Force Matrix Update (on unscaled model)
                     window.scene3D.updateMatrixWorld(true);
+                    
+                    // Debug Helpers (Scale them down to match unscaled model initially if needed, but 5 is fine)
+                    const axesHelper = new THREE.AxesHelper(1);
+                    window.scene3D.add(axesHelper);
 
-                    // Conservative Material Update
+                    // Conservative Material Update (Cyber Style)
                     window.robotModel.traverse((child) => {
                         if (child.isMesh) {
                             child.castShadow = true;
                             child.receiveShadow = true;
                             if (child.material) {
-                                child.material.side = THREE.DoubleSide; 
+                                // Keep original material but ensure double-side rendering
+                                child.material.side = THREE.DoubleSide;
                                 child.material.transparent = false;
                                 child.material.opacity = 1.0;
-                                if (child.material.emissive) {
-                                    child.material.emissive = new THREE.Color(0x004400);
+                                
+                                // Add subtle cyber glow if not already emissive
+                                if (child.material.emissive && child.material.emissive.getHex() === 0) {
+                                    child.material.emissive = new THREE.Color(0x004400); // Dark Green Glow
                                     child.material.emissiveIntensity = 0.3;
                                 }
                                 child.material.needsUpdate = true;
@@ -1523,11 +1591,11 @@
                     });
                     
                     try {
-                        console.log('[3D] Starting Auto-Rigging Process...');
+                        console.log('[3D] Starting Auto-Rigging Process (Safe Mode)...');
 
                         // 2. Create Virtual Kinematic Chain & Add to Scene
                         const virtualBase = new THREE.Group(); virtualBase.name = 'Virtual_Base';
-                        window.scene3D.add(virtualBase); // Add parent to scene first!
+                        window.scene3D.add(virtualBase); // Add parent to scene first
 
                         const virtualShoulder = new THREE.Group(); virtualShoulder.name = 'Virtual_Shoulder';
                         const virtualElbow = new THREE.Group(); virtualElbow.name = 'Virtual_Elbow';
@@ -1535,26 +1603,36 @@
                         virtualBase.add(virtualShoulder);
                         virtualShoulder.add(virtualElbow);
                         
-                        // Bounds & Pivot Config (Logic remains same)
+                        // CRITICAL: Update World Matrices of the new virtual hierarchy
+                        virtualBase.updateMatrixWorld(true);
+
+                        // --- AUTO-CENTERING LOGIC (MATCHING ROBOT_ARM_SIMULATOR.HTML) ---
+                        // 1. Get Bounds
+                        const rawBox = new THREE.Box3().setFromObject(window.robotModel);
+                        const rawCenter = rawBox.getCenter(new THREE.Vector3());
+                        
+                        // 2. Shift Position: Center X/Z, Align Bottom Y to 0
+                        window.robotModel.position.x -= rawCenter.x;
+                        window.robotModel.position.z -= rawCenter.z;
+                        window.robotModel.position.y -= rawBox.min.y; 
+
+                        console.log('[3D] Auto-Centered: Offset X=' + (-rawCenter.x).toFixed(3) + ' Y=' + (-rawBox.min.y).toFixed(3) + ' Z=' + (-rawCenter.z).toFixed(3));
+
+                        // 3. Force Matrix Update BEFORE Rigging
+                        window.robotModel.updateMatrixWorld(true);
+                        // -----------------------------------
+
+                        // Bounds & Pivot Config
                         const box = new THREE.Box3().setFromObject(window.robotModel);
                         const size = box.getSize(new THREE.Vector3());
-                        const center = box.getCenter(new THREE.Vector3());
                         const minY = box.min.y;
                         const maxY = box.max.y;
                         const height = size.y;
 
-                        // Camera Auto-Fit
-                        const maxDim = Math.max(size.x, size.y, size.z);
-                        const fov = window.camera3D.fov * (Math.PI / 180);
-                        let cameraZ = Math.abs(maxDim / 2 * Math.tan(fov * 2)); // Basic fit distance
-                        cameraZ *= 2.0; // Zoom out a bit
-                        window.camera3D.position.set(center.x + cameraZ, center.y + cameraZ/2, center.z + cameraZ);
-                        window.camera3D.lookAt(center);
-                        
-                        console.log('[3D] Auto-Fit Camera:', window.camera3D.position);
-                        console.log('[3D] Model Height Range: ' + minY.toFixed(2) + ' to ' + maxY.toFixed(2) + ' (H: ' + height.toFixed(2) + ')');
+                        console.log('[3D] Raw Model Height: ' + height.toFixed(4) + ' (Unscaled)');
 
-                        // Pivot estimates
+                        // Pivot estimates (relative to unscaled height)
+                        // Note: Since we aligned bottom to 0, minY should be approx 0 now.
                         virtualShoulder.position.y = minY + height * 0.3;
                         virtualElbow.position.y = (minY + height * 0.7) - virtualShoulder.position.y;
 
@@ -1563,8 +1641,6 @@
                         window.robotModel.traverse((child) => {
                             if (child.isMesh) {
                                 meshes.push(child);
-                                child.castShadow = true;
-                                child.receiveShadow = true;
                             }
                         });
 
@@ -1585,10 +1661,41 @@
                         window.elbowPart = virtualElbow;
 
                         // 4. Final Scene Setup
-                        virtualBase.position.set(0, -3, 0); // Floor alignment
+                        console.log('[3D] Rigging Complete. Applying Scale x15...');
                         
-                        console.log('[3D] Auto-Rigging Complete. Virtual Joints created.');
+                        // Apply Scale to the ROOT of the rigged arm
+                        virtualBase.scale.set(15, 15, 15);
+                        // Ensure Base is at 0,0,0
+                        virtualBase.position.set(0, 0, 0); 
+                        
+                        // Add BoxHelper for the FINAL rigged object
+                        const riggedHelper = new THREE.BoxHelper(virtualBase, 0x00ff00);
+                        window.scene3D.add(riggedHelper);
 
+                        // FINAL AUTO-FIT CAMERA
+                        // Calculate bounds of the fully rigged and scaled arm
+                        const finalBox = new THREE.Box3().setFromObject(virtualBase);
+                        const finalSize = finalBox.getSize(new THREE.Vector3());
+                        const finalCenter = finalBox.getCenter(new THREE.Vector3());
+                        
+                        // Position Camera
+                        const maxDim = Math.max(finalSize.x, finalSize.y, finalSize.z);
+                        const fov = window.camera3D.fov * (Math.PI / 180);
+                        let cameraZ = Math.abs(maxDim / 2 * Math.tan(fov * 2)); 
+                        cameraZ *= 2.0; // Zoom factor
+                        
+                        window.camera3D.position.set(finalCenter.x + cameraZ, finalCenter.y + cameraZ/2, finalCenter.z + cameraZ);
+                        window.camera3D.lookAt(finalCenter);
+                        
+                        // Update controls target
+                        if (window.controls3D) {
+                            window.controls3D.target.copy(finalCenter);
+                            window.controls3D.update();
+                        }
+                        
+                        console.log('[3D] Final Rigged Bounds: ' + finalSize.x.toFixed(2) + ' x ' + finalSize.y.toFixed(2) + ' x ' + finalSize.z.toFixed(2));
+                        console.log('[3D] Camera Auto-Fitted to:', window.camera3D.position);
+                        
                     } catch (e) {
                         console.error('[3D] Auto-Rigging Failed:', e);
                         // Fallback: Model is already in scene (added at start)
@@ -1684,6 +1791,16 @@
             updateBar('bar-elbow', currentElbowAngle, Math.PI / 2);
         }
 
+        // Reset robot arm to zero
+        function resetRobotArm() {
+            if (currentView === 'robot') {
+                window.targetBaseAngle = 0;
+                window.targetShoulderAngle = 0;
+                window.targetElbowAngle = 0;
+                console.log('[3D] Robot Arm Reset');
+            }
+        }
+
         // Update robot arm from gamepad (right stick)
         function updateRobotArmFromGamepad() {
             const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -1703,14 +1820,14 @@
             const filteredY = applyDeadzone(rightY);
 
             // Incremental control
-            targetBaseAngle += filteredX * controlSpeed;
-            targetShoulderAngle += filteredY * controlSpeed;
-            targetElbowAngle += filteredY * controlSpeed * 0.5; // Follow shoulder movement
+            window.targetBaseAngle += filteredX * controlSpeed;
+            window.targetShoulderAngle += filteredY * controlSpeed;
+            window.targetElbowAngle += filteredY * controlSpeed * 0.5; // Follow shoulder movement
 
             // Clamp angles
-            targetBaseAngle = Math.max(-Math.PI, Math.min(Math.PI, targetBaseAngle));
-            targetShoulderAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, targetShoulderAngle));
-            targetElbowAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, targetElbowAngle));
+            window.targetBaseAngle = Math.max(-Math.PI, Math.min(Math.PI, window.targetBaseAngle));
+            window.targetShoulderAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, window.targetShoulderAngle));
+            window.targetElbowAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, window.targetElbowAngle));
         }
 
         // Hook into existing game loop
