@@ -1491,36 +1491,51 @@
                     // Scale fix
                     window.robotModel.scale.set(15, 15, 15);
                     window.robotModel.position.set(0, 0, 0); 
-                    window.robotModel.updateMatrixWorld(true);
-
-                    // FORCE MATERIAL OVERRIDE (Fix invisible model)
-                    const cyberMaterial = new THREE.MeshStandardMaterial({
-                        color: 0x00ff99,
-                        emissive: 0x004400,
-                        metalness: 0.8,
-                        roughness: 0.2,
-                        wireframe: false,
-                        side: THREE.DoubleSide
-                    });
-
-                    window.robotModel.traverse((child) => {
-                        if (child.isMesh) {
-                            child.material = cyberMaterial;
-                            child.castShadow = true;
-                            child.receiveShadow = true;
-                        }
-                    });
-
+                    
+                    // CRITICAL FIX: Add to scene FIRST to ensure World Matrices are valid for 'attach'
+                    window.scene3D.add(window.robotModel);
+                    
                     // Debug Helpers
                     const axesHelper = new THREE.AxesHelper(5);
                     window.scene3D.add(axesHelper);
                     const boxHelper = new THREE.BoxHelper(window.robotModel, 0xffff00);
                     window.scene3D.add(boxHelper);
+
+                    // Force Matrix Update
+                    window.scene3D.updateMatrixWorld(true);
+
+                    // Conservative Material Update
+                    window.robotModel.traverse((child) => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                            if (child.material) {
+                                child.material.side = THREE.DoubleSide; 
+                                child.material.transparent = false;
+                                child.material.opacity = 1.0;
+                                if (child.material.emissive) {
+                                    child.material.emissive = new THREE.Color(0x004400);
+                                    child.material.emissiveIntensity = 0.3;
+                                }
+                                child.material.needsUpdate = true;
+                            }
+                        }
+                    });
                     
                     try {
                         console.log('[3D] Starting Auto-Rigging Process...');
 
-                        // 1. Calculate Model Bounding Box
+                        // 2. Create Virtual Kinematic Chain & Add to Scene
+                        const virtualBase = new THREE.Group(); virtualBase.name = 'Virtual_Base';
+                        window.scene3D.add(virtualBase); // Add parent to scene first!
+
+                        const virtualShoulder = new THREE.Group(); virtualShoulder.name = 'Virtual_Shoulder';
+                        const virtualElbow = new THREE.Group(); virtualElbow.name = 'Virtual_Elbow';
+
+                        virtualBase.add(virtualShoulder);
+                        virtualShoulder.add(virtualElbow);
+                        
+                        // Bounds & Pivot Config (Logic remains same)
                         const box = new THREE.Box3().setFromObject(window.robotModel);
                         const size = box.getSize(new THREE.Vector3());
                         const center = box.getCenter(new THREE.Vector3());
@@ -1539,14 +1554,6 @@
                         console.log('[3D] Auto-Fit Camera:', window.camera3D.position);
                         console.log('[3D] Model Height Range: ' + minY.toFixed(2) + ' to ' + maxY.toFixed(2) + ' (H: ' + height.toFixed(2) + ')');
 
-                        // 2. Create Virtual Kinematic Chain
-                        const virtualBase = new THREE.Group(); virtualBase.name = 'Virtual_Base';
-                        const virtualShoulder = new THREE.Group(); virtualShoulder.name = 'Virtual_Shoulder';
-                        const virtualElbow = new THREE.Group(); virtualElbow.name = 'Virtual_Elbow';
-
-                        virtualBase.add(virtualShoulder);
-                        virtualShoulder.add(virtualElbow);
-                        
                         // Pivot estimates
                         virtualShoulder.position.y = minY + height * 0.3;
                         virtualElbow.position.y = (minY + height * 0.7) - virtualShoulder.position.y;
@@ -1579,14 +1586,12 @@
 
                         // 4. Final Scene Setup
                         virtualBase.position.set(0, -3, 0); // Floor alignment
-                        window.scene3D.add(virtualBase);
                         
                         console.log('[3D] Auto-Rigging Complete. Virtual Joints created.');
 
                     } catch (e) {
                         console.error('[3D] Auto-Rigging Failed:', e);
-                        // Fallback: Just add the original model
-                        window.scene3D.add(window.robotModel);
+                        // Fallback: Model is already in scene (added at start)
                         window.robotModel.position.set(0, -3, 0);
                     }
 

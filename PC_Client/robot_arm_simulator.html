@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EEZYbotARM 3D Simulator - WebGL</title>
+    <title>機器手臂 3D 調試工具</title>
     <style>
         * {
             margin: 0;
@@ -13,190 +13,110 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            overflow: hidden;
+            font-family: 'Segoe UI', sans-serif;
             background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
             color: #fff;
+            overflow: hidden;
         }
 
-        #canvas-container {
+        #container {
             width: 100vw;
             height: 100vh;
             position: relative;
         }
 
-        /* UI Overlay */
-        .ui-overlay {
+        #info {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 10;
-        }
-
-        .info-panel {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            background: rgba(15, 15, 35, 0.85);
-            backdrop-filter: blur(10px);
-            border-radius: 12px;
-            padding: 20px;
-            min-width: 280px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            pointer-events: auto;
-        }
-
-        .info-panel h2 {
-            font-size: 18px;
-            margin-bottom: 15px;
-            color: #00d4ff;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-        }
-
-        .status-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-            padding: 8px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .status-label {
-            color: #aaa;
-            font-size: 13px;
-        }
-
-        .status-value {
-            color: #fff;
-            font-weight: 600;
-            font-size: 14px;
-            font-family: 'Consolas', monospace;
-        }
-
-        .gamepad-status {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(15, 15, 35, 0.85);
-            backdrop-filter: blur(10px);
-            border-radius: 12px;
-            padding: 20px;
-            min-width: 300px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            pointer-events: auto;
-        }
-
-        .gamepad-connected {
-            color: #00ff88;
-            font-weight: bold;
-        }
-
-        .gamepad-disconnected {
-            color: #ff4444;
-            font-weight: bold;
-        }
-
-        .axis-display {
-            margin-top: 15px;
-        }
-
-        .axis-bar {
-            margin-bottom: 12px;
-        }
-
-        .axis-label {
-            font-size: 12px;
-            color: #aaa;
-            margin-bottom: 5px;
-        }
-
-        .axis-bar-bg {
-            width: 100%;
-            height: 8px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 4px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .axis-bar-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #00d4ff, #00ff88);
-            border-radius: 4px;
-            transition: width 0.1s ease;
-        }
-
-        .controls-help {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            background: rgba(15, 15, 35, 0.85);
-            backdrop-filter: blur(10px);
-            border-radius: 12px;
-            padding: 20px;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
             max-width: 350px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            pointer-events: auto;
+            font-size: 12px;
+            z-index: 100;
+            max-height: 90vh;
+            overflow-y: auto;
         }
 
-        .controls-help h3 {
-            font-size: 16px;
-            margin-bottom: 12px;
+        #info h3 {
+            color: #00ff88;
+            margin-bottom: 10px;
+        }
+
+        #info pre {
+            background: #1a1a1a;
+            padding: 8px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 10px;
+            margin: 5px 0;
             color: #00d4ff;
         }
 
-        .controls-help ul {
-            list-style: none;
-            font-size: 13px;
-            line-height: 1.8;
+        .status {
+            margin: 5px 0;
+            padding: 5px;
+            background: rgba(0, 255, 136, 0.1);
+            border-left: 3px solid #00ff88;
         }
 
-        .controls-help li {
-            color: #ccc;
-            margin-bottom: 5px;
+        .error {
+            background: rgba(255, 68, 68, 0.1);
+            border-left: 3px solid #ff4444;
         }
 
-        .controls-help li strong {
-            color: #00ff88;
-            font-weight: 600;
+        .warning {
+            background: rgba(255, 170, 0, 0.1);
+            border-left: 3px solid #ffaa00;
         }
 
-        /* Loading Screen */
-        .loading-screen {
+        #controls {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-            transition: opacity 0.5s ease;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 100;
         }
 
-        .loading-screen.hidden {
-            opacity: 0;
-            pointer-events: none;
+        button {
+            background: #00ff88;
+            color: #000;
+            border: none;
+            padding: 8px 15px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background: #00d4ff;
+        }
+
+        input[type="file"] {
+            margin: 5px 0;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 50;
         }
 
         .spinner {
             border: 4px solid rgba(255, 255, 255, 0.1);
-            border-top: 4px solid #00d4ff;
+            border-top: 4px solid #00ff88;
             border-radius: 50%;
             width: 60px;
             height: 60px;
             animation: spin 1s linear infinite;
+            margin: 0 auto;
         }
 
         @keyframes spin {
@@ -208,489 +128,303 @@
                 transform: rotate(360deg);
             }
         }
-
-        .loading-text {
-            margin-top: 20px;
-            font-size: 16px;
-            color: #00d4ff;
-        }
-
-        .model-warning {
-            margin-top: 30px;
-            padding: 20px;
-            background: rgba(255, 68, 68, 0.1);
-            border: 1px solid rgba(255, 68, 68, 0.3);
-            border-radius: 8px;
-            max-width: 500px;
-            text-align: center;
-        }
-
-        .model-warning h3 {
-            color: #ff4444;
-            margin-bottom: 10px;
-        }
-
-        .model-warning p {
-            color: #ffaaaa;
-            font-size: 14px;
-            line-height: 1.6;
-        }
     </style>
 </head>
 
 <body>
-    <div id="canvas-container"></div>
+    <div id="container"></div>
 
-    <div class="ui-overlay">
-        <!-- Info Panel -->
-        <div class="info-panel">
-            <h2>🤖 機器手臂狀態</h2>
-            <div class="status-item">
-                <span class="status-label">底座旋轉 (Base)</span>
-                <span class="status-value" id="base-angle">0°</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">大臂 (Shoulder)</span>
-                <span class="status-value" id="shoulder-angle">0°</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">小臂 (Elbow)</span>
-                <span class="status-value" id="elbow-angle">0°</span>
-            </div>
-        </div>
-
-        <!-- Gamepad Status -->
-        <div class="gamepad-status">
-            <h2>🎮 Xbox 控制器</h2>
-            <div class="status-item">
-                <span class="status-label">狀態</span>
-                <span class="status-value" id="gamepad-status">未連接</span>
-            </div>
-            <div class="axis-display" id="axis-display" style="display: none;">
-                <div class="axis-bar">
-                    <div class="axis-label">左搖桿 X (底座旋轉)</div>
-                    <div class="axis-bar-bg">
-                        <div class="axis-bar-fill" id="axis-0" style="width: 50%;"></div>
-                    </div>
-                </div>
-                <div class="axis-bar">
-                    <div class="axis-label">左搖桿 Y (大臂)</div>
-                    <div class="axis-bar-bg">
-                        <div class="axis-bar-fill" id="axis-1" style="width: 50%;"></div>
-                    </div>
-                </div>
-                <div class="axis-bar">
-                    <div class="axis-label">右搖桿 Y (小臂)</div>
-                    <div class="axis-bar-bg">
-                        <div class="axis-bar-fill" id="axis-3" style="width: 50%;"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Controls Help -->
-        <div class="controls-help">
-            <h3>📋 操作說明</h3>
-            <ul>
-                <li><strong>滑鼠拖曳：</strong>旋轉視角</li>
-                <li><strong>滑鼠滾輪：</strong>縮放</li>
-                <li><strong>滑鼠右鍵：</strong>平移視角</li>
-                <li><strong>左搖桿 ←→：</strong>底座旋轉</li>
-                <li><strong>左搖桿 ↑↓：</strong>大臂上下</li>
-                <li><strong>右搖桿 ↑↓：</strong>小臂伸縮</li>
-            </ul>
-        </div>
-    </div>
-
-    <!-- Loading Screen -->
-    <div class="loading-screen" id="loading-screen">
+    <div id="loading">
         <div class="spinner"></div>
-        <div class="loading-text">載入中...</div>
-        <div class="model-warning">
-            <h3>⚠️ 模型檔案需求</h3>
-            <p>請將您的 <strong>eezybotarm.glb</strong> 模型檔案放在與此 HTML 檔案相同的目錄下。</p>
-            <p style="margin-top: 10px;">模型應包含以下部件名稱：<br>
-                • Base 或 Waist (底座)<br>
-                • Shoulder 或 MainArm (大臂)<br>
-                • Elbow 或 Forearm (小臂)</p>
-        </div>
+        <p style="margin-top: 20px; color: #00ff88;">正在載入模型...</p>
     </div>
 
-    <!-- Three.js via CDN (ESM) -->
+    <div id="info">
+        <h3>🔍 模型診斷資訊</h3>
+        <div id="log"></div>
+    </div>
+
+    <div id="controls">
+        <h4 style="margin-bottom: 10px; color: #00ff88;">模型控制</h4>
+        <input type="file" id="fileInput" accept=".glb,.gltf" />
+        <br>
+        <button onclick="toggleWireframe()">切換線框模式</button>
+        <button onclick="toggleAxes()">切換座標軸</button>
+        <button onclick="resetCamera()">重設相機</button>
+        <button onclick="dumpModelInfo()">顯示完整結構</button>
+    </div>
+
     <script type="importmap">
-        {
-            "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-            }
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
         }
+    }
     </script>
 
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
-        // ==================== Scene Setup ====================
+        // === Setup ===
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a2e);
-        scene.fog = new THREE.Fog(0x1a1a2e, 50, 100);
+        scene.background = new THREE.Color(0x0a0a0a);
 
-        // Camera
         const camera = new THREE.PerspectiveCamera(
-            50,
+            60,
             window.innerWidth / window.innerHeight,
             0.1,
             1000
         );
-        camera.position.set(5, 4, 8);
+        camera.position.set(5, 5, 5);
 
-        // Renderer
-        const renderer = new THREE.WebGLRenderer({
-            antialias: true,
-            alpha: true
-        });
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setPixelRatio(window.devicePixelRatio);
         renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.2;
-        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        document.getElementById('container').appendChild(renderer.domElement);
 
-        document.getElementById('canvas-container').appendChild(renderer.domElement);
-
-        // Controls
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
-        controls.minDistance = 3;
-        controls.maxDistance = 20;
-        controls.maxPolarAngle = Math.PI / 2;
 
-        // ==================== Lighting ====================
-        // Ambient Light
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        // === Lighting ===
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
 
-        // Main Directional Light (with shadow)
-        const mainLight = new THREE.DirectionalLight(0xffffff, 1.5);
-        mainLight.position.set(10, 15, 10);
-        mainLight.castShadow = true;
-        mainLight.shadow.mapSize.width = 2048;
-        mainLight.shadow.mapSize.height = 2048;
-        mainLight.shadow.camera.near = 0.5;
-        mainLight.shadow.camera.far = 50;
-        mainLight.shadow.camera.left = -10;
-        mainLight.shadow.camera.right = 10;
-        mainLight.shadow.camera.top = 10;
-        mainLight.shadow.camera.bottom = -10;
-        scene.add(mainLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(5, 10, 5);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
 
-        // Fill Light
-        const fillLight = new THREE.DirectionalLight(0x4488ff, 0.4);
+        const fillLight = new THREE.DirectionalLight(0x4488ff, 0.5);
         fillLight.position.set(-5, 5, -5);
         scene.add(fillLight);
 
-        // Rim Light
-        const rimLight = new THREE.PointLight(0xff8844, 0.8, 30);
-        rimLight.position.set(0, 8, -8);
-        scene.add(rimLight);
-
-        // ==================== Ground & Grid ====================
-        // Grid Helper
-        const gridHelper = new THREE.GridHelper(20, 20, 0x00d4ff, 0x444444);
-        gridHelper.material.opacity = 0.3;
-        gridHelper.material.transparent = true;
+        // === Grid ===
+        const gridHelper = new THREE.GridHelper(10, 10, 0x00ff88, 0x444444);
         scene.add(gridHelper);
 
-        // Ground Plane (receives shadow)
-        const groundGeometry = new THREE.PlaneGeometry(20, 20);
-        const groundMaterial = new THREE.ShadowMaterial({ opacity: 0.3 });
-        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-        ground.rotation.x = -Math.PI / 2;
-        ground.receiveShadow = true;
-        scene.add(ground);
+        const axesHelper = new THREE.AxesHelper(5);
+        scene.add(axesHelper);
+        window.axesHelper = axesHelper;
 
-        // ==================== Robot Arm Model ====================
-        let robotModel = null;
-        let basePart = null;
-        let shoulderPart = null;
-        let elbowPart = null;
+        // === Logging ===
+        function log(msg, type = 'status') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = type;
+            entry.innerHTML = `<small>${new Date().toLocaleTimeString()}</small> ${msg}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(msg);
+        }
 
-        // Target angles (controlled by gamepad)
-        let targetBaseAngle = 0;
-        let targetShoulderAngle = 0;
-        let targetElbowAngle = 0;
+        // === Model Loading ===
+        let loadedModel = null;
+        let wireframeMode = false;
+        const loader = new GLTFLoader();
 
-        // Current angles (smoothly interpolated)
-        let currentBaseAngle = 0;
-        let currentShoulderAngle = 0;
-        let currentElbowAngle = 0;
+        function loadModel(url) {
+            log(`📂 載入模型: ${url}`, 'status');
+            document.getElementById('loading').style.display = 'block';
 
-        // Control sensitivity
-        const controlSpeed = 0.03;
-        const smoothFactor = 0.1;
+            loader.load(
+                url,
+                (gltf) => {
+                    document.getElementById('loading').style.display = 'none';
+                    log('✅ 模型載入成功', 'status');
 
-        // GLTF Loader
-        const gltfLoader = new GLTFLoader();
+                    if (loadedModel) {
+                        scene.remove(loadedModel);
+                    }
 
-        // ⚠️ IMPORTANT: Replace 'eezybotarm.glb' with your actual model file path
-        const modelPath = './eezybotarm.glb';
+                    loadedModel = gltf.scene;
+                    scene.add(loadedModel);
 
-        gltfLoader.load(
-            modelPath,
-            (gltf) => {
-                robotModel = gltf.scene;
+                    // 分析模型結構
+                    analyzeModel(loadedModel);
 
-                // Enable shadows for all meshes
-                robotModel.traverse((child) => {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                        child.receiveShadow = true;
+                    // 自動調整相機
+                    fitCameraToModel(loadedModel);
 
-                        // Enhance materials for PBR
-                        if (child.material) {
-                            child.material.metalness = 0.4;
-                            child.material.roughness = 0.6;
+                    // 啟用陰影
+                    loadedModel.traverse((child) => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
                         }
-                    }
-                });
-
-                // ⚠️ CRITICAL: Find named parts in the model
-                // Adjust these names to match your actual model structure
-                robotModel.traverse((child) => {
-                    const name = child.name.toLowerCase();
-
-                    // Base / Waist detection
-                    if (!basePart && (name.includes('base') || name.includes('waist'))) {
-                        basePart = child;
-                        console.log('✅ Found Base:', child.name);
-                    }
-
-                    // Shoulder / MainArm detection
-                    if (!shoulderPart && (name.includes('shoulder') || name.includes('mainarm') || name.includes('main_arm'))) {
-                        shoulderPart = child;
-                        console.log('✅ Found Shoulder:', child.name);
-                    }
-
-                    // Elbow / Forearm detection
-                    if (!elbowPart && (name.includes('elbow') || name.includes('forearm') || name.includes('fore_arm'))) {
-                        elbowPart = child;
-                        console.log('✅ Found Elbow:', child.name);
-                    }
-                });
-
-                // Warning if parts not found
-                if (!basePart) console.warn('⚠️ Base part not found! Check model naming.');
-                if (!shoulderPart) console.warn('⚠️ Shoulder part not found! Check model naming.');
-                if (!elbowPart) console.warn('⚠️ Elbow part not found! Check model naming.');
-
-                scene.add(robotModel);
-                console.log('✅ Robot model loaded successfully');
-
-                // Hide loading screen
-                setTimeout(() => {
-                    document.getElementById('loading-screen').classList.add('hidden');
-                }, 500);
-            },
-            (progress) => {
-                const percent = (progress.loaded / progress.total * 100).toFixed(0);
-                document.querySelector('.loading-text').textContent = `載入中... ${percent}%`;
-            },
-            (error) => {
-                console.error('❌ Model loading failed:', error);
-                document.querySelector('.loading-text').textContent = '模型載入失敗';
-                document.querySelector('.loading-text').style.color = '#ff4444';
-                document.querySelector('.model-warning h3').textContent = '❌ 載入失敗';
-                document.querySelector('.model-warning p').innerHTML =
-                    `請確認 <strong>${modelPath}</strong> 檔案存在且路徑正確。<br>錯誤訊息: ${error.message}`;
-            }
-        );
-
-        // Create a placeholder/demo robot if model fails to load
-        function createPlaceholderRobot() {
-            const placeholderGroup = new THREE.Group();
-
-            // Base
-            const baseGeo = new THREE.CylinderGeometry(0.8, 1, 0.3, 16);
-            const baseMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.6, roughness: 0.4 });
-            basePart = new THREE.Mesh(baseGeo, baseMat);
-            basePart.castShadow = true;
-            basePart.receiveShadow = true;
-            basePart.position.y = 0.15;
-            placeholderGroup.add(basePart);
-
-            // Shoulder (arm segment 1)
-            const shoulderGeo = new THREE.BoxGeometry(0.4, 2, 0.4);
-            const shoulderMat = new THREE.MeshStandardMaterial({ color: 0xff6600, metalness: 0.5, roughness: 0.5 });
-            shoulderPart = new THREE.Mesh(shoulderGeo, shoulderMat);
-            shoulderPart.castShadow = true;
-            shoulderPart.position.set(0, 1.3, 0);
-            basePart.add(shoulderPart);
-
-            // Elbow (arm segment 2)
-            const elbowGeo = new THREE.BoxGeometry(0.3, 1.5, 0.3);
-            const elbowMat = new THREE.MeshStandardMaterial({ color: 0x00aaff, metalness: 0.5, roughness: 0.5 });
-            elbowPart = new THREE.Mesh(elbowGeo, elbowMat);
-            elbowPart.castShadow = true;
-            elbowPart.position.set(0, 1.5, 0);
-            shoulderPart.add(elbowPart);
-
-            scene.add(placeholderGroup);
-            robotModel = placeholderGroup;
-
-            console.log('✅ Placeholder robot created');
+                    });
+                },
+                (progress) => {
+                    const percent = (progress.loaded / progress.total * 100).toFixed(0);
+                    log(`⏳ 載入進度: ${percent}%`, 'status');
+                },
+                (error) => {
+                    document.getElementById('loading').style.display = 'none';
+                    log(`❌ 載入失敗: ${error.message}`, 'error');
+                    console.error(error);
+                }
+            );
         }
 
-        // Create placeholder after 3 seconds if model hasn't loaded
-        setTimeout(() => {
-            if (!robotModel) {
-                createPlaceholderRobot();
-                document.getElementById('loading-screen').classList.add('hidden');
-                console.log('⚠️ Using placeholder robot');
-            }
-        }, 3000);
+        function analyzeModel(model) {
+            log('<br><strong>🔬 模型結構分析:</strong>', 'status');
 
-        // ==================== Gamepad Integration ====================
-        let gamepadConnected = false;
-        let gamepadIndex = null;
+            const box = new THREE.Box3().setFromObject(model);
+            const size = box.getSize(new THREE.Vector3());
+            const center = box.getCenter(new THREE.Vector3());
 
-        window.addEventListener('gamepadconnected', (e) => {
-            gamepadConnected = true;
-            gamepadIndex = e.gamepad.index;
-            console.log('🎮 Gamepad connected:', e.gamepad.id);
-            updateGamepadUI(true);
-        });
+            log(`📏 尺寸: ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`, 'status');
+            log(`📍 中心: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`, 'status');
 
-        window.addEventListener('gamepaddisconnected', (e) => {
-            gamepadConnected = false;
-            gamepadIndex = null;
-            console.log('🎮 Gamepad disconnected');
-            updateGamepadUI(false);
-        });
+            let meshCount = 0;
+            let nodeCount = 0;
+            const nodeNames = [];
 
-        function updateGamepadUI(connected) {
-            const statusElement = document.getElementById('gamepad-status');
-            const axisDisplay = document.getElementById('axis-display');
+            model.traverse((child) => {
+                nodeCount++;
+                if (child.name) {
+                    nodeNames.push(child.name);
+                }
+                if (child.isMesh) {
+                    meshCount++;
+                    log(`🔷 Mesh: "${child.name}" | 材質: ${child.material.type} | 三角形: ${child.geometry.index ? child.geometry.index.count / 3 : 'N/A'}`, 'status');
+                }
+            });
 
-            if (connected) {
-                statusElement.textContent = '已連接';
-                statusElement.className = 'status-value gamepad-connected';
-                axisDisplay.style.display = 'block';
+            log(`📊 節點數: ${nodeCount} | Mesh數: ${meshCount}`, 'status');
+            log('<strong>🏷️ 所有節點名稱:</strong>', 'status');
+            log(`<pre>${nodeNames.join('\n')}</pre>`, 'status');
+
+            // 檢查可能的關節名稱
+            const possibleJoints = nodeNames.filter(name =>
+                name.toLowerCase().includes('base') ||
+                name.toLowerCase().includes('shoulder') ||
+                name.toLowerCase().includes('elbow') ||
+                name.toLowerCase().includes('joint') ||
+                name.toLowerCase().includes('arm')
+            );
+
+            if (possibleJoints.length > 0) {
+                log(`🎯 可能的關節: ${possibleJoints.join(', ')}`, 'status');
             } else {
-                statusElement.textContent = '未連接';
-                statusElement.className = 'status-value gamepad-disconnected';
-                axisDisplay.style.display = 'none';
+                log('⚠️ 未找到明顯的關節名稱', 'warning');
             }
         }
 
-        function updateGamepadInput() {
-            if (!gamepadConnected) return;
+        function fitCameraToModel(model) {
+            const box = new THREE.Box3().setFromObject(model);
+            const size = box.getSize(new THREE.Vector3());
+            const center = box.getCenter(new THREE.Vector3());
 
-            const gamepads = navigator.getGamepads();
-            if (!gamepads[gamepadIndex]) return;
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov = camera.fov * (Math.PI / 180);
+            let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+            cameraZ *= 2.5; // 留點空間
 
-            const gamepad = gamepads[gamepadIndex];
-
-            // Xbox controller axes mapping:
-            // axes[0] = Left stick X (left/right)
-            // axes[1] = Left stick Y (up/down)
-            // axes[2] = Right stick X
-            // axes[3] = Right stick Y (up/down)
-
-            const leftX = gamepad.axes[0] || 0;  // Base rotation
-            const leftY = gamepad.axes[1] || 0;  // Shoulder
-            const rightY = gamepad.axes[3] || 0; // Elbow
-
-            // Deadzone filtering
-            const deadzone = 0.15;
-            const filterDeadzone = (value) => Math.abs(value) < deadzone ? 0 : value;
-
-            const filteredLeftX = filterDeadzone(leftX);
-            const filteredLeftY = filterDeadzone(leftY);
-            const filteredRightY = filterDeadzone(rightY);
-
-            // Incremental control (not direct mapping)
-            targetBaseAngle += filteredLeftX * controlSpeed;
-            targetShoulderAngle += filteredLeftY * controlSpeed;
-            targetElbowAngle += filteredRightY * controlSpeed;
-
-            // Clamp angles to reasonable limits
-            targetBaseAngle = THREE.MathUtils.clamp(targetBaseAngle, -Math.PI, Math.PI);
-            targetShoulderAngle = THREE.MathUtils.clamp(targetShoulderAngle, -Math.PI / 2, Math.PI / 2);
-            targetElbowAngle = THREE.MathUtils.clamp(targetElbowAngle, -Math.PI / 2, Math.PI / 2);
-
-            // Update UI
-            updateAxisBar('axis-0', filteredLeftX);
-            updateAxisBar('axis-1', filteredLeftY);
-            updateAxisBar('axis-3', filteredRightY);
-        }
-
-        function updateAxisBar(id, value) {
-            const bar = document.getElementById(id);
-            if (bar) {
-                const width = ((value + 1) / 2) * 100; // Convert -1~1 to 0~100%
-                bar.style.width = width + '%';
-            }
-        }
-
-        // ==================== Animation & Control ====================
-        function updateRobotAngles() {
-            // Smooth interpolation (Lerp) for realistic movement
-            currentBaseAngle = THREE.MathUtils.lerp(currentBaseAngle, targetBaseAngle, smoothFactor);
-            currentShoulderAngle = THREE.MathUtils.lerp(currentShoulderAngle, targetShoulderAngle, smoothFactor);
-            currentElbowAngle = THREE.MathUtils.lerp(currentElbowAngle, targetElbowAngle, smoothFactor);
-
-            // Apply rotations to robot parts
-            if (basePart) {
-                basePart.rotation.y = currentBaseAngle;
-            }
-            if (shoulderPart) {
-                shoulderPart.rotation.x = currentShoulderAngle;
-            }
-            if (elbowPart) {
-                elbowPart.rotation.x = currentElbowAngle;
-            }
-
-            // Update UI display
-            document.getElementById('base-angle').textContent =
-                (currentBaseAngle * 180 / Math.PI).toFixed(1) + '°';
-            document.getElementById('shoulder-angle').textContent =
-                (currentShoulderAngle * 180 / Math.PI).toFixed(1) + '°';
-            document.getElementById('elbow-angle').textContent =
-                (currentElbowAngle * 180 / Math.PI).toFixed(1) + '°';
-        }
-
-        // ==================== Animation Loop ====================
-        function animate() {
-            requestAnimationFrame(animate);
-
-            // Update gamepad input
-            updateGamepadInput();
-
-            // Update robot angles with smooth interpolation
-            updateRobotAngles();
-
-            // Update controls
+            camera.position.set(center.x + cameraZ, center.y + cameraZ / 2, center.z + cameraZ);
+            camera.lookAt(center);
+            controls.target.copy(center);
             controls.update();
 
-            // Render scene
-            renderer.render(scene, camera);
+            log(`📷 相機已調整至最佳位置`, 'status');
         }
 
-        // ==================== Responsive Resize ====================
+        // === Controls ===
+        window.toggleWireframe = function () {
+            wireframeMode = !wireframeMode;
+            if (loadedModel) {
+                loadedModel.traverse((child) => {
+                    if (child.isMesh) {
+                        child.material.wireframe = wireframeMode;
+                    }
+                });
+                log(`🔲 線框模式: ${wireframeMode ? '開啟' : '關閉'}`, 'status');
+            }
+        };
+
+        window.toggleAxes = function () {
+            axesHelper.visible = !axesHelper.visible;
+            log(`📐 座標軸: ${axesHelper.visible ? '顯示' : '隱藏'}`, 'status');
+        };
+
+        window.resetCamera = function () {
+            if (loadedModel) {
+                fitCameraToModel(loadedModel);
+            } else {
+                camera.position.set(5, 5, 5);
+                camera.lookAt(0, 0, 0);
+            }
+        };
+
+        window.dumpModelInfo = function () {
+            if (!loadedModel) {
+                log('❌ 沒有載入的模型', 'error');
+                return;
+            }
+
+            log('<br><strong>📋 完整模型樹狀結構:</strong>', 'status');
+            let output = '';
+            loadedModel.traverse((child) => {
+                const indent = '  '.repeat(getDepth(child));
+                const type = child.type;
+                const name = child.name || '(無名稱)';
+                output += `${indent}└─ [${type}] ${name}\n`;
+
+                if (child.isMesh) {
+                    output += `${indent}   ├─ 材質: ${child.material.name || child.material.type}\n`;
+                    output += `${indent}   └─ 幾何: ${child.geometry.type}\n`;
+                }
+            });
+            log(`<pre>${output}</pre>`, 'status');
+        };
+
+        function getDepth(node) {
+            let depth = 0;
+            let current = node;
+            while (current.parent) {
+                depth++;
+                current = current.parent;
+            }
+            return depth;
+        }
+
+        // === File Input ===
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const url = URL.createObjectURL(file);
+                loadModel(url);
+            }
+        });
+
+        // === Animation ===
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // === Resize ===
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        // ==================== Start Animation ====================
-        animate();
-        console.log('🚀 Simulator started');
-        console.log('💡 Connect your Xbox controller and use the joysticks to control the robot arm!');
+        // === Auto-load default model ===
+        const defaultModelPath = './models/eezybotarm.glb';
+        log('🚀 啟動診斷工具', 'status');
+        log(`嘗試載入預設模型: ${defaultModelPath}`, 'status');
+        loadModel(defaultModelPath);
+
+        // === Export for debugging ===
+        window.scene = scene;
+        window.camera = camera;
+        window.loadedModel = () => loadedModel;
     </script>
 </body>
 
