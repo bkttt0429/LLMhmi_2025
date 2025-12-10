@@ -749,12 +749,19 @@
                         window.targetBaseAngle -= rx * speed;
 
                         // Shoulder/Elbow (Pitch) - RS Y
-                        // Simple mapping: Up/Down moves shoulder
                         window.targetShoulderAngle += ry * speed;
+                        // Linked Elbow Movement for natural look
+                        window.targetElbowAngle += ry * speed * 0.5;
 
-                        // Clamp angles (Optional but good for safety)
-                        // window.targetBaseAngle = Math.max(-Math.PI, Math.min(Math.PI, window.targetBaseAngle));
-                        // window.targetShoulderAngle = Math.max(-1.5, Math.min(1.5, window.targetShoulderAngle));
+                        // Debug Log (Throttle to avoid spam)
+                        if (Math.random() < 0.05) {
+                            console.log(`[SOCKET] Arm Control → Base:${window.targetBaseAngle.toFixed(2)} Shldr:${window.targetShoulderAngle.toFixed(2)}`);
+                        }
+
+                        // Clamp angles
+                        window.targetBaseAngle = Math.max(-Math.PI, Math.min(Math.PI, window.targetBaseAngle));
+                        window.targetShoulderAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, window.targetShoulderAngle));
+                        window.targetElbowAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, window.targetElbowAngle));
                     }
                 }
             });
