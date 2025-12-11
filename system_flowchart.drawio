@@ -1,0 +1,19 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36" version="29.2.7">
+  <diagram id="Comm-Flow" name="Communication Flow">
+    <mxGraphModel dx="1042" dy="527" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="lane_web" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Web Client (Frontend)" vertex="1">
+          <mxGeometry height="500" width="280" x="40" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="node_js_main" parent="lane_web" style="rounded=1;whiteSpace=wrap;html=1;" value="Main Logic (JS)&#xa;Socket.IO Client" vertex="1">
+          <mxGeometry height="60" width="160" x="60" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="node_web_ui" parent="lane_web" style="rounded=1;whiteSpace=wrap;html=1;" value="UI Control&#xa;(Joystick/Keyboard)" vertex="1">
+          <mxGeometry height="60" width="160" x="60" y="200" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

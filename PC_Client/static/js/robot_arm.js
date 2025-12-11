@@ -60,6 +60,12 @@ function initRobot3D() {
     controls3D.minDistance = 0.01;
     controls3D.maxDistance = 100;
 
+    // DEBUG: Log Camera Position for User Calibration
+    controls3D.addEventListener('change', () => {
+        const p = camera3D.position;
+        console.log(`[3D] CAM: X=${p.x.toFixed(3)}, Y=${p.y.toFixed(3)}, Z=${p.z.toFixed(3)}`);
+    });
+
     // Lighting
     const ambientLight = new THREE.AmbientLight(0x00ff99, 0.4);
     scene3D.add(ambientLight);
@@ -215,16 +221,31 @@ function autoRigModel() {
     const box = new THREE.Box3().setFromObject(robotModel);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
-    const minY = box.min.y;
+    let minY = box.min.y;
     const height = size.y;
 
-    console.log(`[3D] Model Height: ${height.toFixed(2)}, MinY: ${minY.toFixed(2)}`);
+    console.log(`[3D] Raw Model Height: ${height.toFixed(2)}, MinY: ${minY.toFixed(2)}`);
+
+    // AUTO-CORRECTION: If model is "underground", shift it up to Y=0
+    if (minY < -0.01) {
+        const offset = -minY;
+        console.log(`[3D] 🛠 Fixing Origin: Shifting model UP by ${offset.toFixed(3)} to sit on floor.`);
+
+        robotModel.position.y += offset;
+        robotModel.updateMatrixWorld(true);
+
+        // Re-measure after shift
+        box.setFromObject(robotModel);
+        minY = box.min.y; // Should be ~0.00
+    }
+
+    console.log(`[3D] Corrected Model Height: ${height.toFixed(2)}, MinY: ${minY.toFixed(2)}`);
 
     // Pivot Estimates relative to Model Base (minY)
-    // These ratios are tuned for EEZYbotARM MK2/MK3 geometry
-    const pivotShoulderY = minY + height * 0.42;
-    const pivotElbowY = minY + height * 0.81;
-    const pivotGripperY = minY + height * 0.95; // Rough estimate for gripper base
+    // Adjusted: Lowered thresholds to catch bolts near the joints
+    const pivotShoulderY = minY + height * 0.25; // Was 0.42
+    const pivotElbowY = minY + height * 0.70;    // Was 0.81
+    const pivotGripperY = minY + height * 0.95;  // Rough estimate
 
     // 2. Create Kinematic Groups (The "Rig")
     // Structure: Base -> LowerArm (Shoulder) -> UpperArm (Elbow) -> Gripper
@@ -257,26 +278,70 @@ function autoRigModel() {
     rigGripper.position.set(0, pivotGripperY - pivotElbowY, 0);
     rigUpperArm.add(rigGripper);
 
-    // 3. Categorize Meshes (Filtering Logic)
+    // 3. Categorize Meshes (Strict Hardware Binding)
     const clusters = { base: [], lowerArm: [], upperArm: [], gripper: [] };
 
-    // Grouping Helpers (Renamed to avoid scope conflicts)
+    // --- HARDWARE DEFS (Strict Substring Matches) ---
+    // Group: Rig_UpperArm (Elbow Joint)
+    const UPPER_ARM_HARDWARE = [
+        "DIN7991_M3x22mm__10__M3 Nuts_0",
+        "DIN912_M4x25mm_2_M4 Bolts_0",
+        "EBA3_012_MK3_0",
+        "eba3_006", "upper", "ecrou", "m3 nuts"
+    ];
 
-    // Base: Structural parts only
-    const checkBase = (n) =>
-        ['eba3_001', 'eba3_014', 'base', 'bottom'].some(k => n.includes(k));
+    // Group: Rig_LowerArm (Shoulder Joint)
+    const LOWER_ARM_HARDWARE = [
+        "EBA3_005_1_MK3_0",
+        "EBA3_002_MK3_0",
+        "DIN912_M4x25mm_2",
+        "din912", "m4_washer", "step", "motor"
+    ];
 
-    // Gripper: Distinctive parts
-    const checkGripper = (n) =>
-        ['tower', 'finger', 'horn', 'gear'].some(k => n.includes(k));
+    // Group: Rig_Gripper (Fingers)
+    const GRIPPER_HARDWARE = [
+        // Right Finger Set
+        "DIN7991_M3x16mm__8__2_M3 Nuts_0",
+        "M3_Nut_igs_4_M3 Nuts_0",
+        "3D_print_part_14___Right_finger_1_MK3_0",
+        // Left Finger Set
+        "DIN7991_M3x16mm__8__M3 Nuts_0",
+        "M3_Nut_igs_5_M3 Nuts_0",
+        "3D_print_part_12___Left_finger_1_MK3_0",
+        // Generic
+        "tower", "finger", "horn", "gear", "din7991_m3x16mm"
+    ];
 
-    // Upper Arm: Specific parts
-    const checkUpperArm = (n) =>
-        ['eba3_006', 'upper'].some(k => n.includes(k));
+    // Strict Check Helpers
+    const isPart = (name, list) => list.some(k => name.includes(k.toLowerCase())); // Lowercase check
 
-    // Lower Arm: Specific parts
-    const checkLowerArm = (n) =>
-        ['eba3_005', 'step', 'motor'].some(k => n.includes(k));
+    const checkGripper = (n) => isPart(n, GRIPPER_HARDWARE.map(s => s.toLowerCase()));
+    const checkUpperArm = (n) => isPart(n, UPPER_ARM_HARDWARE.map(s => s.toLowerCase()));
+    const checkLowerArm = (n) => isPart(n, LOWER_ARM_HARDWARE.map(s => s.toLowerCase()));
+    const checkBase = (n) => ['eba3_001', 'eba3_014', 'base', 'bottom'].some(k => n.includes(k));
+
+    // Pivot Estimates logic moved to top of function (lines 246-248)
+
+    // --- PIVOT VISUALIZATION (Pivot Point Strategy) ---
+    // User Manual Calibration Markers
+    const sphereGeo = new THREE.SphereGeometry(0.02, 16, 16);
+
+    // Shoulder Pivot (Red)
+    const debugShoulder = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color: 0xff0000 }));
+    debugShoulder.position.set(0, pivotShoulderY, 0);
+    scene3D.add(debugShoulder);
+
+    // Elbow Pivot (Green)
+    const debugElbow = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color: 0x00ff00 }));
+    debugElbow.position.set(0, pivotElbowY, 0);
+    scene3D.add(debugElbow);
+
+    // Gripper Pivot (Blue)
+    const debugGripper = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color: 0x0000ff }));
+    debugGripper.position.set(0, pivotGripperY, 0);
+    scene3D.add(debugGripper);
+
+    console.log(`[3D] PIVOT DEBUG: ShoulderY=${pivotShoulderY.toFixed(3)}, ElbowY=${pivotElbowY.toFixed(3)}`);
 
     // Generic bits that are scattered everywhere - DO NOT put in specific lists:
     // 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'washer', 'bearing', 'nut', 'bolt', 'din'
@@ -357,15 +422,19 @@ function autoRigModel() {
 
     // Closer Zoom: 0.9 optimal (Balanced)
     const dist = maxDim * 0.9;
-    camera3D.position.set(finalCenter.x + dist, finalCenter.y + dist * 0.5, finalCenter.z + dist * 1.0);
+
+    // User Calibration: Angle from (-0.14, 0.20, 0.00) but "Further Away"
+    // Applied 2.0x Distance Multiplier
+    camera3D.position.set(-0.28, 0.40, -0.01);
+
     camera3D.lookAt(finalCenter);
     controls3D.target.copy(finalCenter);
     controls3D.update();
 
     // 7. Visual Debug Helpers (Optional - Uncomment to see skeletons)
-    // const axes1 = new THREE.AxesHelper(5); rigBase.add(axes1);
-    // const axes2 = new THREE.AxesHelper(5); rigLowerArm.add(axes2);
-    // const axes3 = new THREE.AxesHelper(5); rigUpperArm.add(axes3);
+    const axes1 = new THREE.AxesHelper(0.1); rigBase.add(axes1);
+    const axes2 = new THREE.AxesHelper(0.1); rigLowerArm.add(axes2);
+    const axes3 = new THREE.AxesHelper(0.1); rigUpperArm.add(axes3);
 }
 
 function updateStatus(status, mode) {

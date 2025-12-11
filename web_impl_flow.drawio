@@ -1,0 +1,75 @@
+<mxfile host="Electron" modified="2025-12-11T13:40:00.000Z" agent="5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/21.6.8 Chrome/114.0.5735.289 Electron/25.5.0 Safari/537.36" etag="Web_Impl" version="21.6.8" type="device">
+  <diagram id="Web-Impl" name="Web Implementation">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Lane: Initialization -->
+        <mxCell id="lane_init" value="Initialization (main.js)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="240" height="500" as="geometry" />
+        </mxCell>
+        <mxCell id="node_load" value="(1) Window Load" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="lane_init">
+          <mxGeometry x="60" y="40" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="node_conn_sio" value="(2) Connect SocketIO" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_init">
+          <mxGeometry x="60" y="100" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="node_init_3d" value="(3) Init Three.js&#xa;(initRobot3D)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_init">
+          <mxGeometry x="60" y="160" width="120" height="40" as="geometry" />
+        </mxCell>
+         <mxCell id="node_start_loop" value="(4) Start Loop&#xa;(requestAnimFrame)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_init">
+          <mxGeometry x="60" y="220" width="120" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Lane: Gamepad Loop -->
+        <mxCell id="lane_loop" value="Gamepad Loop (gamepad.js)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="280" y="40" width="280" height="500" as="geometry" />
+        </mxCell>
+        <mxCell id="node_poll" value="(5) Poll Gamepad API" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_loop">
+          <mxGeometry x="60" y="220" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="node_axes" value="(6) Process Axes&#xa;(Left: Drive, Right: Arm)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_loop">
+          <mxGeometry x="60" y="280" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="node_btn" value="(7) Process Buttons&#xa;(A, B, X, Y)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_loop">
+          <mxGeometry x="60" y="340" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="node_emit" value="(8) Emit control_cmd&#xa;(Throttle: 20Hz)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="lane_loop">
+          <mxGeometry x="60" y="400" width="160" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Lane: Visualization -->
+        <mxCell id="lane_viz" value="Visualization (robot_arm.js)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="560" y="40" width="240" height="500" as="geometry" />
+        </mxCell>
+        <mxCell id="node_ik_upd" value="(9) Update Target Angles" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_viz">
+          <mxGeometry x="40" y="280" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="node_render" value="(10) Render Scene&#xa;(Three.js)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_viz">
+          <mxGeometry x="40" y="400" width="160" height="40" as="geometry" />
+        </mxCell>
+
+
+        <!-- Edges -->
+        <mxCell id="e1" edge="1" parent="1" source="node_load" target="node_conn_sio" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="node_conn_sio" target="node_init_3d" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="node_init_3d" target="node_start_loop" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
+        
+        <!-- Loop Edges -->
+        <mxCell id="e_loop_start" edge="1" parent="1" source="node_start_loop" target="node_poll" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
+        <mxCell id="e_poll_axes" edge="1" parent="lane_loop" source="node_poll" target="node_axes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
+        <mxCell id="e_axes_btn" edge="1" parent="lane_loop" source="node_axes" target="node_btn" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
+        <mxCell id="e_btn_emit" edge="1" parent="lane_loop" source="node_btn" target="node_emit" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
+        
+        <!-- Interactive Edges -->
+        <mxCell id="e_axes_ik" edge="1" parent="1" source="node_axes" target="node_ik_upd" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
+        <mxCell id="e_emit_render" edge="1" parent="1" source="node_emit" target="node_render" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
+        <mxCell id="e_next_frame" edge="1" parent="1" source="node_render" target="node_poll" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;"> 
+            <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="750" y="420"/><mxPoint x="750" y="240"/></Array></mxGeometry> 
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

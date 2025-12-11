@@ -115,8 +115,7 @@
                 <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">3D SIMULATION</div>
 
                 <div id="canvas-3d-container"
-                    class="relative w-full max-w-[320px] aspect-square rounded border border-green-900 bg-[#1a1a1a] overflow-hidden mx-auto"
-                    style="min-width: 250px; min-height: 250px;">
+                    class="relative w-full max-w-[320px] aspect-square rounded border border-green-900 bg-[#1a1a1a] overflow-hidden mx-auto min-w-[250px] min-h-[250px]">
                     <!-- Three.js canvas will be appended here -->
                 </div>
             </div>
@@ -146,10 +145,10 @@
                 <!-- WASD Compact Keyboard -->
                 <div class="wasd-container-compact">
                     <div class="wasd-row">
-                        <div style="width: 40px"></div>
+                        <div class="w-[40px]"></div>
                         <button class="wasd-key" onmousedown="sendCmd('F')" onmouseup="sendCmd('S')"
                             ontouchstart="sendCmd('F')" ontouchend="sendCmd('S')" id="btn-w">W</button>
-                        <div style="width: 40px"></div>
+                        <div class="w-[40px]"></div>
                     </div>
                     <div class="wasd-row">
                         <button class="wasd-key" onmousedown="sendCmd('L')" onmouseup="sendCmd('S')"
@@ -160,10 +159,10 @@
                             ontouchstart="sendCmd('R')" ontouchend="sendCmd('S')" id="btn-d">D</button>
                     </div>
                     <div class="wasd-row">
-                        <div style="width: 40px"></div>
+                        <div class="w-[40px]"></div>
                         <button class="wasd-key" onmousedown="sendCmd('B')" onmouseup="sendCmd('S')"
                             ontouchstart="sendCmd('B')" ontouchend="sendCmd('S')" id="btn-x">X</button>
-                        <div style="width: 40px"></div>
+                        <div class="w-[40px]"></div>
                     </div>
                 </div>
 
@@ -257,6 +256,7 @@
                     <div class="flex flex-col gap-1">
                         <label class="text-gray-400">Resolution</label>
                         <select id="cfg-framesize" onchange="updateCameraSetting('framesize', this.value)"
+                            title="Camera Resolution" aria-label="Select Camera Resolution"
                             class="bg-black border border-green-900 text-green-400 p-1 rounded">
                             <option value="11">VGA (640x480)</option>
                             <option value="9">CIF (400x296)</option>
