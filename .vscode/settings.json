@@ -3,5 +3,6 @@
     "idf.openOcdConfigs": [
         "board/esp32s3-builtin.cfg"
     ],
-    "idf.flashType": "UART"
+    "idf.flashType": "UART",
+    "cmake.sourceDirectory": "D:/hmidata/project/Firmware/ESP32_S3"
 }
