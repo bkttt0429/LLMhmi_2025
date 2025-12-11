@@ -101,22 +101,23 @@
             </div>
         </div>
 
-        <div class="lg:col-span-4 flex flex-col gap-4">
+        <div class="lg:col-span-4 flex flex-col gap-2">
 
             <div class="cyber-border p-2 sm:p-4 flex flex-col items-center justify-center relative grow-0">
-                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">SONAR (ESP12F)</div>
+                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">3D SIMULATION</div>
 
-                <div
-                    class="relative w-32 h-32 sm:w-40 sm:h-40 lg:w-56 lg:h-56 rounded-full border border-green-900 bg-black/80 shadow-[inset_0_0_20px_rgba(0,50,0,0.5)]">
-                    <canvas id="radar-canvas-main" class="absolute inset-0 w-full h-full rounded-full"></canvas>
+                <div id="canvas-3d-container"
+                    class="relative w-full max-w-[320px] aspect-square rounded border border-green-900 bg-[#1a1a1a] overflow-hidden mx-auto"
+                    style="min-width: 250px; min-height: 250px;">
+                    <!-- Three.js canvas will be appended here -->
                 </div>
 
-                <div id="dist-val"
-                    class="text-xl sm:text-2xl lg:text-3xl font-bold mt-2 text-green-400 drop-shadow-[0_0_5px_rgba(0,255,0,0.5)]">
-                    --.-- CM</div>
+                <div id="3d-status"
+                    class="text-xs font-bold mt-2 text-green-400 drop-shadow-[0_0_5px_rgba(0,255,0,0.5)]">
+                    ACTIVE</div>
             </div>
 
-            <div class="cyber-border p-3 sm:p-6 flex-1 flex flex-col justify-center gap-4 sm:gap-6 relative">
+            <div class="cyber-border p-3 sm:p-4 flex flex-col justify-center gap-2 relative">
                 <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">MANUAL OVERRIDE</div>
 
                 <div class="grid grid-cols-3 gap-2 sm:gap-3 w-full max-w-[180px] sm:max-w-[240px] mx-auto">
@@ -151,9 +152,6 @@
                     <input type="range" min="0" max="100" value="100" step="5" class="speed-slider"
                         id="speed-limit-slider" title="Control speed limit" aria-label="Speed limit slider">
                 </div>
-
-                <button class="btn-cy w-full py-2 sm:py-3 rounded tracking-widest text-xs sm:text-sm"
-                    onclick="toggleLight()">TOGGLE LIGHTS (ESP32 CAM)</button>
             </div>
 
             <div class="xbox-card rounded p-3 sm:p-4 flex flex-col gap-3 relative">
@@ -416,10 +414,11 @@
                         <span>RIGHT STICK: <span class="text-cyan-400 animate-pulse">ROBOT ARM</span></span>
                     </div>
                 </div>
-                <div id="canvas-3d-container" class="flex-1 bg-black relative overflow-hidden border border-gray-800"
+                <div id="canvas-3d-deprecated" class="flex-1 bg-black relative overflow-hidden border border-gray-800"
                     style="min-height: 350px;">
-                    <div class="scan-line"></div>
-                    <!-- Three.js canvas will be appended here -->
+                    <div class="flex items-center justify-center h-full text-gray-600">
+                        3D View Moved to Dashboard
+                    </div>
                 </div>
             </div>
 
@@ -550,6 +549,9 @@
 
             // Initialize video retry logic
             initVideoRetry();
+
+            // Initialize 3D Robot Arm (Now in Dashboard)
+            initRobot3D();
         };
 
         function initVideoRetry() {
@@ -751,12 +753,13 @@
                         // Shoulder/Elbow (Pitch) - RS Y
                         window.targetShoulderAngle += ry * speed;
                         // Linked Elbow Movement for natural look
-                        window.targetElbowAngle += ry * speed * 0.5;
+                        window.targetElbowAngle -= ry * speed * 0.5;
 
-                        // Debug Log (Throttle to avoid spam)
-                        if (Math.random() < 0.05) {
-                            console.log(`[SOCKET] Arm Control → Base:${window.targetBaseAngle.toFixed(2)} Shldr:${window.targetShoulderAngle.toFixed(2)}`);
-                        }
+                        // Debug Log (Always log for now to debug)
+                        console.log(`[SOCKET] Arm Control → Base:${window.targetBaseAngle.toFixed(2)} Shldr:${window.targetShoulderAngle.toFixed(2)} View:${currentView}`);
+
+                        // Force UI update if needed (normally animationLoop handles it)
+
 
                         // Clamp angles
                         window.targetBaseAngle = Math.max(-Math.PI, Math.min(Math.PI, window.targetBaseAngle));
@@ -802,7 +805,7 @@
 
             // 更新距離
             const distVal = document.getElementById('dist-val');
-            if (data.dist !== undefined) {
+            if (distVal && data.dist !== undefined) {
                 distVal.innerText = data.dist.toFixed(2) + " CM";
             }
 
@@ -1429,7 +1432,7 @@
 
                 // Scene Setup
                 window.scene3D = new THREE.Scene();
-                window.scene3D.background = new THREE.Color(0x0a0a0a);
+                window.scene3D.background = new THREE.Color(0x222222);
 
                 // Camera
                 const container = document.getElementById('canvas-3d-container');
@@ -1444,7 +1447,7 @@
                     0.1,
                     1000
                 );
-                window.camera3D.position.set(8, 8, 8);
+                window.camera3D.position.set(5, 5, 5);
 
                 // Renderer
                 window.renderer3D = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -1460,8 +1463,8 @@
                 window.controls3D = new OrbitControls(window.camera3D, window.renderer3D.domElement);
                 window.controls3D.enableDamping = true;
                 window.controls3D.dampingFactor = 0.05;
-                window.controls3D.minDistance = 3;
-                window.controls3D.maxDistance = 20;
+                window.controls3D.minDistance = 1; // Allow closer zoom
+                window.controls3D.maxDistance = 100; // Allow further zoom
 
                 // Lighting - Cyber style
                 const ambientLight = new THREE.AmbientLight(0x00ff99, 0.4);
@@ -1638,10 +1641,10 @@
 
                         console.log('[3D] Raw Model Height: ' + height.toFixed(4) + ' (Unscaled)');
 
-                        // Pivot estimates (relative to unscaled height)
+                        // Pivot estimates (relative to unscaled height) - Tuned for EezyBotArm
                         // Note: Since we aligned bottom to 0, minY should be approx 0 now.
-                        virtualShoulder.position.y = minY + height * 0.3;
-                        virtualElbow.position.y = (minY + height * 0.7) - virtualShoulder.position.y;
+                        virtualShoulder.position.y = minY + height * 0.45; // Raised shoulder pivot
+                        virtualElbow.position.y = (minY + height * 0.82) - virtualShoulder.position.y; // Raised elbow pivot
 
                         // 3. Segment Parts
                         const meshes = [];
@@ -1651,33 +1654,90 @@
                             }
                         });
 
-                        const shoulderThreshold = minY + height * 0.4;
-                        const elbowThreshold = minY + height * 0.75;
+                        // --- MODULE 1: HYBRID NAME + CENTROID RIGGING ---
+                        // User Request: 
+                        // "tower, m1, m2" -> Gripper (Fingers)
+                        // "washer, step, m4" -> Arm (Shoulder/Elbow)
+                        // "m6" -> Base
 
-                        meshes.forEach(mesh => {
-                            const meshBox = new THREE.Box3().setFromObject(mesh);
-                            const centerY = (meshBox.min.y + meshBox.max.y) / 2;
+                        const clusterBase = [];
+                        const clusterShoulder = [];
+                        const clusterElbow = [];
+                        const clusterGripper = [];
+                        
+                        // Tuned Thresholds
+                        const baseHeightCap = minY + height * 0.40; 
+                        const elbowHeightStart = minY + height * 0.82; 
 
-                            if (centerY < shoulderThreshold) virtualBase.attach(mesh);
-                            else if (centerY < elbowThreshold) virtualShoulder.attach(mesh);
-                            else virtualElbow.attach(mesh);
+                        window.robotModel.traverse((child) => {
+                            if (child.isMesh) {
+                                const name = child.name.toLowerCase();
+                                const mBox = new THREE.Box3().setFromObject(child);
+                                const cy = mBox.getCenter(new THREE.Vector3()).y;
+
+                                let assigned = false;
+
+                                // 1. GRIPPER (TOWER, M1, M2, FINGER) -> New Virtual Gripper
+                                if (name.includes('tower') || name.includes('m1') || name.includes('m2') || name.includes('finger')) {
+                                    clusterGripper.push(child);
+                                    assigned = true;
+                                }
+                                // 2. BASE SPECIFIC (M6, EBA3_001, BASE)
+                                else if (name.includes('m6') || name.includes('eba3_001') || name.includes('base') || name.includes('bottom')) {
+                                    clusterBase.push(child);
+                                    assigned = true;
+                                }
+                                // 3. ARM CANDIDATES (WASHER, STEP, M4, 28BYJ)
+                                else if (name.includes('washer') || name.includes('step') || name.includes('m4') || name.includes('28byj')) {
+                                    // Spatial Split for Arm Parts
+                                    if (cy < elbowHeightStart) {
+                                        // "Big Arm"
+                                        clusterShoulder.push(child);
+                                    } else {
+                                        // "Small Arm" / Top
+                                        clusterElbow.push(child);
+                                    }
+                                    assigned = true;
+                                }
+                                
+                                // 4. FALLBACK (Spatial Logic for unnamed parts)
+                                if (!assigned) {
+                                    if (cy < baseHeightCap) clusterBase.push(child);
+                                    else if (cy < elbowHeightStart) clusterShoulder.push(child);
+                                    else clusterElbow.push(child); // Or Gripper? Default to Elbow
+                                }
+                            }
                         });
 
+
+                        console.log('[3D] Grouping: Base=' + clusterBase.length + ' Shoulder=' + clusterShoulder.length + ' Elbow=' + clusterElbow.length + ' Gripper=' + clusterGripper.length);
+
+                        // Attach to Virtual Parts
+                        clusterBase.forEach(m => virtualBase.attach(m));
+                        clusterShoulder.forEach(m => virtualShoulder.attach(m));
+                        clusterElbow.forEach(m => virtualElbow.attach(m));
+
+                        // Create Virtual Gripper (Child of Elbow)
+                        const virtualGripper = new THREE.Group(); virtualGripper.name = 'Virtual_Gripper';
+                        virtualElbow.add(virtualGripper);
+                        clusterGripper.forEach(m => virtualGripper.attach(m));
+                        
                         window.basePart = virtualBase;
                         window.shoulderPart = virtualShoulder;
                         window.elbowPart = virtualElbow;
+                        window.gripperPart = virtualGripper;
 
                         // 4. Final Scene Setup
                         console.log('[3D] Rigging Complete. Applying Scale x15...');
                         
-                        // Apply Scale to the ROOT of the rigged arm
+                        // Apply Scale to the ROOT
                         virtualBase.scale.set(15, 15, 15);
                         // Ensure Base is at 0,0,0
                         virtualBase.position.set(0, 0, 0); 
                         
-                        // Add BoxHelper for the FINAL rigged object
-                        const riggedHelper = new THREE.BoxHelper(virtualBase, 0x00ff00);
-                        window.scene3D.add(riggedHelper);
+                        // Add BoxHelper (DISABLED for cleaner view)
+                        // const riggedHelper = new THREE.BoxHelper(virtualBase, 0x00ff00);
+                        // window.scene3D.add(riggedHelper);
 
                         // FINAL AUTO-FIT CAMERA
                         // Calculate bounds of the fully rigged and scaled arm
@@ -1685,13 +1745,20 @@
                         const finalSize = finalBox.getSize(new THREE.Vector3());
                         const finalCenter = finalBox.getCenter(new THREE.Vector3());
                         
-                        // Position Camera
+                        // Position Camera (ZOOM IN)
                         const maxDim = Math.max(finalSize.x, finalSize.y, finalSize.z);
-                        const fov = window.camera3D.fov * (Math.PI / 180);
-                        let cameraZ = Math.abs(maxDim / 2 * Math.tan(fov * 2)); 
-                        cameraZ *= 2.0; // Zoom factor
+                        const fovRad = window.camera3D.fov * (Math.PI / 180);
+                        let cameraDist = maxDim / (2 * Math.tan(fovRad / 2));
                         
-                        window.camera3D.position.set(finalCenter.x + cameraZ, finalCenter.y + cameraZ/2, finalCenter.z + cameraZ);
+                        cameraDist *= 0.8; // Zoom factor (0.8 = Closer, 1.5 = Further)
+                        
+                        // Ensure minimal distance
+                        if (cameraDist < 5) cameraDist = 5;
+                        if (cameraDist > 200) cameraDist = 200; // Cap it
+
+                        // Position Camera (High Angle / Top-Downish to match reference)
+                        // Higher Y, close Z/X
+                        window.camera3D.position.set(finalCenter.x, finalCenter.y + cameraDist * 1.2, finalCenter.z + cameraDist * 0.8);
                         window.camera3D.lookAt(finalCenter);
                         
                         // Update controls target
@@ -1701,7 +1768,7 @@
                         }
                         
                         console.log('[3D] Final Rigged Bounds: ' + finalSize.x.toFixed(2) + ' x ' + finalSize.y.toFixed(2) + ' x ' + finalSize.z.toFixed(2));
-                        console.log('[3D] Camera Auto-Fitted to:', window.camera3D.position);
+                        console.log('[3D] Camera Auto-Fitted Dist:', cameraDist);
                         
                     } catch (e) {
                         console.error('[3D] Auto-Rigging Failed:', e);
@@ -1741,10 +1808,11 @@
                     window.currentElbowAngle = THREE.MathUtils.lerp(window.currentElbowAngle, window.targetElbowAngle, 0.1);
 
                     if (window.basePart) window.basePart.rotation.y = window.currentBaseAngle;
-                    if (window.shoulderPart) window.shoulderPart.rotation.x = window.currentShoulderAngle;
-                    if (window.elbowPart) window.elbowPart.rotation.x = window.currentElbowAngle;
+            // Changed from .x to .z based on user report ("North-South" vs "East-West")
+            if (window.shoulderPart) window.shoulderPart.rotation.z = window.currentShoulderAngle;
+            if (window.elbowPart) window.elbowPart.rotation.z = window.currentElbowAngle;
 
-                    // Update UI telemetry
+            // Update UI telemetry
                     if (typeof updateAngleDisplays === 'function') {
                         updateAngleDisplays();
                     }
@@ -1800,7 +1868,7 @@
 
         // Reset robot arm to zero
         function resetRobotArm() {
-            if (currentView === 'robot') {
+            if (currentView === 'robot' || currentView === 'main') {
                 window.targetBaseAngle = 0;
                 window.targetShoulderAngle = 0;
                 window.targetElbowAngle = 0;
@@ -1808,16 +1876,45 @@
             }
         }
 
+        // Helper to highlight parts with specific color
+        function setPartHighlight(part, active, colorHex = 0xaa8800) {
+            if (!part) return;
+            // Use children.forEach instead of traverse to avoid hitting child Pivot Groups (base->shoulder->elbow)
+            part.children.forEach((child) => {
+                if (child.isMesh && child.material) {
+                    // Save original emissive if not saved
+                    if (child.userData.originalEmissive === undefined) {
+                        child.userData.originalEmissive = child.material.emissive ? child.material.emissive.getHex() : 0x000000;
+                    }
+                    if (child.material.emissive) {
+                        child.material.emissive.setHex(active ? colorHex : child.userData.originalEmissive);
+                    }
+                }
+            });
+        }
+
         // Update robot arm from gamepad (right stick)
         function updateRobotArmFromGamepad() {
             const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
             const gp = gamepads[0];
 
-            if (!gp || !gp.connected || currentView !== 'robot') return;
+            if (!gp || !gp.connected) return;
+            // Allow control in both Robot view AND Main Dashboard 
+            if (currentView !== 'robot' && currentView !== 'main') return;
 
             // Right stick: axes[2] = X (left/right), axes[3] = Y (up/down)
             const rightX = gp.axes[2] || 0;
             const rightY = gp.axes[3] || 0;
+            // Gripper Buttons (Standard: A=0, B=1, RB=5, RT=7)
+            const btnA = gp.buttons[0]?.pressed || false;
+            const btnB = gp.buttons[1]?.pressed || false;
+            const btnRB = gp.buttons[5]?.pressed || false;
+            const isGripperActive = btnA || btnB || btnRB;
+
+            // DEBUG: Log all axes to find the right ones
+            if (Math.abs(rightX) > 0.1 || Math.abs(rightY) > 0.1 || Math.random() < 0.01) {
+                // console.log(`[ARM DEBUG] Axes...`);
+            }
 
             // Deadzone
             const deadzone = 0.15;
@@ -1829,7 +1926,21 @@
             // Incremental control
             window.targetBaseAngle += filteredX * controlSpeed;
             window.targetShoulderAngle += filteredY * controlSpeed;
-            window.targetElbowAngle += filteredY * controlSpeed * 0.5; // Follow shoulder movement
+            window.targetElbowAngle -= filteredY * controlSpeed * 0.5; // Follow shoulder movement (Inverted)
+
+            // Highlight Feedback (Colors Requested by User)
+            // Left/Right (Base) -> Purple
+            const isBaseActive = Math.abs(filteredX) > 0.01;
+            setPartHighlight(window.basePart, isBaseActive, 0x9900CC); // Purple
+
+            // Up/Down (Arm) -> Cyan/Blue ("Change" color -> Assumed Cyan)
+            const isArmActive = Math.abs(filteredY) > 0.01;
+            const armColor = 0x00FFFF; // Cyan
+            setPartHighlight(window.shoulderPart, isArmActive, armColor);
+            setPartHighlight(window.elbowPart, isArmActive, armColor);
+
+            // Gripper -> Red
+            setPartHighlight(window.gripperPart, isGripperActive, 0xFF0000); // Red
 
             // Clamp angles
             window.targetBaseAngle = Math.max(-Math.PI, Math.min(Math.PI, window.targetBaseAngle));
@@ -1839,9 +1950,51 @@
 
         // Hook into existing game loop
         const originalUpdateJoystick = window.updateJoystickLoop;
+
+        let lastArmCmdTime = 0;
+        const ARM_CMD_INTERVAL = 100; // 10Hz throttle
+
+        function sendRobotArmCmd() {
+            const now = Date.now();
+            if (now - lastArmCmdTime < ARM_CMD_INTERVAL) return;
+
+            // Convert Radians to Degrees (Assumes 0 rad = 90 deg center)
+            const toDeg = (rad) => Math.round((rad * 180 / Math.PI) + 90);
+
+            const baseDeg = Math.max(0, Math.min(180, toDeg(window.targetBaseAngle)));
+            const shoulderDeg = Math.max(0, Math.min(180, toDeg(window.targetShoulderAngle)));
+            const elbowDeg = Math.max(0, Math.min(180, toDeg(window.targetElbowAngle)));
+
+            // Only send if values changed significantly? (Optional optimization)
+            // For now, send periodically if in robot view
+
+            fetch('/api/robot_arm_control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    base: baseDeg,
+                    shoulder: shoulderDeg,
+                    elbow: elbowDeg
+                })
+            }).then(res => {
+                if (res.status === 200) {
+                    // Success
+                }
+            }).catch(err => {
+                // Suppress errors to avoid log spam
+            });
+
+            lastArmCmdTime = now;
+        }
+
         window.updateJoystickLoop = function () {
             if (originalUpdateJoystick) originalUpdateJoystick();
             updateRobotArmFromGamepad();
+
+            // Physical Control Loop
+            if (currentView === 'robot') {
+                sendRobotArmCmd();
+            }
         };
 
     </script>

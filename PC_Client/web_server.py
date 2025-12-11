@@ -952,6 +952,40 @@ def api_control():
         print(f"[API] 💥 Exception: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/robot_arm_control', methods=['POST'])
+def api_robot_arm_control():
+    """
+    Control Robot Arm via Serial
+    Expected JSON: {"base": int, "shoulder": int, "elbow": int} (0-180 degrees)
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data"}), 400
+
+        base = data.get('base')
+        shoulder = data.get('shoulder')
+        elbow = data.get('elbow')
+
+        if base is None or shoulder is None or elbow is None:
+            return jsonify({"error": "Missing angles"}), 400
+
+        # Create Command String: ARM:B90,S45,E90\n
+        cmd = f"ARM:B{int(base)},S{int(shoulder)},E{int(elbow)}\n"
+        
+        # Send via Serial if available
+        if state.ser and state.ser.is_open:
+            state.ser.write(cmd.encode('utf-8'))
+            return jsonify({"status": "sent", "cmd": cmd.strip()})
+        else:
+            # Fallback: Log it (Simulation Mode)
+            # print(f"[SIMULATION] Would send Serial: {cmd.strip()}")
+            return jsonify({"status": "simulation", "msg": "Serial not connected"}), 200
+
+    except Exception as e:
+        print(f"[API] Arm Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     # Initialize Multiprocessing Queues
     video_cmd_queue = Queue()
