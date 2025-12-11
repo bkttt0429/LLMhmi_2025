@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- VERSION: 2025-12-07-FIX-SENDCMD-v2 - CRITICAL UPDATE -->
+<!-- VERSION: 2025-12-07-OPTIMIZED-v1 - MODULARIZED -->
 <html lang="zh-TW">
 
 <head>
@@ -9,14 +9,16 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>TACTICAL COMMAND v15.0 [DUAL-LINK]</title>
+    <title>TACTICAL COMMAND v15.1 [DUAL-LINK]</title>
 
     <!-- Local Tailwind CSS (compiled) -->
-    <link rel="stylesheet" href="/static/css/output.css">
+    <link rel="stylesheet" href="/static/css/output.css?v=15.1">
+    <!-- Custom Cyber Styles -->
+    <link rel="stylesheet" href="/static/css/custom.css?v=15.1">
 
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
-    <!-- Three.js Import Maps for 3D Robot Arm -->
+    <!-- Three.js Import Maps -->
     <script type="importmap">
     {
         "imports": {
@@ -25,18 +27,6 @@
         }
     }
     </script>
-    <style>
-        /* Force grid layout in case Tailwind classes are missing */
-        @media (min-width: 1024px) {
-            .lg\:col-span-10 {
-                grid-column: span 10 / span 10 !important;
-            }
-
-            .lg\:col-span-2 {
-                grid-column: span 2 / span 2 !important;
-            }
-        }
-    </style>
 </head>
 
 <body
@@ -47,7 +37,7 @@
         <div>
             <h1
                 class="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-widest text-green-400 drop-shadow-[0_0_5px_rgba(0,255,157,0.8)]">
-                SHIM INTERFACE <span class="text-xs sm:text-sm text-gray-500">v15.0 DUAL-LINK</span></h1>
+                SHIM INTERFACE <span class="text-xs sm:text-sm text-gray-500">v15.1 MODULAR</span></h1>
             <div class="text-[10px] sm:text-xs text-gray-400 tracking-wider flex items-center gap-4 flex-wrap">
                 <div class="flex items-center gap-1">
                     <span>CONTROL(UDP):</span>
@@ -64,46 +54,63 @@
         <div id="clock" class="text-lg sm:text-2xl text-green-600">00:00:00</div>
     </header>
 
-    <div id="main-view" class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0 pb-20">
+    <!-- Main View (Dashboard) -->
+    <div id="main-view" class="view-grid dashboard-grid pb-20 overflow-hidden">
 
-        <div class="lg:col-span-8 flex flex-col gap-2 relative cyber-border rounded p-1 min-h-[300px]">
-            <div class="flex justify-between px-2 text-[10px] sm:text-xs text-gray-500 font-bold flex-wrap gap-2">
-                <div class="flex gap-2 items-center text-green-600">
-                    SYSTEM STATUS: <span class="text-green-400">OPERATIONAL</span>
-                </div>
-                <span>FEED: <span class="text-green-400 animate-pulse">LIVE</span></span>
-            </div>
-
-            <div
-                class="flex-1 bg-black relative overflow-hidden flex items-center justify-center border border-gray-800 group">
-                <div class="scan-line"></div>
-                <img id="video-stream" src="/video_feed" alt="Live video feed from ESP32-S3 camera"
-                    class="w-full h-full object-contain">
-
-                <div id="no-sig" class="hidden absolute inset-0 flex-col items-center justify-center bg-black/80 z-20">
-                    <div
-                        class="text-2xl sm:text-4xl text-red-500 font-bold border-4 border-red-500 p-4 sm:p-6 animate-pulse">
-                        NO SIGNAL</div>
-                    <div class="text-red-400 mt-2 text-xs sm:text-sm">CHECK ESP32-S3 (CAMERA)</div>
-                    <div class="text-gray-500 mt-2 text-[10px]">Retrying connection...</div>
+        <!-- Left Column (Video + Command) -->
+        <div class="col-left">
+            <!-- Quadrant 1: Video Feed + HUD -->
+            <div class="grid-video-hud cyber-border flex flex-col gap-2">
+                <div class="flex justify-between px-2 text-[10px] sm:text-xs text-gray-500 font-bold flex-wrap gap-2">
+                    <div class="flex gap-2 items-center text-green-600">
+                        SYSTEM STATUS: <span class="text-green-400">OPERATIONAL</span>
+                    </div>
+                    <span>FEED: <span class="text-green-400 animate-pulse">LIVE</span></span>
                 </div>
 
-                <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
-                    <div class="w-[40px] h-[40px] border border-green-500 rounded-full absolute"></div>
-                    <div class="w-[200px] h-[1px] bg-green-500"></div>
-                    <div class="h-[200px] w-[1px] bg-green-500 absolute"></div>
+                <div
+                    class="flex-1 bg-black relative overflow-hidden flex items-center justify-center border border-gray-800 group">
+                    <div class="scan-line"></div>
+
+                    <!-- AI DET Toggle Button (Top-Right) -->
+                    <button id="btn-ai-det" onclick="toggleAIDetection()"
+                        class="absolute top-2 right-2 z-30 btn-cy px-3 py-1 text-[10px] font-bold rounded border border-green-500 bg-black/60 backdrop-blur-sm hover:bg-green-500/20 transition-all">
+                        <span id="ai-det-text">AI DET</span>
+                    </button>
+
+                    <!-- Video Stream Image -->
+                    <img id="video-stream" src="/video_feed" alt="Live video feed from ESP32-S3 camera"
+                        class="w-full h-full object-contain">
+
+                    <div id="no-sig"
+                        class="hidden absolute inset-0 flex-col items-center justify-center bg-black/80 z-20">
+                        <div
+                            class="text-2xl sm:text-4xl text-red-500 font-bold border-4 border-red-500 p-4 sm:p-6 animate-pulse">
+                            NO SIGNAL</div>
+                        <div class="text-red-400 mt-2 text-xs sm:text-sm">CHECK ESP32-S3 (CAMERA)</div>
+                        <div class="text-gray-500 mt-2 text-[10px]">Retrying connection...</div>
+                    </div>
+
+                    <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
+                        <div class="w-[40px] h-[40px] border border-green-500 rounded-full absolute"></div>
+                        <div class="w-[200px] h-[1px] bg-green-500"></div>
+                        <div class="h-[200px] w-[1px] bg-green-500 absolute"></div>
+                    </div>
+                </div>
+
+                <div id="log-box"
+                    class="h-24 sm:h-32 bg-black border-t border-gray-700 p-2 font-mono text-[10px] sm:text-xs overflow-y-auto text-gray-400 leading-tight">
+                    <div class="text-green-700">> Initializing Modular Interface...</div>
                 </div>
             </div>
 
-            <div id="log-box"
-                class="h-24 sm:h-32 bg-black border-t border-gray-700 p-2 font-mono text-[10px] sm:text-xs overflow-y-auto text-gray-400 leading-tight">
-                <div class="text-green-700">> Initializing Dual-Link Interface...</div>
-            </div>
+
         </div>
 
-        <div class="lg:col-span-4 flex flex-col gap-2">
-
-            <div class="cyber-border p-2 sm:p-4 flex flex-col items-center justify-center relative grow-0">
+        <!-- Right Column (Arm + Manual) -->
+        <div class="col-right">
+            <!-- Quadrant 2: Arm HMI (3D Simulation) -->
+            <div class="grid-arm-hmi cyber-border flex flex-col p-2">
                 <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">3D SIMULATION</div>
 
                 <div id="canvas-3d-container"
@@ -111,115 +118,88 @@
                     style="min-width: 250px; min-height: 250px;">
                     <!-- Three.js canvas will be appended here -->
                 </div>
-
-                <div id="3d-status"
-                    class="text-xs font-bold mt-2 text-green-400 drop-shadow-[0_0_5px_rgba(0,255,0,0.5)]">
-                    ACTIVE</div>
             </div>
 
-            <div class="cyber-border p-3 sm:p-4 flex flex-col justify-center gap-2 relative">
-                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">MANUAL OVERRIDE</div>
+            <!-- Quadrant 4: CONTROL + MANUAL (Right-Bottom) -->
+            <div class="grid-manual cyber-border flex flex-col gap-2 p-3">
+                <div class="label-corner">CONTROL</div>
 
-                <div class="grid grid-cols-3 gap-2 sm:gap-3 w-full max-w-[180px] sm:max-w-[240px] mx-auto">
-                    <div></div>
-                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
-                        onmousedown="sendCmd('F')" onmouseup="sendCmd('S')" ontouchstart="sendCmd('F')"
-                        ontouchend="sendCmd('S')" id="btn-w">W</button>
-                    <div></div>
-
-                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
-                        onmousedown="sendCmd('L')" onmouseup="sendCmd('S')" ontouchstart="sendCmd('L')"
-                        ontouchend="sendCmd('S')" id="btn-a">A</button>
-                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
-                        onmousedown="sendCmd('S')" ontouchstart="sendCmd('S')" id="btn-s">S</button>
-                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
-                        onmousedown="sendCmd('R')" onmouseup="sendCmd('S')" ontouchstart="sendCmd('R')"
-                        ontouchend="sendCmd('S')" id="btn-d">D</button>
-
-                    <div></div>
-                    <button class="btn-cy h-10 sm:h-12 lg:h-14 rounded text-base sm:text-lg lg:text-xl"
-                        onmousedown="sendCmd('B')" onmouseup="sendCmd('S')" ontouchstart="sendCmd('B')"
-                        ontouchend="sendCmd('S')" id="btn-x">X</button>
-                    <div></div>
-                </div>
-
-                <!-- Speed Limiter Slider -->
-                <div class="speed-limiter-container">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-[10px] text-gray-400 uppercase tracking-wider">Speed Limit</span>
-                        <span class="speed-value" id="speed-limit-value">100%</span>
-                    </div>
-                    <input type="range" min="0" max="100" value="100" step="5" class="speed-slider"
+                <!-- Speed Limiter (Horizontal Layout) -->
+                <div class="control-row">
+                    <span class="control-label">SPEED</span>
+                    <input type="range" min="0" max="100" value="100" step="5" class="speed-slider-compact"
                         id="speed-limit-slider" title="Control speed limit" aria-label="Speed limit slider">
+                    <span class="control-value" id="speed-limit-value">100%</span>
+                </div>
+
+                <!-- Motor Lock -->
+                <div class="control-row">
+                    <button id="btn-motor-lock" onclick="toggleMotorLock()"
+                        class="btn-compact w-full text-green-400 border-green-500">
+                        MOTORS: <span class="animate-pulse">ON</span>
+                    </button>
+                </div>
+
+                <div class="border-t border-gray-700 my-1"></div>
+
+                <!-- WASD Compact Keyboard -->
+                <div class="wasd-container-compact">
+                    <div class="wasd-row">
+                        <div style="width: 40px"></div>
+                        <button class="wasd-key" onmousedown="sendCmd('F')" onmouseup="sendCmd('S')"
+                            ontouchstart="sendCmd('F')" ontouchend="sendCmd('S')" id="btn-w">W</button>
+                        <div style="width: 40px"></div>
+                    </div>
+                    <div class="wasd-row">
+                        <button class="wasd-key" onmousedown="sendCmd('L')" onmouseup="sendCmd('S')"
+                            ontouchstart="sendCmd('L')" ontouchend="sendCmd('S')" id="btn-a">A</button>
+                        <button class="wasd-key" onmousedown="sendCmd('S')" ontouchstart="sendCmd('S')"
+                            id="btn-s">S</button>
+                        <button class="wasd-key" onmousedown="sendCmd('R')" onmouseup="sendCmd('S')"
+                            ontouchstart="sendCmd('R')" ontouchend="sendCmd('S')" id="btn-d">D</button>
+                    </div>
+                    <div class="wasd-row">
+                        <div style="width: 40px"></div>
+                        <button class="wasd-key" onmousedown="sendCmd('B')" onmouseup="sendCmd('S')"
+                            ontouchstart="sendCmd('B')" ontouchend="sendCmd('S')" id="btn-x">X</button>
+                        <div style="width: 40px"></div>
+                    </div>
+                </div>
+
+                <!-- Joystick Visualization (Compact) -->
+                <div class="flex justify-center gap-3 mt-2">
+                    <div class="flex flex-col items-center gap-1">
+                        <div class="text-[8px] text-gray-400 uppercase">Left</div>
+                        <div class="xbox-stick-mini" id="hud-stick-left"></div>
+                        <div class="hud-coords" id="stick-coords-left">0.00, 0.00</div>
+                    </div>
+                    <div class="flex flex-col items-center gap-1">
+                        <div class="text-[8px] text-gray-400 uppercase">Right</div>
+                        <div class="xbox-stick-mini" id="hud-stick-right"></div>
+                        <div class="hud-coords" id="stick-coords-right">0.00, 0.00</div>
+                    </div>
+                </div>
+
+                <!-- PWM Display (Compact) -->
+                <div class="flex gap-2 text-[9px] font-mono justify-center">
+                    <div class="bg-black/60 border border-green-900/50 rounded px-2 py-1">
+                        <span class="text-gray-500">L:</span>
+                        <span class="text-green-400 font-bold" id="pwm-left">0</span>
+                    </div>
+                    <div class="bg-black/60 border border-green-900/50 rounded px-2 py-1">
+                        <span class="text-gray-500">R:</span>
+                        <span class="text-green-400 font-bold" id="pwm-right">0</span>
+                    </div>
                 </div>
             </div>
-
-            <div class="xbox-card rounded p-3 sm:p-4 flex flex-col gap-3 relative">
-                <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">XBOX TELEMETRY</div>
-                <div class="flex items-center gap-4">
-                    <!-- Enhanced Xbox Stick Visual -->
-                    <div class="relative flex flex-col items-center gap-2">
-                        <div class="relative xbox-stick" id="xbox-stick"></div>
-                        <div class="text-[9px] text-gray-500 font-mono" id="stick-coords">X:0.00 Y:0.00</div>
-                    </div>
-
-                    <div class="flex flex-col gap-2 flex-1">
-                        <!-- Button Indicators -->
-                        <div class="flex gap-2">
-                            <div
-                                class="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-black/40 text-[10px]">
-                                <span class="text-green-400 font-bold">A</span>
-                                <div class="w-2 h-2 rounded-full bg-gray-700" id="btn-indicator-a"></div>
-                            </div>
-                            <div
-                                class="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-black/40 text-[10px]">
-                                <span class="text-blue-400 font-bold">X</span>
-                                <div class="w-2 h-2 rounded-full bg-gray-700" id="btn-indicator-x"></div>
-                            </div>
-                            <div
-                                class="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-black/40 text-[10px]">
-                                <span class="text-purple-400 font-bold">LS</span>
-                                <div class="w-2 h-2 rounded-full bg-gray-700" id="btn-indicator-ls"></div>
-                            </div>
-                        </div>
-
-                        <!-- Control Info -->
-                        <div class="space-y-1 text-[10px] text-gray-400">
-                            <div class="flex items-center gap-2"><span class="text-green-400 font-mono">LS</span>：移動控制
-                            </div>
-                            <div class="flex items-center gap-2"><span class="text-blue-400 font-mono">X</span>：緊急煞車
-                            </div>
-                            <div class="flex items-center gap-2"><span class="text-green-400 font-mono">A</span>：補光燈
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- PWM Output Display -->
-                <div class="grid grid-cols-2 gap-2 text-[10px] font-mono">
-                    <div class="bg-black/60 border border-green-900/50 rounded p-1.5">
-                        <div class="text-gray-500">LEFT PWM</div>
-                        <div class="text-green-400 font-bold text-sm" id="pwm-left">0</div>
-                    </div>
-                    <div class="bg-black/60 border border-green-900/50 rounded p-1.5">
-                        <div class="text-gray-500">RIGHT PWM</div>
-                        <div class="text-green-400 font-bold text-sm" id="pwm-right">0</div>
-                    </div>
-                </div>
-
-                <div class="flex items-center justify-between text-[10px] sm:text-xs text-gray-400">
-                    <div>CMD: <span id="xbox-cmd" class="text-yellow-400 font-mono">--</span></div>
-                    <div id="ai-status" class="text-gray-500">AI: STANDBY</div>
-                </div>
-            </div>
-
         </div>
+
     </div>
 
     <!-- Settings View -->
     <div id="settings-view" class="flex-1 overflow-auto p-2 sm:p-4 pb-20 view-hidden">
         <div class="max-w-3xl mx-auto space-y-4">
-
+            <!-- Connection Settings -->
             <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
                 <div class="text-green-400 font-bold mb-3 flex items-center gap-2 text-sm sm:text-base">
                     <span class="text-xl">📡</span> DUAL-LINK CONNECTION
@@ -227,26 +207,22 @@
                 <div class="space-y-4">
                     <div class="p-3 border border-green-900/50 rounded bg-green-900/10">
                         <label class="block text-xs text-green-400 mb-1 font-bold">🚗 Car Control IP (ESP12F)</label>
-                        <div class="text-[10px] text-gray-500 mb-2">接收 UDP 指令的遙控車 (Port 4210)</div>
                         <input id="settings-car-ip" type="text"
                             class="w-full bg-black text-green-400 border border-green-900 px-2 py-2 rounded focus:outline-none focus:border-green-500 text-sm font-mono"
                             placeholder="192.168.x.x">
                     </div>
-
                     <div class="p-3 border border-blue-900/50 rounded bg-blue-900/10">
                         <label class="block text-xs text-blue-400 mb-1 font-bold">📹 Camera Stream IP (ESP32-S3)</label>
-                        <div class="text-[10px] text-gray-500 mb-2">提供影像串流 (Port 81)</div>
                         <input id="settings-cam-ip" type="text"
                             class="w-full bg-black text-blue-400 border border-blue-900 px-2 py-2 rounded focus:outline-none focus:border-blue-500 text-sm font-mono"
                             placeholder="192.168.x.x">
                     </div>
-
                     <button onclick="applySettings()" class="btn-cy w-full py-3 rounded text-sm font-bold">APPLY DUAL IP
                         SETTINGS</button>
                 </div>
             </div>
 
-            <!-- SYSTEM TOOLS (AI Model Selection) -->
+            <!-- System Tools -->
             <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
                 <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">SYSTEM TOOLS</div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -259,245 +235,52 @@
                             class="btn-cy py-2 rounded text-xs sm:text-sm text-blue-300 border-blue-500">SHOW NET
                             INFO</button>
                     </div>
-
                     <!-- AI Model Selector -->
                     <div class="flex flex-col gap-2 p-2 border border-green-900/30 rounded">
                         <label class="text-xs text-green-400 font-bold">🧠 AI Model Selection</label>
                         <div class="flex gap-2">
-                            <select id="model-selector" title="Select AI model for object detection"
+                            <select id="model-selector" title="Select AI model"
                                 class="bg-black text-green-400 border border-green-800 rounded px-2 py-1 text-xs flex-1">
                                 <option value="yolov13l.pt" selected>YOLOv13-Large (Default)</option>
-                                <option value="yolov8n.pt">YOLOv8-Nano (Fast)</option>
-                                <option value="yolov8s.pt">YOLOv8-Small</option>
-                                <option value="yolov8m.pt">YOLOv8-Medium</option>
                             </select>
                             <button onclick="applyModel()" class="btn-cy px-4 text-xs rounded font-bold">LOAD</button>
-                        </div>
-                        <div class="text-[9px] text-gray-500">
-                            * Use Nano/Small for CPU. Large requires NVIDIA GPU.
                         </div>
                     </div>
                 </div>
             </div>
 
+            <!-- Camera Config -->
             <div class="cyber-border rounded p-3 sm:p-4 bg-black/60">
                 <div class="text-green-400 font-bold mb-3 text-sm sm:text-base">CAMERA CONFIGURATION</div>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-
-                    <!-- Selectors -->
                     <div class="flex flex-col gap-1">
                         <label class="text-gray-400">Resolution</label>
-                        <select id="cfg-framesize" title="Camera resolution setting"
-                            onchange="updateCameraSetting('framesize', this.value)"
+                        <select id="cfg-framesize" onchange="updateCameraSetting('framesize', this.value)"
                             class="bg-black border border-green-900 text-green-400 p-1 rounded">
                             <option value="11">VGA (640x480)</option>
-                            <option value="10">HVGA (480x320)</option>
                             <option value="9">CIF (400x296)</option>
                             <option value="8">QVGA (320x240)</option>
-                            <option value="6">HQVGA (240x176)</option>
-                            <option value="5">QCIF (176x144)</option>
                         </select>
                     </div>
-
-                    <div class="flex flex-col gap-1">
-                        <label class="text-gray-400">Special Effect</label>
-                        <select id="cfg-special_effect" title="Camera special effect filter"
-                            onchange="updateCameraSetting('special_effect', this.value)"
-                            class="bg-black border border-green-900 text-green-400 p-1 rounded">
-                            <option value="0">No Effect</option>
-                            <option value="1">Negative</option>
-                            <option value="2">Grayscale</option>
-                            <option value="3">Red Tint</option>
-                            <option value="4">Green Tint</option>
-                            <option value="5">Blue Tint</option>
-                            <option value="6">Sepia</option>
-                        </select>
-                    </div>
-
-                    <div class="flex flex-col gap-1">
-                        <label class="text-gray-400">WB Mode</label>
-                        <select id="cfg-wb_mode" title="Camera white balance mode"
-                            onchange="updateCameraSetting('wb_mode', this.value)"
-                            class="bg-black border border-green-900 text-green-400 p-1 rounded">
-                            <option value="0">Auto</option>
-                            <option value="1">Sunny</option>
-                            <option value="2">Cloudy</option>
-                            <option value="3">Office</option>
-                            <option value="4">Home</option>
-                        </select>
-                    </div>
-
-                    <!-- Sliders -->
-                    <div class="col-span-full grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-gray-800 pt-2">
-                        <div class="flex flex-col gap-1">
-                            <div class="flex justify-between"><label>Quality (10-63)</label><span id="val-quality"
-                                    class="text-gray-500">--</span></div>
-                            <input type="range" id="cfg-quality" min="10" max="63" step="1"
-                                title="Camera image quality (10-63)" aria-label="Quality slider from 10 to 63"
-                                onchange="updateCameraSetting('quality', this.value)" class="accent-green-500">
-                        </div>
-                        <div class="flex flex-col gap-1">
-                            <div class="flex justify-between"><label>Brightness (-2 to 2)</label><span
-                                    id="val-brightness" class="text-gray-500">--</span></div>
-                            <input type="range" id="cfg-brightness" min="-2" max="2" step="1"
-                                title="Camera brightness adjustment (-2 to 2)"
-                                aria-label="Brightness slider from -2 to 2"
-                                onchange="updateCameraSetting('brightness', this.value)" class="accent-green-500">
-                        </div>
-                        <div class="flex flex-col gap-1">
-                            <div class="flex justify-between"><label>Contrast (-2 to 2)</label><span id="val-contrast"
-                                    class="text-gray-500">--</span></div>
-                            <input type="range" id="cfg-contrast" min="-2" max="2" step="1"
-                                title="Camera contrast adjustment (-2 to 2)" aria-label="Contrast slider from -2 to 2"
-                                onchange="updateCameraSetting('contrast', this.value)" class="accent-green-500">
-                        </div>
-                        <div class="flex flex-col gap-1">
-                            <div class="flex justify-between"><label>Saturation (-2 to 2)</label><span
-                                    id="val-saturation" class="text-gray-500">--</span></div>
-                            <input type="range" id="cfg-saturation" min="-2" max="2" step="1"
-                                title="Camera saturation adjustment (-2 to 2)"
-                                aria-label="Saturation slider from -2 to 2"
-                                onchange="updateCameraSetting('saturation', this.value)" class="accent-green-500">
-                        </div>
-                    </div>
-
-                    <!-- Toggles -->
+                    <!-- Other Camera Controls here (Generated dynamically or reused) -->
                     <div
                         class="col-span-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 border-t border-gray-800 pt-2">
                         <button id="btn-awb" onclick="toggleCamBool('awb')"
                             class="btn-cy py-1 text-[10px] rounded">AWB</button>
-                        <button id="btn-aec" onclick="toggleCamBool('aec')" class="btn-cy py-1 text-[10px] rounded">AEC
-                            (Sensor)</button>
-                        <button id="btn-aec2" onclick="toggleCamBool('aec2')"
-                            class="btn-cy py-1 text-[10px] rounded">AEC (DSP)</button>
-                        <button id="btn-agc" onclick="toggleCamBool('agc')"
-                            class="btn-cy py-1 text-[10px] rounded">AGC</button>
-                        <button id="btn-bpc" onclick="toggleCamBool('bpc')"
-                            class="btn-cy py-1 text-[10px] rounded">BPC</button>
-                        <button id="btn-wpc" onclick="toggleCamBool('wpc')"
-                            class="btn-cy py-1 text-[10px] rounded">WPC</button>
-                        <button id="btn-raw_gma" onclick="toggleCamBool('raw_gma')"
-                            class="btn-cy py-1 text-[10px] rounded">Raw GMA</button>
-                        <button id="btn-lenc" onclick="toggleCamBool('lenc')"
-                            class="btn-cy py-1 text-[10px] rounded">Lens Corr</button>
-                        <button id="btn-hmirror" onclick="toggleCamBool('hmirror')"
-                            class="btn-cy py-1 text-[10px] rounded">H-Mirror</button>
-                        <button id="btn-vflip" onclick="toggleCamBool('vflip')"
-                            class="btn-cy py-1 text-[10px] rounded">V-Flip</button>
-                        <button id="btn-dcw" onclick="toggleCamBool('dcw')"
-                            class="btn-cy py-1 text-[10px] rounded">DCW</button>
-                        <button id="btn-colorbar" onclick="toggleCamBool('colorbar')"
-                            class="btn-cy py-1 text-[10px] rounded">Colorbar</button>
-                    </div>
-
-                </div>
-            </div>
-
-        </div>
-    </div>
-
-    <!-- 3D Robot Arm View -->
-    <div id="robot-view" class="flex-1 overflow-hidden p-2 sm:p-4 gap-4 view-hidden pb-20">
-        <div class="h-full grid grid-cols-1 lg:grid-cols-12 gap-4" style="min-height: 500px;">
-            <!-- 3D Canvas -->
-            <div id="canvas-wrapper" class="lg:col-span-10 cyber-border rounded p-2 relative flex flex-col"
-                style="min-height: 400px;">
-                <div
-                    class="flex justify-between px-2 text-[10px] sm:text-xs text-gray-500 font-bold flex-wrap gap-2 mb-2">
-                    <div class="flex gap-2 items-center text-green-600">
-                        3D SIMULATION: <span class="text-green-400" id="3d-status">INITIALIZING</span>
-                    </div>
-                    <div class="flex gap-4">
-                        <button onclick="toggle3DUI()"
-                            class="text-gray-400 hover:text-white border border-gray-700 px-2 rounded bg-black/50">TOGGLE
-                            UI</button>
-                        <span>RIGHT STICK: <span class="text-cyan-400 animate-pulse">ROBOT ARM</span></span>
-                    </div>
-                </div>
-                <div id="canvas-3d-deprecated" class="flex-1 bg-black relative overflow-hidden border border-gray-800"
-                    style="min-height: 350px;">
-                    <div class="flex items-center justify-center h-full text-gray-600">
-                        3D View Moved to Dashboard
-                    </div>
-                </div>
-            </div>
-
-            <!-- Telemetry Panel -->
-            <div id="telemetry-panel" class="lg:col-span-2 flex flex-col gap-4">
-
-                <!-- Joint Angles -->
-                <div class="cyber-border p-3 sm:p-4 flex flex-col gap-3 relative">
-                    <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">JOINT TELEMETRY</div>
-                    <div class="mt-4 space-y-3">
-                        <div class="flex justify-between items-center">
-                            <span class="text-[11px] text-gray-400">BASE (底座)</span>
-                            <span class="text-green-400 font-mono text-sm font-bold" id="angle-base">0.0°</span>
-                        </div>
-                        <div class="w-full h-1 bg-gray-800 rounded overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-cyan-500 to-green-400 transition-all duration-100"
-                                id="bar-base" style="width: 50%; margin-left: 25%;"></div>
-                        </div>
-
-                        <div class="flex justify-between items-center mt-3">
-                            <span class="text-[11px] text-gray-400">SHOULDER (大臂)</span>
-                            <span class="text-green-400 font-mono text-sm font-bold" id="angle-shoulder">0.0°</span>
-                        </div>
-                        <div class="w-full h-1 bg-gray-800 rounded overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-cyan-500 to-green-400 transition-all duration-100"
-                                id="bar-shoulder" style="width: 50%; margin-left: 25%;"></div>
-                        </div>
-
-                        <div class="flex justify-between items-center mt-3">
-                            <span class="text-[11px] text-gray-400">ELBOW (小臂)</span>
-                            <span class="text-green-400 font-mono text-sm font-bold" id="angle-elbow">0.0°</span>
-                        </div>
-                        <div class="w-full h-1 bg-gray-800 rounded overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-cyan-500 to-green-400 transition-all duration-100"
-                                id="bar-elbow" style="width: 50%; margin-left: 25%;"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Control Info -->
-                <div class="cyber-border p-3 sm:p-4 flex flex-col gap-2 relative">
-                    <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">CONTROL MAP</div>
-                    <div class="mt-4 space-y-2 text-[11px] text-gray-400">
-                        <div class="flex items-center gap-2">
-                            <span class="text-cyan-400 font-mono font-bold">RS-X</span> → 底座旋轉
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="text-cyan-400 font-mono font-bold">RS-Y</span> → 大臂/小臂
-                        </div>
-                        <div class="flex items-center gap-2 text-yellow-400 text-[10px] mt-3">
-                            <span>💡</span> 使用右搖桿控制
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Model Status -->
-                <div class="cyber-border p-3 sm:p-4 flex flex-col gap-2 relative">
-                    <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">MODEL STATUS</div>
-                    <div class="mt-4 space-y-2 text-[11px]">
-                        <div class="flex justify-between">
-                            <span class="text-gray-400">Mode:</span>
-                            <span class="text-green-400 font-bold" id="model-mode">PLACEHOLDER</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-400">Parts:</span>
-                            <span class="text-cyan-400 font-mono" id="model-parts">3/3</span>
-                        </div>
+                        <button id="btn-aec" onclick="toggleCamBool('aec')"
+                            class="btn-cy py-1 text-[10px] rounded">AEC</button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- Robot View Container Removed -->
+
+    <!-- Navigation -->
     <div class="nav-bar">
         <button onclick="switchView('main')" class="nav-btn active" id="nav-main">
             <span>🎮</span> <span class="hidden sm:inline">COMMAND</span>
-        </button>
-        <button onclick="switchView('robot')" class="nav-btn" id="nav-robot">
-            <span>🤖</span> <span class="hidden sm:inline">3D VIEW</span>
         </button>
         <button onclick="switchView('settings')" class="nav-btn" id="nav-settings">
             <span>⚙</span> <span class="hidden sm:inline">SYSTEM</span>
@@ -505,1499 +288,19 @@
     </div>
 
     <script>
-        // === Global State ===
-        let currentView = 'main';
-        let socket;
-        let wsConnected = false;
-        let lastLogs = [];
-
-        // Canvas State
-        const radarBlips = [];
-        let radarAngle = 0;
-        let lastFrameTime = 0;
-        let controllerLinked = false;
-        let lastXboxUpdate = 0;
-        let lastKeyboardActivity = 0;  // Track keyboard input for priority
-
-        // Keyboard state tracking
-        let keyPressed = {};
-
-        // === Speed Limiter System ===
-        let speedLimitPercent = 100; // Global speed limit (0-100%)
-
-        function applySpeedLimit(pwmValue) {
-            return Math.round(pwmValue * (speedLimitPercent / 100));
-        }
-
-        function updateSpeedLimitDisplay() {
-            const display = document.getElementById('speed-limit-value');
-            if (display) display.innerText = speedLimitPercent + '%';
-        }
-
-        window.onload = () => {
-            initWebSocket();
-            resizeCanvas();
-            requestAnimationFrame(animationLoop);
-            log("System Initialized. Dual-Link Mode Active.");
-            fetchModels();
-
-            // Add keyboard event listeners
-            setupKeyboardControls();
-
-            // Initialize speed limiter
-            initSpeedLimiter();
-
-            // Initialize video retry logic
-            initVideoRetry();
-
-            // Initialize 3D Robot Arm (Now in Dashboard)
-            initRobot3D();
-        };
-
-        function initVideoRetry() {
-            const img = document.getElementById('video-stream');
-            const noSig = document.getElementById('no-sig');
-            let retryTimeout = null;
-
-            if (!img || !noSig) return;
-
-            img.onerror = () => {
-                console.log("[VIDEO] Stream error/disconnect. Retrying in 2s...");
-                img.style.display = 'none';
-                noSig.style.display = 'flex';
-
-                if (retryTimeout) clearTimeout(retryTimeout);
-
-                retryTimeout = setTimeout(() => {
-                    // Cache bust to force reconnect
-                    img.src = "/video_feed?t=" + new Date().getTime();
-                    // Don't show immediately, wait for load
-                }, 2000);
-            };
-
-            img.onload = () => {
-                console.log("[VIDEO] Stream connected");
-                img.style.display = 'block';
-                noSig.style.display = 'none';
-            };
-        }
-
-        // === Speed Limiter Initialization ===
-        function initSpeedLimiter() {
-            const slider = document.getElementById('speed-limit-slider');
-            if (!slider) {
-                console.warn('[SPEED_LIMITER] Slider element not found');
-                return;
-            }
-
-            // Set initial value
-            speedLimitPercent = parseInt(slider.value);
-            updateSpeedLimitDisplay();
-
-            // Bind input event
-            slider.addEventListener('input', (e) => {
-                speedLimitPercent = parseInt(e.target.value);
-                updateSpeedLimitDisplay();
-                console.log(`[SPEED_LIMITER] Updated to ${speedLimitPercent}%`);
-            });
-
-            // Bind change event for final value (when user releases slider)
-            slider.addEventListener('change', (e) => {
-                log(`Speed Limit set to ${speedLimitPercent}%`);
-            });
-
-            console.log('[SPEED_LIMITER] Initialized successfully');
-        }
-
-
-        function setupKeyboardControls() {
-            // Track which keys are currently pressed
-            document.addEventListener('keydown', (e) => {
-                const key = e.key.toUpperCase();
-
-                // Prevent repeated keydown events when holding
-                if (keyPressed[key]) return;
-                keyPressed[key] = true;
-
-                // Update keyboard activity timestamp for input priority
-                lastKeyboardActivity = Date.now();
-
-                console.log(`[KEYBOARD] Key DOWN: ${key}`);
-
-                // Map keys to commands
-                switch (key) {
-                    case 'W':
-                        sendCmd('F');
-                        break;
-                    case 'S':
-                        sendCmd('S');
-                        break;
-                    case 'A':
-                        sendCmd('L');
-                        break;
-                    case 'D':
-                        sendCmd('R');
-                        break;
-                    case 'X':
-                        sendCmd('B');
-                        break;
-                }
-            });
-
-            document.addEventListener('keyup', (e) => {
-                const key = e.key.toUpperCase();
-                keyPressed[key] = false;
-
-                console.log(`[KEYBOARD] Key UP: ${key}`);
-
-                // Send stop command when key released
-                if (['W', 'A', 'S', 'D', 'X'].includes(key)) {
-                    sendCmd('S');
-                }
-            });
-
-            console.log('[KEYBOARD] Event listeners installed');
-        }
-
-        async function fetchModels() {
-            try {
-                const res = await fetch('/api/get_models');
-                const data = await res.json();
-                const selector = document.getElementById('model-selector');
-                if (data.models && data.models.length > 0) {
-                    selector.innerHTML = ''; // Clear defaults
-                    data.models.forEach(model => {
-                        const opt = document.createElement('option');
-                        opt.value = model;
-                        opt.text = model;
-                        selector.appendChild(opt);
-                    });
-                }
-            } catch (e) {
-                console.log("Failed to fetch models", e);
-            }
-        }
-
-        async function applyModel() {
-            const model = document.getElementById('model-selector').value;
-            if (!model) return;
-            log(`Switching AI model to ${model}...`);
-            try {
-                const res = await fetch('/api/set_model', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ model: model })
-                });
-                const data = await res.json();
-                if (data.status === 'ok') {
-                    log(`Model switched to ${model}`);
-                } else {
-                    log(`Failed to switch model: ${data.msg}`);
-                }
-            } catch (e) {
-                log(`Error switching model: ${e}`);
-            }
-        }
-
-        window.addEventListener('resize', resizeCanvas);
-
-        function resizeCanvas() {
-            const mainC = document.getElementById('radar-canvas-main');
-            if (mainC) {
-                mainC.width = mainC.parentElement.clientWidth;
-                mainC.height = mainC.parentElement.clientHeight;
-            }
-        }
-
-        function initWebSocket() {
-            socket = io({ transports: ['websocket'] });
-            socket.on('connect', () => { wsConnected = true; log("WS Connected"); });
-            socket.on('disconnect', () => { wsConnected = false; log("WS Disconnected"); });
-
-            // Handle status updates pushed from server (replaces polling)
-            socket.on('status_update', (data) => {
-                updateUI(data);
-            });
-
-            socket.on('controller_data', (data) => {
-                controllerLinked = true;
-                lastXboxUpdate = Date.now();
-
-                // Update Visuals
-                updateXboxVisual(data.left_stick_x || 0, data.left_stick_y || 0, data.stick_pressed || false);
-
-                if (data.cmd) {
-                    document.getElementById('xbox-cmd').innerText = data.cmd;
-                    highlightKey(data.cmd);
-                }
-                const icon = document.getElementById('gamepad-status');
-                if (icon) {
-                    icon.classList.remove('gamepad-inactive');
-                    icon.classList.add('gamepad-active');
-                }
-
-                // === ROBOT ARM CONTROL (Right Stick) ===
-                if (currentView === 'robot' && window.robot3DInitialized) {
-                    // Deadzone for robot arm
-                    const DEADZONE = 0.15;
-                    const rx = Math.abs(data.right_stick_x) < DEADZONE ? 0 : data.right_stick_x;
-                    const ry = Math.abs(data.right_stick_y) < DEADZONE ? 0 : data.right_stick_y;
-
-                    if (rx !== 0 || ry !== 0) {
-                        const speed = 0.05; // Rotation speed
-
-                        // Base Rotation (Yaw) - RS X
-                        // Invert if necessary
-                        window.targetBaseAngle -= rx * speed;
-
-                        // Shoulder/Elbow (Pitch) - RS Y
-                        window.targetShoulderAngle += ry * speed;
-                        // Linked Elbow Movement for natural look
-                        window.targetElbowAngle -= ry * speed * 0.5;
-
-                        // Debug Log (Always log for now to debug)
-                        console.log(`[SOCKET] Arm Control → Base:${window.targetBaseAngle.toFixed(2)} Shldr:${window.targetShoulderAngle.toFixed(2)} View:${currentView}`);
-
-                        // Force UI update if needed (normally animationLoop handles it)
-
-
-                        // Clamp angles
-                        window.targetBaseAngle = Math.max(-Math.PI, Math.min(Math.PI, window.targetBaseAngle));
-                        window.targetShoulderAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, window.targetShoulderAngle));
-                        window.targetElbowAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, window.targetElbowAngle));
-                    }
-                }
-            });
-        }
-
-        function updateUI(data) {
-            // 更新 header 的 IP 顯示
-            const carIpDisplay = document.getElementById('car-ip-display');
-            const camIpDisplay = document.getElementById('cam-ip-display');
-
-            if (data.car_ip) {
-                carIpDisplay.innerText = data.car_ip;
-                carIpDisplay.className = "text-green-400 font-bold font-mono";
-                // 同步更新 Settings 欄位
-                const setCar = document.getElementById('settings-car-ip');
-                if (setCar && !setCar.value) setCar.value = data.car_ip;
-            }
-
-            if (data.camera_ip) {
-                camIpDisplay.innerText = data.camera_ip;
-                camIpDisplay.className = "text-blue-400 font-bold font-mono";
-                // 同步更新 Settings 欄位
-                const setCam = document.getElementById('settings-cam-ip');
-                if (setCam && !setCam.value) setCam.value = data.camera_ip;
-            }
-
-            // 更新 AI 狀態
-            const aiStatus = document.getElementById('ai-status');
-            if (data.ai_status) {
-                aiStatus.innerText = "AI: ACTIVE";
-                aiStatus.className = "text-green-400 font-bold animate-pulse";
-                document.getElementById('ai-toggle-btn').innerText = "DEACTIVATE AI";
-            } else {
-                aiStatus.innerText = "AI: STANDBY";
-                aiStatus.className = "text-gray-500";
-                document.getElementById('ai-toggle-btn').innerText = "ACTIVATE AI HUD";
-            }
-
-            // 更新距離
-            const distVal = document.getElementById('dist-val');
-            if (distVal && data.dist !== undefined) {
-                distVal.innerText = data.dist.toFixed(2) + " CM";
-            }
-
-            // Logs
-            if (data.logs) {
-                const serialized = JSON.stringify(data.logs);
-                if (serialized !== JSON.stringify(lastLogs)) {
-                    lastLogs = data.logs.slice();
-                    const box = document.getElementById('log-box');
-                    box.innerHTML = "";
-                    data.logs.forEach(l => {
-                        const d = document.createElement('div');
-                        d.innerText = l;
-                        box.appendChild(d);
-                    });
-                    box.scrollTop = box.scrollHeight;
-                }
-            }
-        }
-
-        function applySettings() {
-            const carIp = document.getElementById('settings-car-ip').value;
-            const camIp = document.getElementById('settings-cam-ip').value;
-
-            // [DISABLED] /api/set_ip endpoint doesn't exist in web_server.py
-            // IP configuration is auto-detected from config.py
-            // To change IPs, edit config.py and restart the server
-
-            // if (carIp) {
-            //     fetch('/api/set_ip', {
-            //         method: 'POST',
-            //         headers: { 'Content-Type': 'application/json' },
-            //         body: JSON.stringify({ car_ip: carIp })
-            //     });
-            // }
-            // if (camIp) {
-            //     fetch('/api/set_ip', {
-            //         method: 'POST',
-            //         headers: { 'Content-Type': 'application/json' },
-            //         body: JSON.stringify({ cam_ip: camIp })
-            //     });
-            // }
-
-            log(`Settings view - Current CAR: ${carIp}, CAM: ${camIp} (read-only)`);
-            log(`To change IPs, edit config.py and restart server`);
-            switchView('main');
-        }
-
-        // === Animation & Visuals ===
-        function animationLoop(timestamp) {
-            const dt = timestamp - lastFrameTime;
-            lastFrameTime = timestamp;
-            drawRadar(document.getElementById('radar-canvas-main'), timestamp);
-
-            // Gamepad heartbeat check
-            if (Date.now() - lastXboxUpdate > 2000) {
-                const icon = document.getElementById('gamepad-status');
-                if (icon) {
-                    icon.classList.remove('gamepad-active');
-                    icon.classList.add('gamepad-inactive');
-                }
-            }
-
-            updateJoystickLoop();
-            requestAnimationFrame(animationLoop);
-        }
-
-        // === Xbox Controller Logic ===
-        let lastGamepadCmdTime = 0;
-        let wasJoystickActive = false;
-        const CMD_INTERVAL = 50; // Throttle to 20Hz
-
-        function updateJoystickLoop() {
-            // Get Gamepads (Standard Mapping)
-            // Index 0 is usually the first connected controller
-            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-            const gp = gamepads[0]; // Focus on the first controller
-
-            if (!gp || !gp.connected) return;
-
-            // Mark as active
-            const icon = document.getElementById('gamepad-status');
-            if (icon) {
-                icon.classList.remove('gamepad-inactive');
-                icon.classList.add('gamepad-active');
-            }
-            lastXboxUpdate = Date.now();
-
-
-            // === 1. Read Inputs ===
-            // Standard Gamepad Mapping:
-            // Axes[0] = Left Stick X (-1 Left, +1 Right)
-            // Axes[1] = Left Stick Y (-1 Up, +1 Down)
-            let rawX = gp.axes[0];
-            let rawY = gp.axes[1];
-
-            // [DEBUG] Log raw stick values
-            if (Math.abs(rawX) > 0.15 || Math.abs(rawY) > 0.15) {
-                console.log(`[GAMEPAD] 🕹️ STICK RAW → axisX:${rawX.toFixed(2)}, axisY:${rawY.toFixed(2)}`);
-            }
-
-            // === 1.1 Input Priority Check ===
-            // If keyboard was used recently (within 500ms), suppress gamepad
-            if (Date.now() - lastKeyboardActivity < 500) {
-                // If gamepad was active, we might need to send a stop? 
-                // But keyboard handles its own stop when keyup.
-                // Just return to avoid conflict.
-                return;
-            }
-
-            // === 2. Deadzone Processing ===
-            const DEADZONE = 0.15;
-            const applyDeadzone = (val) => Math.abs(val) < DEADZONE ? 0 : val;
-
-            let steer = applyDeadzone(rawX);     // -1.0 (Left) to 1.0 (Right)
-            let throttle = -applyDeadzone(rawY); // Invert Y: Up is positive
-
-            // === 3. Update Visuals ===
-            // Update stick animation and button indicators
-            updateXboxVisual(rawX, rawY, gp.buttons[10] && gp.buttons[10].pressed);
-
-            // Update button indicators
-            updateButtonIndicator('a', gp.buttons[0] && gp.buttons[0].pressed);
-            updateButtonIndicator('x', gp.buttons[2] && gp.buttons[2].pressed);
-            updateButtonIndicator('ls', gp.buttons[10] && gp.buttons[10].pressed);
-
-            // === 4. Differential Drive Mixing ===
-            // Formula:
-            //   Left  = Throttle + Steer
-            //   Right = Throttle - Steer
-            // When turning right (steer > 0): Left speeds up, Right slows down
-            let leftVal = throttle + steer;
-            let rightVal = throttle - steer;
-
-            if (Math.abs(leftVal) > 0.1 || Math.abs(rightVal) > 0.1) {
-                console.log(`[GAMEPAD] ⚙️ MIXED → L:${leftVal.toFixed(2)}, R:${rightVal.toFixed(2)}`);
-            }
-
-            // Clamp and scale
-            leftVal = Math.max(-1, Math.min(1, leftVal));
-            rightVal = Math.max(-1, Math.min(1, rightVal));
-
-            const MAX_PWM = 255;
-            let leftPWM = Math.round(leftVal * MAX_PWM);
-            let rightPWM = Math.round(rightVal * MAX_PWM);
-
-            // Apply speed limiter to gamepad as well
-            leftPWM = applySpeedLimit(leftPWM);
-            rightPWM = applySpeedLimit(rightPWM);
-
-            // Update PWM display in real-time
-            updatePWMDisplay(leftPWM, rightPWM);
-
-            if (leftPWM !== 0 || rightPWM !== 0) {
-                console.log(`[GAMEPAD] 📤 PWM → L:${leftPWM}, R:${rightPWM}`);
-            }
-
-
-            // === 5. Throttling & Sending ===
-            // Only send if time interval passed OR immediate stop
-            // [FIX] Input Priority: Only send if joystick is active OR just became inactive
-            const isStickActive = (leftPWM !== 0 || rightPWM !== 0);
-
-            if (!isStickActive && !wasJoystickActive) {
-                // Joystick is idle and was already idle. Do NOT send anything.
-                // This allows Keyboard (WASD) commands to pass through.
-                return;
-            }
-
-            const now = Date.now();
-            if (isStickActive || (now - lastGamepadCmdTime > CMD_INTERVAL) || !wsConnected) { // wsConnected check is dummy here, mainly logic below
-
-                // Allow sending if: 
-                // 1. Stick is moving (Active)
-                // 2. Stick JUST stopped (wasActive=true, isActive=false) - Send ONE (0,0)
-                // 3. Throttle condition met
-
-                if (isStickActive || wasJoystickActive) {
-                    if ((now - lastGamepadCmdTime > CMD_INTERVAL) || (wasJoystickActive && !isStickActive)) {
-
-
-                        // Construct payload
-                        const payload = { left: leftPWM, right: rightPWM };
-
-                        // Visual Debug
-                        document.getElementById('xbox-cmd').innerText = `L:${leftPWM} R:${rightPWM}`;
-
-                        // Send 
-                        fetch('/api/control', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        }).catch(e => { /* Ignore fetch errors */ });
-
-                        lastGamepadCmdTime = now;
-                    }
-                }
-            }
-
-            wasJoystickActive = isStickActive;
-
-            // Button Bindings for Lights (A Button = Index 0)
-            if (gp.buttons[0] && gp.buttons[0].pressed) {
-                // Debounce could be added here, but toggleLight handles state
-                // For simple press-and-hold or toggle
-            }
-        }
-
-        function drawRadar(canvas, time) {
-            if (!canvas) return;
-            const ctx = canvas.getContext('2d');
-            const w = canvas.width, h = canvas.height;
-            const cx = w / 2, cy = h / 2;
-            let radius = Math.min(w, h) / 2 - 2;
-
-            // Safety check: prevent negative radius
-            if (radius < 5) {
-                radius = Math.max(5, Math.min(w, h) / 2);
-            }
-
-            ctx.clearRect(0, 0, w, h);
-
-            // Grid
-            ctx.strokeStyle = 'rgba(0, 255, 157, 0.2)';
-            ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.stroke();
-            ctx.beginPath(); ctx.arc(cx, cy, radius * 0.5, 0, Math.PI * 2); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy); ctx.stroke();
-
-            // Sweep
-            radarAngle = (time / 2000 * Math.PI * 2) % (Math.PI * 2);
-            const grad = ctx.createConicGradient(radarAngle - Math.PI / 2, cx, cy);
-            grad.addColorStop(0, 'rgba(0, 255, 157, 0)');
-            grad.addColorStop(0.8, 'rgba(0, 255, 157, 0.1)');
-            grad.addColorStop(1, 'rgba(0, 255, 157, 0.4)');
-            ctx.fillStyle = grad;
-            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.fill();
-        }
-
-        function sendCmd(cmd) {
-            console.log(`[KEYBOARD] sendCmd called with: ${cmd}`);
-            highlightKey(cmd);
-
-            // [Input Priority] Update keyboard activity timestamp
-            lastKeyboardActivity = Date.now();
-
-            // Map commands to differential drive PWM (-255 to 255)
-            let left = 0, right = 0;
-
-            switch (cmd) {
-                case 'F': // Forward (reduced from 200 to 130)
-                    left = 130; right = 130;
-                    break;
-                case 'B': // Backward (reduced from -200 to -130)
-                    left = -130; right = -130;
-                    break;
-                case 'L': // Turn Left (reduced from ±150 to ±100)
-                    left = -100; right = 100;
-                    break;
-                case 'R': // Turn Right (reduced from ±150 to ±100)
-                    left = 100; right = -100;
-                    break;
-                case 'S': // Stop
-                    left = 0; right = 0;
-                    break;
-                default:
-                    console.log(`[KEYBOARD] Unknown command: ${cmd}`);
-                    return; // Ignore unknown commands
-            }
-
-            // Apply speed limiter
-            left = applySpeedLimit(left);
-            right = applySpeedLimit(right);
-
-            console.log(`[KEYBOARD] Sending: L=${left}, R=${right}`);
-
-            // Send through your backend API
-            fetch('/api/control', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ left: left, right: right })
-            })
-                .then(response => {
-                    if (!response.ok) {
-                        if (response.status === 503) {
-                            // [SUPPRESS] 503 is "Device Unreachable" (common when ESP32 is off)
-                            // Warn only once per 5 seconds to avoid spam
-                            const now = Date.now();
-                            if (!window._last503Warn || now - window._last503Warn > 5000) {
-                                console.warn(`[KEYBOARD] Device Unreachable (503) - Check ESP32 Connection`);
-                                window._last503Warn = now;
-                            }
-                            return {}; // Return empty object to prevent downstream errors
-                        }
-                        return response.text().then(text => {
-                            console.error(`[KEYBOARD] Backend error ${response.status}:`, text);
-                            throw new Error(`HTTP ${response.status}: ${text}`);
-                        });
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('[KEYBOARD] Command sent successfully:', data);
-                })
-                .catch(e => console.error('[KEYBOARD] Control error:', e));
-        }
-
-        function highlightKey(cmd) {
-            const map = { 'F': 'btn-w', 'L': 'btn-a', 'S': 'btn-s', 'R': 'btn-d', 'B': 'btn-x' };
-            const id = map[cmd];
-            if (id) {
-                const btn = document.getElementById(id);
-                btn.classList.add('btn-active');
-                setTimeout(() => btn.classList.remove('btn-active'), 150);
-            }
-        }
-
-        function updateXboxVisual(x, y, pressed) {
-            const stick = document.getElementById('xbox-stick');
-            const coords = document.getElementById('stick-coords');
-            if (!stick) return;
-
-            const clamp = (v) => Math.max(-1, Math.min(1, v));
-            const offset = 24; // Increased offset for more visible movement
-            const dx = clamp(x) * offset;
-            const dy = clamp(y) * offset; // Keep Y as-is for visual representation
-
-            // Note: transform needs to stay as inline style for dynamic positioning
-            stick.style.transform = `translate(${dx}px, ${dy}px)`;
-
-            // Enhanced visual feedback with CSS classes
-            if (pressed) {
-                stick.classList.add('xbox-stick-pressed');
-                stick.classList.remove('xbox-stick-normal');
-                stick.style.transform = `translate(${dx}px, ${dy}px) scale(0.9)`;
-            } else {
-                stick.classList.remove('xbox-stick-pressed');
-                stick.classList.add('xbox-stick-normal');
-            }
-
-            // Update coordinates display
-            if (coords) {
-                coords.innerText = `X:${x.toFixed(2)} Y:${y.toFixed(2)}`;
-            }
-        }
-
-        function updateButtonIndicator(buttonId, pressed) {
-            const indicator = document.getElementById(`btn-indicator-${buttonId}`);
-            if (!indicator) return;
-
-            if (pressed) {
-                indicator.classList.remove('bg-gray-700');
-                indicator.classList.add('bg-green-400');
-                indicator.classList.add('indicator-active');
-                indicator.classList.remove('indicator-inactive');
-            } else {
-                indicator.classList.remove('bg-green-400');
-                indicator.classList.add('bg-gray-700');
-                indicator.classList.remove('indicator-active');
-                indicator.classList.add('indicator-inactive');
-            }
-        }
-
-        function updatePWMDisplay(left, right) {
-            const leftEl = document.getElementById('pwm-left');
-            const rightEl = document.getElementById('pwm-right');
-
-            if (leftEl) {
-                leftEl.innerText = left;
-                // Color coding based on direction
-                if (left > 0) leftEl.className = 'text-green-400 font-bold text-sm';
-                else if (left < 0) leftEl.className = 'text-red-400 font-bold text-sm';
-                else leftEl.className = 'text-gray-500 font-bold text-sm';
-            }
-
-            if (rightEl) {
-                rightEl.innerText = right;
-                if (right > 0) rightEl.className = 'text-green-400 font-bold text-sm';
-                else if (right < 0) rightEl.className = 'text-red-400 font-bold text-sm';
-                else rightEl.className = 'text-gray-500 font-bold text-sm';
-            }
-        }
-
-        let lightState = false;
-        function toggleLight() {
-            lightState = !lightState;
-            sendCmd(lightState ? 'W' : 'w');
-        }
-
-        function toggleAI() {
-            fetch('/api/toggle_ai', { method: 'POST' });
-        }
-
-        function exportLogs() {
-            const logs = document.getElementById('log-box').innerText;
-            const blob = new Blob([logs], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = 'system_logs.txt'; a.click();
-        }
-
-        async function showNetInfo() {
-            try {
-                const res = await fetch('/netinfo');
-                const data = await res.json();
-                let msg = "=== NETWORK INTERFACES ===\n\n";
-
-                if (data.camera_net) {
-                    msg += `[CAMERA NET] (ESP32)\nName: ${data.camera_net.name}\nIP: ${data.camera_net.ip}\nMAC: ${data.camera_net.mac}\n\n`;
-                } else {
-                    msg += `[CAMERA NET] Not Detected\n\n`;
-                }
-
-                if (data.internet_net) {
-                    msg += `[INTERNET/CAR NET]\nName: ${data.internet_net.name}\nIP: ${data.internet_net.ip}\nMAC: ${data.internet_net.mac}\n\n`;
-                } else {
-                    msg += `[INTERNET/CAR NET] Not Detected\n\n`;
-                }
-
-                msg += "--- Other Interfaces ---\n";
-                data.all_ifaces.forEach(iface => {
-                    if ((!data.camera_net || iface.name !== data.camera_net.name) &&
-                        (!data.internet_net || iface.name !== data.internet_net.name)) {
-                        msg += `${iface.name}: ${iface.ip}\n`;
-                    }
-                });
-
-                alert(msg);
-                log("Network Info retrieved.");
-            } catch (e) {
-                alert("Failed to fetch network info");
-            }
-        }
-
-        // === Camera Config ===
-        const camState = {};
-
-        async function fetchCameraSettings() {
-            try {
-                const res = await fetch('/api/camera_settings');
-                if (!res.ok) return;
-                const data = await res.json();
-
-                // Update UI elements
-                const updateVal = (id, val) => {
-                    const el = document.getElementById(id);
-                    if (el) {
-                        el.value = val;
-                        // Trigger onchange manually if needed, or just update UI
-                        const display = document.getElementById('val-' + id.replace('cfg-', ''));
-                        if (display) display.innerText = val;
-                    }
-                };
-
-                // Selects & Sliders
-                ['framesize', 'special_effect', 'wb_mode', 'quality', 'brightness', 'contrast', 'saturation'].forEach(key => {
-                    if (data[key] !== undefined) {
-                        updateVal('cfg-' + key, data[key]);
-                        camState[key] = data[key];
-                    }
-                });
-
-                // Toggles
-                ['awb', 'aec', 'aec2', 'agc', 'bpc', 'wpc', 'raw_gma', 'lenc', 'hmirror', 'vflip', 'dcw', 'colorbar'].forEach(key => {
-                    if (data[key] !== undefined) {
-                        camState[key] = data[key];
-                        const btn = document.getElementById('btn-' + key);
-                        if (btn) {
-                            if (data[key] == 1) btn.classList.add('btn-active');
-                            else btn.classList.remove('btn-active');
-                        }
-                    }
-                });
-
-                log("Camera settings synced.");
-
-            } catch (e) {
-                log("Failed to sync camera settings.");
-            }
-        }
-
-        async function updateCameraSetting(varName, val) {
-            // Update local state and UI display immediately
-            camState[varName] = val;
-            const display = document.getElementById('val-' + varName);
-            if (display) display.innerText = val;
-
-            try {
-                await fetch('/api/camera_settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ var: varName, val: Number(val) })
-                });
-            } catch (e) {
-                log(`Failed to set ${varName}`);
-            }
-        }
-
-        function toggleCamBool(varName) {
-            const current = camState[varName] || 0;
-            const newVal = current ? 0 : 1;
-
-            // Toggle visual state
-            const btn = document.getElementById('btn-' + varName);
-            if (btn) {
-                if (newVal) btn.classList.add('btn-active');
-                else btn.classList.remove('btn-active');
-            }
-
-            updateCameraSetting(varName, newVal);
-        }
-
-        function switchView(view) {
-            currentView = view;
-            const mainView = document.getElementById('main-view');
-            const settingsView = document.getElementById('settings-view');
-            const robotView = document.getElementById('robot-view');
-
-            // Hide all views
-            mainView.classList.add('view-hidden');
-            mainView.classList.remove('view-grid');
-            settingsView.classList.add('view-hidden');
-            settingsView.classList.remove('view-block');
-            robotView.classList.add('view-hidden');
-
-            // Show selected view
-            if (view === 'main') {
-                mainView.classList.remove('view-hidden');
-                mainView.classList.add('view-grid');
-            } else if (view === 'robot') {
-                robotView.classList.remove('view-hidden');
-                if (!window.robot3DInitialized) {
-                    initRobot3D();
-                }
-            } else if (view === 'settings') {
-                settingsView.classList.remove('view-hidden');
-                settingsView.classList.add('view-block');
-                fetchCameraSettings();
-            }
-
-            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
-            document.getElementById('nav-' + view).classList.add('active');
-        }
-
-        function log(msg) {
-            const box = document.getElementById('log-box');
-            if (box) {
-                const time = new Date().toLocaleTimeString('en-GB');
-                const d = document.createElement('div');
-                d.innerHTML = `<span class="text-gray-600">[${time}]</span> ${msg}`;
-                box.appendChild(d);
-                box.scrollTop = box.scrollHeight;
-            }
-        }
-
-        // Keyboard
-        document.addEventListener('keydown', (e) => {
-            if (e.repeat) return;
-            const k = e.key.toUpperCase();
-            const map = {
-                'W': 'F', 'A': 'L', 'S': 'S', 'D': 'R', 'X': 'B', ' ': 'S',
-                'Q': 'Q', 'E': 'E', 'Z': 'Z', 'C': 'C'
-            };
-            if (map[k]) sendCmd(map[k]);
-
-            // Robot Reset Key
-            if (k === 'R') resetRobotArm();
-        });
-        document.addEventListener('keyup', (e) => {
-            if (['W', 'A', 'D', 'X', 'Q', 'E', 'Z', 'C'].includes(e.key.toUpperCase())) sendCmd('S');
-        });
-
+        // Clock
         setInterval(() => {
             document.getElementById('clock').innerText = new Date().toLocaleTimeString();
         }, 1000);
-
-        // ==================== 3D ROBOT ARM SIMULATOR ====================
-        // Three.js Integration for Robot Arm Visualization
-
-        let robot3DInitialized = false;
-        let scene3D, camera3D, renderer3D, controls3D;
-        let robotModel, basePart, shoulderPart, elbowPart;
-
-        // CRITICAL: Expose to window for Three.js module and Socket access
-        window.targetBaseAngle = 0; window.targetShoulderAngle = 0; window.targetElbowAngle = 0;
-        window.currentBaseAngle = 0; window.currentShoulderAngle = 0; window.currentElbowAngle = 0;
-
-        const controlSpeed = 0.03;
-        const smoothFactor = 0.1;
-
-        function toggle3DUI() {
-            const panel = document.getElementById('telemetry-panel');
-            const canvasContainer = document.getElementById('canvas-wrapper');
-            if (panel && canvasContainer) {
-                if (panel.classList.contains('hidden')) {
-                    panel.classList.remove('hidden');
-                    canvasContainer.classList.remove('lg:col-span-12');
-                    canvasContainer.classList.add('lg:col-span-10');
-                } else {
-                    panel.classList.add('hidden');
-                    canvasContainer.classList.remove('lg:col-span-10');
-                    canvasContainer.classList.add('lg:col-span-12');
-                }
-                // Trigger resize
-                setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
-            }
-        }
-
-        function initRobot3D() {
-            if (robot3DInitialized) return;
-            robot3DInitialized = true;
-            console.log('[3D] Initializing Robot Arm Simulator...');
-
-            // Load Three.js scene with Import Maps
-            const script = document.createElement('script');
-            script.type = 'module';
-            script.textContent = `
-                import * as THREE from 'three';
-                import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-                import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-
-                console.log('[3D] Three.js modules loaded');
-
-                // Scene Setup
-                window.scene3D = new THREE.Scene();
-                window.scene3D.background = new THREE.Color(0x222222);
-
-                // Camera
-                const container = document.getElementById('canvas-3d-container');
-                if (!container) {
-                    console.error('[3D] Canvas container not found!');
-                    throw new Error('[3D] Canvas container not found');
-                }
-                
-                window.camera3D = new THREE.PerspectiveCamera(
-                    45,
-                    container.clientWidth / container.clientHeight,
-                    0.1,
-                    1000
-                );
-                window.camera3D.position.set(5, 5, 5);
-
-                // Renderer
-                window.renderer3D = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-                window.renderer3D.setSize(container.clientWidth, container.clientHeight);
-                window.renderer3D.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-                window.renderer3D.shadowMap.enabled = true;
-                window.renderer3D.shadowMap.type = THREE.PCFSoftShadowMap;
-                window.renderer3D.toneMapping = THREE.ACESFilmicToneMapping;
-                window.renderer3D.toneMappingExposure = 1.2;
-                container.appendChild(window.renderer3D.domElement);
-
-                // Controls
-                window.controls3D = new OrbitControls(window.camera3D, window.renderer3D.domElement);
-                window.controls3D.enableDamping = true;
-                window.controls3D.dampingFactor = 0.05;
-                window.controls3D.minDistance = 1; // Allow closer zoom
-                window.controls3D.maxDistance = 100; // Allow further zoom
-
-                // Lighting - Cyber style
-                const ambientLight = new THREE.AmbientLight(0x00ff99, 0.4);
-                window.scene3D.add(ambientLight);
-
-                const mainLight = new THREE.DirectionalLight(0x00ffaa, 1.2);
-                mainLight.position.set(10, 15, 10);
-                mainLight.castShadow = true;
-                mainLight.shadow.mapSize.width = 2048;
-                mainLight.shadow.mapSize.height = 2048;
-                window.scene3D.add(mainLight);
-
-                const fillLight = new THREE.DirectionalLight(0x00ddff, 0.5);
-                fillLight.position.set(-5, 5, -5);
-                window.scene3D.add(fillLight);
-
-                const rimLight = new THREE.PointLight(0x00ff99, 0.8, 30);
-                rimLight.position.set(0, 8, -8);
-                window.scene3D.add(rimLight);
-
-                // Grid - Cyber style
-                const gridHelper = new THREE.GridHelper(20, 20, 0x00ff99, 0x003322);
-                gridHelper.material.opacity = 0.3;
-                gridHelper.material.transparent = true;
-                window.scene3D.add(gridHelper);
-
-                // Ground
-                const groundGeometry = new THREE.PlaneGeometry(20, 20);
-                const groundMaterial = new THREE.ShadowMaterial({ opacity: 0.4 });
-                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-                ground.rotation.x = -Math.PI / 2;
-                ground.receiveShadow = true;
-                window.scene3D.add(ground);
-
-                // Create Placeholder Robot (Cyber Style)
-                function createCyberRobot() {
-                    const robotGroup = new THREE.Group();
-                    
-                    // Base (Glowing Cyan)
-                    const baseGeo = new THREE.CylinderGeometry(0.8, 1, 0.3, 16);
-                    const baseMat = new THREE.MeshStandardMaterial({ 
-                        color: 0x001a1a,
-                        emissive: 0x00ff99,
-                        emissiveIntensity: 0.3,
-                        metalness: 0.8,
-                        roughness: 0.2
-                    });
-                    window.basePart = new THREE.Mesh(baseGeo, baseMat);
-                    window.basePart.castShadow = true;
-                    window.basePart.receiveShadow = true;
-                    window.basePart.position.y = 0.15;
-                    robotGroup.add(window.basePart);
-                    
-                    // Shoulder (Glowing Green)
-                    const shoulderGeo = new THREE.BoxGeometry(0.4, 2, 0.4);
-                    const shoulderMat = new THREE.MeshStandardMaterial({ 
-                        color: 0x003300,
-                        emissive: 0x00ff66,
-                        emissiveIntensity: 0.4,
-                        metalness: 0.7,
-                        roughness: 0.3
-                    });
-                    window.shoulderPart = new THREE.Mesh(shoulderGeo, shoulderMat);
-                    window.shoulderPart.castShadow = true;
-                    window.shoulderPart.position.set(0, 1.3, 0);
-                    window.basePart.add(window.shoulderPart);
-                    
-                    // Elbow (Glowing Cyan)
-                    const elbowGeo = new THREE.BoxGeometry(0.3, 1.5, 0.3);
-                    const elbowMat = new THREE.MeshStandardMaterial({ 
-                        color: 0x001a33,
-                        emissive: 0x00aaff,
-                        emissiveIntensity: 0.4,
-                        metalness: 0.7,
-                        roughness: 0.3
-                    });
-                    window.elbowPart = new THREE.Mesh(elbowGeo, elbowMat);
-                    window.elbowPart.castShadow = true;
-                    window.elbowPart.position.set(0, 1.5, 0);
-                    window.shoulderPart.add(window.elbowPart);
-                    
-                    window.scene3D.add(robotGroup);
-                    window.robotModel = robotGroup;
-                    
-                    console.log('[3D] Cyber-styled placeholder robot created');
-                    const statusEl = document.getElementById('3d-status');
-                    const modeEl = document.getElementById('model-mode');
-                    if (statusEl) statusEl.textContent = 'ACTIVE';
-                    if (modeEl) modeEl.textContent = 'PLACEHOLDER';
-                }
-
-                // Try to load GLB model, fallback to placeholder
-                const gltfLoader = new GLTFLoader();
-                const modelPath = './models/eezybotarm.glb';
-                
-                gltfLoader.load(
-                    modelPath,
-                    (gltf) => {
-                        window.robotModel = gltf.scene;
-                        
-                    // Scale fix - MOVED TO END
-                    // window.robotModel.scale.set(15, 15, 15); // Don't scale yet!
-                    window.robotModel.position.set(0, 0, 0); 
-                    
-                    // CRITICAL FIX: Add to scene FIRST to ensure World Matrices are valid for 'attach'
-                    window.scene3D.add(window.robotModel);
-                    
-                    // Force Matrix Update (on unscaled model)
-                    window.scene3D.updateMatrixWorld(true);
-                    
-                    // Debug Helpers (Scale them down to match unscaled model initially if needed, but 5 is fine)
-                    const axesHelper = new THREE.AxesHelper(1);
-                    window.scene3D.add(axesHelper);
-
-                    // Conservative Material Update (Cyber Style)
-                    window.robotModel.traverse((child) => {
-                        if (child.isMesh) {
-                            child.castShadow = true;
-                            child.receiveShadow = true;
-                            if (child.material) {
-                                // Keep original material but ensure double-side rendering
-                                child.material.side = THREE.DoubleSide;
-                                child.material.transparent = false;
-                                child.material.opacity = 1.0;
-                                
-                                // Add subtle cyber glow if not already emissive
-                                if (child.material.emissive && child.material.emissive.getHex() === 0) {
-                                    child.material.emissive = new THREE.Color(0x004400); // Dark Green Glow
-                                    child.material.emissiveIntensity = 0.3;
-                                }
-                                child.material.needsUpdate = true;
-                            }
-                        }
-                    });
-                    
-                    try {
-                        console.log('[3D] Starting Auto-Rigging Process (Safe Mode)...');
-
-                        // 2. Create Virtual Kinematic Chain & Add to Scene
-                        const virtualBase = new THREE.Group(); virtualBase.name = 'Virtual_Base';
-                        window.scene3D.add(virtualBase); // Add parent to scene first
-
-                        const virtualShoulder = new THREE.Group(); virtualShoulder.name = 'Virtual_Shoulder';
-                        const virtualElbow = new THREE.Group(); virtualElbow.name = 'Virtual_Elbow';
-
-                        virtualBase.add(virtualShoulder);
-                        virtualShoulder.add(virtualElbow);
-                        
-                        // CRITICAL: Update World Matrices of the new virtual hierarchy
-                        virtualBase.updateMatrixWorld(true);
-
-                        // --- AUTO-CENTERING LOGIC (MATCHING ROBOT_ARM_SIMULATOR.HTML) ---
-                        // 1. Get Bounds
-                        const rawBox = new THREE.Box3().setFromObject(window.robotModel);
-                        const rawCenter = rawBox.getCenter(new THREE.Vector3());
-                        
-                        // 2. Shift Position: Center X/Z, Align Bottom Y to 0
-                        window.robotModel.position.x -= rawCenter.x;
-                        window.robotModel.position.z -= rawCenter.z;
-                        window.robotModel.position.y -= rawBox.min.y; 
-
-                        console.log('[3D] Auto-Centered: Offset X=' + (-rawCenter.x).toFixed(3) + ' Y=' + (-rawBox.min.y).toFixed(3) + ' Z=' + (-rawCenter.z).toFixed(3));
-
-                        // 3. Force Matrix Update BEFORE Rigging
-                        window.robotModel.updateMatrixWorld(true);
-                        // -----------------------------------
-
-                        // Bounds & Pivot Config
-                        const box = new THREE.Box3().setFromObject(window.robotModel);
-                        const size = box.getSize(new THREE.Vector3());
-                        const minY = box.min.y;
-                        const maxY = box.max.y;
-                        const height = size.y;
-
-                        console.log('[3D] Raw Model Height: ' + height.toFixed(4) + ' (Unscaled)');
-
-                        // Pivot estimates (relative to unscaled height) - Tuned for EezyBotArm
-                        // Note: Since we aligned bottom to 0, minY should be approx 0 now.
-                        virtualShoulder.position.y = minY + height * 0.45; // Raised shoulder pivot
-                        virtualElbow.position.y = (minY + height * 0.82) - virtualShoulder.position.y; // Raised elbow pivot
-
-                        // 3. Segment Parts
-                        const meshes = [];
-                        window.robotModel.traverse((child) => {
-                            if (child.isMesh) {
-                                meshes.push(child);
-                            }
-                        });
-
-                        // --- MODULE 1: HYBRID NAME + CENTROID RIGGING ---
-                        // User Request: 
-                        // "tower, m1, m2" -> Gripper (Fingers)
-                        // "washer, step, m4" -> Arm (Shoulder/Elbow)
-                        // "m6" -> Base
-
-                        const clusterBase = [];
-                        const clusterShoulder = [];
-                        const clusterElbow = [];
-                        const clusterGripper = [];
-                        
-                        // Tuned Thresholds
-                        const baseHeightCap = minY + height * 0.40; 
-                        const elbowHeightStart = minY + height * 0.82; 
-
-                        window.robotModel.traverse((child) => {
-                            if (child.isMesh) {
-                                const name = child.name.toLowerCase();
-                                const mBox = new THREE.Box3().setFromObject(child);
-                                const cy = mBox.getCenter(new THREE.Vector3()).y;
-
-                                let assigned = false;
-
-                                // 1. GRIPPER (TOWER, M1, M2, FINGER) -> New Virtual Gripper
-                                if (name.includes('tower') || name.includes('m1') || name.includes('m2') || name.includes('finger')) {
-                                    clusterGripper.push(child);
-                                    assigned = true;
-                                }
-                                // 2. BASE SPECIFIC (M6, EBA3_001, BASE)
-                                else if (name.includes('m6') || name.includes('eba3_001') || name.includes('base') || name.includes('bottom')) {
-                                    clusterBase.push(child);
-                                    assigned = true;
-                                }
-                                // 3. ARM CANDIDATES (WASHER, STEP, M4, 28BYJ)
-                                else if (name.includes('washer') || name.includes('step') || name.includes('m4') || name.includes('28byj')) {
-                                    // Spatial Split for Arm Parts
-                                    if (cy < elbowHeightStart) {
-                                        // "Big Arm"
-                                        clusterShoulder.push(child);
-                                    } else {
-                                        // "Small Arm" / Top
-                                        clusterElbow.push(child);
-                                    }
-                                    assigned = true;
-                                }
-                                
-                                // 4. FALLBACK (Spatial Logic for unnamed parts)
-                                if (!assigned) {
-                                    if (cy < baseHeightCap) clusterBase.push(child);
-                                    else if (cy < elbowHeightStart) clusterShoulder.push(child);
-                                    else clusterElbow.push(child); // Or Gripper? Default to Elbow
-                                }
-                            }
-                        });
-
-
-                        console.log('[3D] Grouping: Base=' + clusterBase.length + ' Shoulder=' + clusterShoulder.length + ' Elbow=' + clusterElbow.length + ' Gripper=' + clusterGripper.length);
-
-                        // Attach to Virtual Parts
-                        clusterBase.forEach(m => virtualBase.attach(m));
-                        clusterShoulder.forEach(m => virtualShoulder.attach(m));
-                        clusterElbow.forEach(m => virtualElbow.attach(m));
-
-                        // Create Virtual Gripper (Child of Elbow)
-                        const virtualGripper = new THREE.Group(); virtualGripper.name = 'Virtual_Gripper';
-                        virtualElbow.add(virtualGripper);
-                        clusterGripper.forEach(m => virtualGripper.attach(m));
-                        
-                        window.basePart = virtualBase;
-                        window.shoulderPart = virtualShoulder;
-                        window.elbowPart = virtualElbow;
-                        window.gripperPart = virtualGripper;
-
-                        // 4. Final Scene Setup
-                        console.log('[3D] Rigging Complete. Applying Scale x15...');
-                        
-                        // Apply Scale to the ROOT
-                        virtualBase.scale.set(15, 15, 15);
-                        // Ensure Base is at 0,0,0
-                        virtualBase.position.set(0, 0, 0); 
-                        
-                        // Add BoxHelper (DISABLED for cleaner view)
-                        // const riggedHelper = new THREE.BoxHelper(virtualBase, 0x00ff00);
-                        // window.scene3D.add(riggedHelper);
-
-                        // FINAL AUTO-FIT CAMERA
-                        // Calculate bounds of the fully rigged and scaled arm
-                        const finalBox = new THREE.Box3().setFromObject(virtualBase);
-                        const finalSize = finalBox.getSize(new THREE.Vector3());
-                        const finalCenter = finalBox.getCenter(new THREE.Vector3());
-                        
-                        // Position Camera (ZOOM IN)
-                        const maxDim = Math.max(finalSize.x, finalSize.y, finalSize.z);
-                        const fovRad = window.camera3D.fov * (Math.PI / 180);
-                        let cameraDist = maxDim / (2 * Math.tan(fovRad / 2));
-                        
-                        cameraDist *= 0.8; // Zoom factor (0.8 = Closer, 1.5 = Further)
-                        
-                        // Ensure minimal distance
-                        if (cameraDist < 5) cameraDist = 5;
-                        if (cameraDist > 200) cameraDist = 200; // Cap it
-
-                        // Position Camera (High Angle / Top-Downish to match reference)
-                        // Higher Y, close Z/X
-                        window.camera3D.position.set(finalCenter.x, finalCenter.y + cameraDist * 1.2, finalCenter.z + cameraDist * 0.8);
-                        window.camera3D.lookAt(finalCenter);
-                        
-                        // Update controls target
-                        if (window.controls3D) {
-                            window.controls3D.target.copy(finalCenter);
-                            window.controls3D.update();
-                        }
-                        
-                        console.log('[3D] Final Rigged Bounds: ' + finalSize.x.toFixed(2) + ' x ' + finalSize.y.toFixed(2) + ' x ' + finalSize.z.toFixed(2));
-                        console.log('[3D] Camera Auto-Fitted Dist:', cameraDist);
-                        
-                    } catch (e) {
-                        console.error('[3D] Auto-Rigging Failed:', e);
-                        // Fallback: Model is already in scene (added at start)
-                        window.robotModel.position.set(0, -3, 0);
-                    }
-
-                    console.log('[3D] GLB model loaded successfully');
-                    const statusEl = document.getElementById('3d-status');
-                        const modeEl = document.getElementById('model-mode');
-                        if (statusEl) statusEl.textContent = 'ACTIVE';
-                        if (modeEl) modeEl.textContent = 'GLB MODEL';
-                    },
-                    undefined,
-                    (error) => {
-                        console.warn('[3D] GLB load failed, using placeholder:', error);
-                        createCyberRobot();
-                    }
-                );
-
-                // Fallback to placeholder after timeout
-                setTimeout(() => {
-                    if (!window.robotModel) {
-                        createCyberRobot();
-                    }
-                }, 2000);
-
-                // Animation Loop
-                function animate3D() {
-                    requestAnimationFrame(animate3D);
-                    
-                    if (window.controls3D) window.controls3D.update();
-                    
-                    // Update robot angles with smooth interpolation
-                    window.currentBaseAngle = THREE.MathUtils.lerp(window.currentBaseAngle, window.targetBaseAngle, 0.1);
-                    window.currentShoulderAngle = THREE.MathUtils.lerp(window.currentShoulderAngle, window.targetShoulderAngle, 0.1);
-                    window.currentElbowAngle = THREE.MathUtils.lerp(window.currentElbowAngle, window.targetElbowAngle, 0.1);
-
-                    if (window.basePart) window.basePart.rotation.y = window.currentBaseAngle;
-            // Changed from .x to .z based on user report ("North-South" vs "East-West")
-            if (window.shoulderPart) window.shoulderPart.rotation.z = window.currentShoulderAngle;
-            if (window.elbowPart) window.elbowPart.rotation.z = window.currentElbowAngle;
-
-            // Update UI telemetry
-                    if (typeof updateAngleDisplays === 'function') {
-                        updateAngleDisplays();
-                    }
-                    
-                    if (window.renderer3D && window.scene3D && window.camera3D) {
-                        window.renderer3D.render(window.scene3D, window.camera3D);
-                    }
-                }
-                animate3D();
-
-                // Resize handler
-                window.addEventListener('resize', () => {
-                    const container = document.getElementById('canvas-3d-container');
-                    if (container && window.camera3D && window.renderer3D) {
-                        window.camera3D.aspect = container.clientWidth / container.clientHeight;
-                        window.camera3D.updateProjectionMatrix();
-                        window.renderer3D.setSize(container.clientWidth, container.clientHeight);
-                    }
-                });
-
-                console.log('[3D] Robot Arm Simulator initialized');
-            `;
-
-            document.body.appendChild(script);
-        }
-
-        function updateAngleDisplays() {
-            const toDeg = (rad) => (rad * 180 / Math.PI).toFixed(1);
-
-            // Update text displays
-            const baseEl = document.getElementById('angle-base');
-            const shoulderEl = document.getElementById('angle-shoulder');
-            const elbowEl = document.getElementById('angle-elbow');
-
-            if (baseEl) baseEl.textContent = toDeg(currentBaseAngle) + '°';
-            if (shoulderEl) shoulderEl.textContent = toDeg(currentShoulderAngle) + '°';
-            if (elbowEl) elbowEl.textContent = toDeg(currentElbowAngle) + '°';
-
-            // Update progress bars (centered at 50%)
-            const updateBar = (id, angle, maxAngle) => {
-                const bar = document.getElementById(id);
-                if (bar) {
-                    const percent = ((angle / maxAngle) + 1) / 2 * 100; // Map -1~1 to 0~100
-                    bar.style.width = Math.abs(angle / maxAngle) * 50 + '%';
-                    bar.style.marginLeft = (angle < 0 ? (50 - Math.abs(angle / maxAngle) * 50) : 50) + '%';
-                }
-            };
-
-            updateBar('bar-base', currentBaseAngle, Math.PI);
-            updateBar('bar-shoulder', currentShoulderAngle, Math.PI / 2);
-            updateBar('bar-elbow', currentElbowAngle, Math.PI / 2);
-        }
-
-        // Reset robot arm to zero
-        function resetRobotArm() {
-            if (currentView === 'robot' || currentView === 'main') {
-                window.targetBaseAngle = 0;
-                window.targetShoulderAngle = 0;
-                window.targetElbowAngle = 0;
-                console.log('[3D] Robot Arm Reset');
-            }
-        }
-
-        // Helper to highlight parts with specific color
-        function setPartHighlight(part, active, colorHex = 0xaa8800) {
-            if (!part) return;
-            // Use children.forEach instead of traverse to avoid hitting child Pivot Groups (base->shoulder->elbow)
-            part.children.forEach((child) => {
-                if (child.isMesh && child.material) {
-                    // Save original emissive if not saved
-                    if (child.userData.originalEmissive === undefined) {
-                        child.userData.originalEmissive = child.material.emissive ? child.material.emissive.getHex() : 0x000000;
-                    }
-                    if (child.material.emissive) {
-                        child.material.emissive.setHex(active ? colorHex : child.userData.originalEmissive);
-                    }
-                }
-            });
-        }
-
-        // Update robot arm from gamepad (right stick)
-        function updateRobotArmFromGamepad() {
-            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-            const gp = gamepads[0];
-
-            if (!gp || !gp.connected) return;
-            // Allow control in both Robot view AND Main Dashboard 
-            if (currentView !== 'robot' && currentView !== 'main') return;
-
-            // Right stick: axes[2] = X (left/right), axes[3] = Y (up/down)
-            const rightX = gp.axes[2] || 0;
-            const rightY = gp.axes[3] || 0;
-            // Gripper Buttons (Standard: A=0, B=1, RB=5, RT=7)
-            const btnA = gp.buttons[0]?.pressed || false;
-            const btnB = gp.buttons[1]?.pressed || false;
-            const btnRB = gp.buttons[5]?.pressed || false;
-            const isGripperActive = btnA || btnB || btnRB;
-
-            // DEBUG: Log all axes to find the right ones
-            if (Math.abs(rightX) > 0.1 || Math.abs(rightY) > 0.1 || Math.random() < 0.01) {
-                // console.log(`[ARM DEBUG] Axes...`);
-            }
-
-            // Deadzone
-            const deadzone = 0.15;
-            const applyDeadzone = (val) => Math.abs(val) < deadzone ? 0 : val;
-
-            const filteredX = applyDeadzone(rightX);
-            const filteredY = applyDeadzone(rightY);
-
-            // Incremental control
-            window.targetBaseAngle += filteredX * controlSpeed;
-            window.targetShoulderAngle += filteredY * controlSpeed;
-            window.targetElbowAngle -= filteredY * controlSpeed * 0.5; // Follow shoulder movement (Inverted)
-
-            // Highlight Feedback (Colors Requested by User)
-            // Left/Right (Base) -> Purple
-            const isBaseActive = Math.abs(filteredX) > 0.01;
-            setPartHighlight(window.basePart, isBaseActive, 0x9900CC); // Purple
-
-            // Up/Down (Arm) -> Cyan/Blue ("Change" color -> Assumed Cyan)
-            const isArmActive = Math.abs(filteredY) > 0.01;
-            const armColor = 0x00FFFF; // Cyan
-            setPartHighlight(window.shoulderPart, isArmActive, armColor);
-            setPartHighlight(window.elbowPart, isArmActive, armColor);
-
-            // Gripper -> Red
-            setPartHighlight(window.gripperPart, isGripperActive, 0xFF0000); // Red
-
-            // Clamp angles
-            window.targetBaseAngle = Math.max(-Math.PI, Math.min(Math.PI, window.targetBaseAngle));
-            window.targetShoulderAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, window.targetShoulderAngle));
-            window.targetElbowAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, window.targetElbowAngle));
-        }
-
-        // Hook into existing game loop
-        const originalUpdateJoystick = window.updateJoystickLoop;
-
-        let lastArmCmdTime = 0;
-        const ARM_CMD_INTERVAL = 100; // 10Hz throttle
-
-        function sendRobotArmCmd() {
-            const now = Date.now();
-            if (now - lastArmCmdTime < ARM_CMD_INTERVAL) return;
-
-            // Convert Radians to Degrees (Assumes 0 rad = 90 deg center)
-            const toDeg = (rad) => Math.round((rad * 180 / Math.PI) + 90);
-
-            const baseDeg = Math.max(0, Math.min(180, toDeg(window.targetBaseAngle)));
-            const shoulderDeg = Math.max(0, Math.min(180, toDeg(window.targetShoulderAngle)));
-            const elbowDeg = Math.max(0, Math.min(180, toDeg(window.targetElbowAngle)));
-
-            // Only send if values changed significantly? (Optional optimization)
-            // For now, send periodically if in robot view
-
-            fetch('/api/robot_arm_control', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    base: baseDeg,
-                    shoulder: shoulderDeg,
-                    elbow: elbowDeg
-                })
-            }).then(res => {
-                if (res.status === 200) {
-                    // Success
-                }
-            }).catch(err => {
-                // Suppress errors to avoid log spam
-            });
-
-            lastArmCmdTime = now;
-        }
-
-        window.updateJoystickLoop = function () {
-            if (originalUpdateJoystick) originalUpdateJoystick();
-            updateRobotArmFromGamepad();
-
-            // Physical Control Loop
-            if (currentView === 'robot') {
-                sendRobotArmCmd();
-            }
-        };
-
     </script>
+
+    <!-- Load Modular Scripts (Order matters) -->
+    <script src="/static/js/ui.js?v=15.1"></script>
+    <script src="/static/js/ai_controls.js?v=15.1"></script>
+    <script src="/static/js/gamepad.js?v=15.1"></script>
+    <!-- Three.js Module -->
+    <script type="module" src="/static/js/robot_arm.js?v=15.1"></script>
+    <script src="/static/js/main.js?v=15.1"></script>
 </body>
 
 </html>

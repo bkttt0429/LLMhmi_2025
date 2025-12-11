@@ -1,0 +1,319 @@
+/* Global Reset */
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    background-color: #050505;
+    /* Match bg */
+}
+
+/* Force grid layout in case Tailwind classes are missing */
+@media (min-width: 1024px) {
+    .lg\:col-span-10 {
+        grid-column: span 10 / span 10 !important;
+    }
+
+    .lg\:col-span-2 {
+        grid-column: span 2 / span 2 !important;
+    }
+
+    .lg\:col-span-8 {
+        grid-column: span 8 / span 8 !important;
+    }
+
+    .lg\:col-span-4 {
+        grid-column: span 4 / span 4 !important;
+    }
+}
+
+/* Custom UI Elements */
+.cyber-border {
+    position: relative;
+    border: 1px solid rgba(0, 255, 157, 0.3);
+    background: rgba(0, 20, 10, 0.6);
+    box-shadow: 0 0 10px rgba(0, 255, 157, 0.1);
+}
+
+.cyber-border::before {
+    content: '';
+    position: absolute;
+    top: -1px;
+    left: -1px;
+    width: 10px;
+    height: 10px;
+    border-top: 2px solid #00ff9d;
+    border-left: 2px solid #00ff9d;
+}
+
+.cyber-border::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    right: -1px;
+    width: 10px;
+    height: 10px;
+    border-bottom: 2px solid #00ff9d;
+    border-right: 2px solid #00ff9d;
+}
+
+.scan-line {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: rgba(0, 255, 157, 0.5);
+    box-shadow: 0 0 10px #00ff9d;
+    animation: scan 3s linear infinite;
+    pointer-events: none;
+    z-index: 10;
+}
+
+@keyframes scan {
+    0% {
+        top: 0%;
+        opacity: 0;
+    }
+
+    10% {
+        opacity: 1;
+    }
+
+    90% {
+        opacity: 1;
+    }
+
+    100% {
+        top: 100%;
+        opacity: 0;
+    }
+}
+
+/* New Cyber Button */
+.btn-cy {
+    background: linear-gradient(180deg, rgba(0, 40, 20, 0.8), rgba(0, 20, 10, 0.9));
+    border: 1px solid #005533;
+    color: #00ff9d;
+    font-family: monospace;
+    transition: all 0.2s;
+    text-shadow: 0 0 2px rgba(0, 255, 157, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+.btn-cy:hover {
+    background: rgba(0, 60, 30, 0.9);
+    border-color: #00ff9d;
+    box-shadow: 0 0 8px rgba(0, 255, 157, 0.3);
+}
+
+.btn-cy:active,
+.btn-active {
+    background: #00ff9d !important;
+    color: #000 !important;
+    font-weight: bold;
+    box-shadow: 0 0 15px rgba(0, 255, 157, 0.6);
+}
+
+/* Xbox Stick Visuals */
+.xbox-stick {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px solid #555;
+    background: radial-gradient(circle at 30% 30%, #444, #111);
+    box-shadow: inset 0 0 5px #000, 0 5px 5px rgba(0, 0, 0, 0.5);
+    transition: transform 0.05s linear;
+    /* Smooth but fast */
+    z-index: 10;
+    pointer-events: none;
+}
+
+.xbox-stick::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #333, #000);
+    box-shadow: inset 0 0 2px #000;
+}
+
+.xbox-stick-normal {
+    border-color: #555;
+}
+
+.xbox-stick-pressed {
+    border-color: #00ff9d;
+    box-shadow: 0 0 10px rgba(0, 255, 157, 0.4);
+}
+
+.xbox-bg {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: #0a0a0a;
+    border: 1px solid #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: inset 0 0 10px #000;
+}
+
+/* Indicator Lights */
+.indicator-active {
+    box-shadow: 0 0 8px currentColor;
+}
+
+.indicator-inactive {
+    box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Custom Scrollbar for Logs */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #001100;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #005533;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #008855;
+}
+
+/* View Switching */
+.view-hidden {
+    display: none !important;
+}
+
+.view-grid {
+    display: grid !important;
+}
+
+.view-block {
+    display: block !important;
+}
+
+/* Nav Bar */
+.nav-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    /* Safer than 100vw */
+    margin: 0 !important;
+    height: 50px;
+    background: rgba(0, 20, 10, 0.95);
+    border-top: 1px solid #005533;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    /* Gap between buttons */
+    padding: 0 10px;
+    /* Safety padding */
+    z-index: 50;
+    box-sizing: border-box;
+    /* Vital */
+}
+
+/* Removed separate container */
+
+.nav-btn {
+    flex: 1;
+    /* Allow to grow */
+    max-width: 220px;
+    /* Constraint */
+    background: transparent;
+    border: none;
+    color: #008855;
+    font-family: monospace;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-top: 2px solid transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 100%;
+    /* Fill height */
+}
+
+.nav-btn:hover {
+    background: rgba(0, 255, 157, 0.1);
+    color: #00ff9d;
+}
+
+.nav-btn.active {
+    background: rgba(0, 255, 157, 0.15);
+    color: #00ff9d;
+    border-top-color: #00ff9d;
+    text-shadow: 0 0 8px rgba(0, 255, 157, 0.4);
+}
+
+/* Speed Limiter Styles */
+.speed-limiter-container {
+    width: 100%;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    border: 1px solid #1a3322;
+    margin-top: 4px;
+}
+
+.speed-slider {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    background: #112211;
+    border-radius: 2px;
+    outline: none;
+    transition: opacity .2s;
+}
+
+.speed-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #00ff9d;
+    cursor: pointer;
+    border-radius: 50%;
+    box-shadow: 0 0 5px rgba(0, 255, 157, 0.5);
+}
+
+.speed-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: #00ff9d;
+    cursor: pointer;
+    border-radius: 50%;
+    box-shadow: 0 0 5px rgba(0, 255, 157, 0.5);
+}
+
+.speed-value {
+    color: #00ff9d;
+    font-family: monospace;
+    font-size: 10px;
+    font-weight: bold;
+}

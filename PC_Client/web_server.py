@@ -800,6 +800,57 @@ def handle_browser_controller_state(data):
     browser_controller_state["data"] = data or {}
     browser_controller_state["timestamp"] = time.time()
 
+@socketio.on('control_command')
+def handle_control_command(data):
+    """
+    Handle motor control commands via WebSocket for lower latency.
+    Expected JSON: {"left": int, "right": int}
+    """
+    try:
+        left = data.get('left')
+        right = data.get('right')
+
+        if left is None or right is None:
+            return
+
+        # [Input Priority] Mark this command as active
+        state.last_api_control_time = time.time()
+
+        # Send to ESP32
+        # Use existing function (it handles threaded requests)
+        send_control_command(int(left), int(right))
+        
+    except Exception as e:
+        print(f"[WS] Control Error: {e}")
+
+@socketio.on('arm_command')
+def handle_arm_command(data):
+    """
+    Handle robot arm commands via WebSocket.
+    Expected JSON: {"base": int, "shoulder": int, "elbow": int}
+    """
+    try:
+        base = data.get('base')
+        shoulder = data.get('shoulder')
+        elbow = data.get('elbow')
+
+        if base is None or shoulder is None or elbow is None:
+            return
+
+        # Create Command String: ARM:B90,S45,E90\n
+        cmd = f"ARM:B{int(base)},S{int(shoulder)},E{int(elbow)}\n"
+        
+        # Send via Serial
+        if state.ser and state.ser.is_open:
+            state.ser.write(cmd.encode('utf-8'))
+        else:
+            # print(f"[SIMULATION] Serial Arm: {cmd.strip()}")
+            pass
+
+    except Exception as e:
+        print(f"[WS] Arm Error: {e}")
+
+
 @app.route('/api/status')
 def api_status():
     return jsonify({
@@ -847,10 +898,14 @@ def set_model():
 
 @app.route('/api/get_models', methods=['GET'])
 def get_models():
-    """List available .pt models in the root/PC_Client directory"""
+    """List available .pt models in the models directory"""
     try:
-        models = [f for f in os.listdir(BASE_DIR) if f.endswith('.pt')]
-        # Also check yolov13-main or other subdirs if needed, but for now root is enough
+        models_dir = os.path.join(BASE_DIR, 'models')
+        if not os.path.exists(models_dir):
+            return jsonify({"models": [], "error": "Models directory not found"})
+        
+        models = [f for f in os.listdir(models_dir) if f.endswith('.pt')]
+        models.sort()  # Sort alphabetically for consistent display
         return jsonify({"models": models})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
