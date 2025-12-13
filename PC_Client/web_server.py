@@ -11,6 +11,8 @@ import psutil
 from pathlib import Path
 import queue
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import serial
 import pygame
 import json
@@ -283,14 +285,29 @@ class SystemState:
         
         # 建立一個綁定到 Camera Net Interface 的 session 用於發送 HTTP 控制指令到 ESP32
         self.control_session = requests.Session()
+        
+        # Define Retry Strategy (Fast retry for control latency)
+        retry_strategy = Retry(
+            total=3,                # Retry 3 times
+            backoff_factor=0,       # No delay between retries (immediate)
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"],
+            raise_on_status=False   # Don't raise exception on status codes, let us handle it
+        )
+
         if self.camera_net_ip:
             try:
-                self.control_session.mount('http://', SourceAddressAdapter(self.camera_net_ip))
-                print(f"[INIT] Control Session bound to {self.camera_net_ip}")
+                # SourceAddressAdapter inherits from HTTPAdapter, so it accepts max_retries
+                adapter = SourceAddressAdapter(self.camera_net_ip, max_retries=retry_strategy)
+                self.control_session.mount('http://', adapter)
+                print(f"[INIT] Control Session bound to {self.camera_net_ip} with Retry(3)")
             except Exception as e:
                 print(f"[INIT] Failed to bind Control Session: {e}")
         else:
-            print("[INIT] Control Session created (Default Routing)")
+            # Default adapter with retries
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            self.control_session.mount('http://', adapter)
+            print("[INIT] Control Session created (Default Routing) with Retry(3)")
 
     def print_network_summary(self):
         print("="*60)

@@ -22,7 +22,7 @@ cd d:\hmidata\project\Firmware\ESP32_S3
 idf.py set-target esp32s3
 
 # 3. Build Firmware
-idf.py build
+$env:IDF_TARGET=$null; idf.py build
 ```
 
 ## 3. Flash & Monitor
