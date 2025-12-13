@@ -282,6 +282,7 @@ class SystemState:
         self.frame_lock = threading.Lock()
         self.stream_connected = False
         self.last_api_control_time = 0.0  # [Input Priority] Track last API/Keyboard command
+        self.last_motor_cmd = (0, 0)      # [Soft Start] Track last sent PWM values
         
         # 建立一個綁定到 Camera Net Interface 的 session 用於發送 HTTP 控制指令到 ESP32
         self.control_session = requests.Session()
@@ -425,23 +426,37 @@ def add_log(msg):
 
 state.add_log = add_log
 
+def _build_cmd_from_state(controller_state: dict) -> dict:
+    # Returns a dict with left/right values instead of a string cmd
+    x = controller_state.get("left_stick_x", 0)
+    y = controller_state.get("left_stick_y", 0)
+
+    left_pwm, right_pwm = _calculate_differential_drive(x, y)
+
+    return {"left": left_pwm, "right": right_pwm}
+
 def _calculate_differential_drive(x: float, y: float) -> tuple[int, int]:
     """
     Mix X/Y joystick inputs to Differential Drive (Tank Drive) PWM values.
     x: -1.0 (Left) to 1.0 (Right)
-    y: -1.0 (Backward) to 1.0 (Forward)
+    y: -1.0 (Backward) to 1.0 (Forward) (Input from Pygame is usually -1=Up)
     Returns: (left_pwm, right_pwm) range -255 to 255
     """
+    
+    # 1. Invert Y (Disabled: User reported direction was correct before/reversed now)
+    # Pygame/HTML5: Up is -1.
+    # y = -y
+
+    # 2. Cubic Sensitivity Curve (Exponential Control)
+    # Allows "Light Push" for slow speed, "Hard Push" for fast.
+    # x^3 preserves sign.
+    # 0.5^3 = 0.125 (12% speed at 50% stick)
+    x = x * x * x
+    y = y * y * y
 
     # Simple Mixing
     # Left = Throttle + Turn
     # Right = Throttle - Turn
-
-    # Scale inputs to avoid clipping too early?
-    # Actually clipping is fine, it just means max speed reached.
-
-    # Apply Turn Factor if x is dominant?
-    # Let's keep it simple first.
 
     left = y + x
     right = y - x
@@ -473,8 +488,38 @@ def send_control_command(left: int, right: int):
     """
     target_ip = state.camera_ip or "192.168.4.1"
     url = f"http://{target_ip}/motor"
+    # [Soft Start] Logic to prevent Brownout
+    # Keyboard sends 0->130 instantly. This huge dI/dt causes voltage sag.
+    # Xbox sends 0->20->50->130 naturally.
+    # We inject an intermediate step if the jump is too large.
+    
+    current_l, current_r = state.last_motor_cmd
+    diff_l = left - current_l
+    diff_r = right - current_r
+    
+    # Threshold for "Current Spike Risk"
+    # If change > 70 PWM units, we split it.
+    RAMP_THRESHOLD = 70 
+    
+    if abs(diff_l) > RAMP_THRESHOLD or abs(diff_r) > RAMP_THRESHOLD:
+        # Calculate intermediate step (halfway)
+        mid_l = current_l + int(diff_l * 0.5)
+        mid_r = current_r + int(diff_r * 0.5)
+        
+        # Send Intermediate Step
+        # print(f"[CONTROL] 📉 Soft Start: {current_l},{current_r} -> {mid_l},{mid_r}")
+        try:
+            state.control_session.get(url, params={"left": mid_l, "right": mid_r}, timeout=0.2)
+            time.sleep(0.02) # 20ms delay to let voltage stabilize
+        except:
+            pass # Ignore errors in intermediate step
+
     params = {"left": left, "right": right}
     
+    # Update State BEFORE request (optimistic) or AFTER? 
+    # Optimistic matches intent.
+    state.last_motor_cmd = (left, right)
+
     # [DEBUG] Print what we're about to send
     print(f"[CONTROL] 🚗 Sending to ESP32: {url} with params={params}")
     add_log(f"[CONTROL] → {target_ip}/motor L:{left} R:{right}")

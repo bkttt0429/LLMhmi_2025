@@ -157,9 +157,15 @@ static esp_err_t motor_handler(httpd_req_t *req)
             right_val = atoi(param);
         }
 
-        app_motor_set_pwm(left_val, right_val);
+        // 1. Send Response FIRST (Ensure client gets OK before voltage sag)
         httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
         httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+
+        // 2. Small delay to flush TCP buffer
+        vTaskDelay(pdMS_TO_TICKS(10));
+
+        // 3. Activate Motors (This causes voltage sag)
+        app_motor_set_pwm(left_val, right_val);
     } else {
         httpd_resp_send_404(req);
     }
