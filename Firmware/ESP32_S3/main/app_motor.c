@@ -11,6 +11,9 @@
 #define MOTOR_RIGHT_PIN   47
 
 // --- Servo PWM Settings ---
+#include "driver/gpio.h"
+#include "camera_pins.h" // For LED_PIN
+
 #define PWM_TIMER         LEDC_TIMER_1
 #define PWM_MODE          LEDC_LOW_SPEED_MODE
 #define PWM_DUTY_RES      LEDC_TIMER_14_BIT // 16384 steps
@@ -28,14 +31,29 @@
 #define SERVO_STOP_US     1500  // Stop
 #define SERVO_MAX_US      2500  // Full Speed CW
 
+// Ramping Settings
+#define LOOP_DELAY_MS     10    // 100Hz Control Loop
+
+// Acceleration Table: Non-linear Ramping (Ease-In)
+// Defines step size based on current speed bucket (0-255 divided into 8 ranges)
+// 0: Start very gentle (Anti-Brownout)
+// 7: Full response at high speed
+static const int accel_table[8] = { 3, 5, 8, 12, 15, 20, 25, 30 };
+
 static const char *TAG = "app_motor";
 
-// Safety State
-static int64_t last_cmd_time = 0;
-static bool is_running = false;
+// Safety & Control State
+static volatile int64_t last_cmd_time = 0;
+static volatile bool is_running = false;
+
+// Ramp State (Logical Inputs -255 to 255)
+static volatile int target_left = 0;
+static volatile int target_right = 0;
+static int current_left = 0;
+static int current_right = 0;
 
 // Function Prototypes
-void motor_safety_task(void *arg);
+void motor_control_task(void *arg);
 void app_motor_update_timestamp(void);
 
 // Helper: Convert Microseconds to Duty Cycle value
@@ -52,7 +70,7 @@ static long map_range(long x, long in_min, long in_max, long out_min, long out_m
 
 void app_motor_init(void)
 {
-    ESP_LOGI(TAG, "Initializing Continuous Servos on GPIO %d, %d", MOTOR_LEFT_PIN, MOTOR_RIGHT_PIN);
+    ESP_LOGI(TAG, "Initializing Continuous Servos with RAMPING on GPIO %d, %d", MOTOR_LEFT_PIN, MOTOR_RIGHT_PIN);
 
     ledc_timer_config_t ledc_timer = {
         .speed_mode       = PWM_MODE,
@@ -85,8 +103,8 @@ void app_motor_init(void)
     };
     ledc_channel_config(&ledc_channel_right);
 
-    // [Safety] Start background task to monitor timeout
-    xTaskCreate(motor_safety_task, "motor_safety", 2048, NULL, 5, NULL);
+    // [Control Task] Handles Ramping + Safety
+    xTaskCreate(motor_control_task, "motor_ctrl", 2048, NULL, 5, NULL);
 }
 
 void app_motor_update_timestamp(void) {
@@ -94,47 +112,163 @@ void app_motor_update_timestamp(void) {
     is_running = true;
 }
 
-void motor_safety_task(void *arg) {
+// --- Main Control Loop (Runs on FreeRTOS) ---
+void motor_control_task(void *arg) {
+    // State for change detection
+    int last_applied_l = -999;
+    int last_applied_r = -999;
+    
+    // Debug counter
+    int debug_tick = 0;
+
     while (1) {
         if (is_running) {
             int64_t now = esp_timer_get_time();
-            // Timeout: 500ms (500,000 us)
+            
+            // 1. Safety Timeout (500ms)
             if (now - last_cmd_time > 500000) {
-                ESP_LOGW(TAG, "Motor Safety Timeout! Stopping...");
-                app_motor_set_pwm(0, 0); // Stop
-                is_running = false;      // Prevent loop spam
+                // If timeout, force target to 0 (STOP)
+                if (target_left != 0 || target_right != 0) {
+                     ESP_LOGW(TAG, "Motor Safety Timeout! Ramping to STOP...");
+                     target_left = 0;
+                     target_right = 0;
+                }
+                // We keep is_running = true until we actually stop? 
+                // Or just let it ramp down.
+                // If we want to squelch logs, check if current is 0.
+                if (current_left == 0 && current_right == 0) {
+                    is_running = false; 
+                }
+            }
+
+
+
+            // 2. Ramping Logic (Acceleration Table)
+            // Determine step size based on current speed
+            
+            // Left
+            int l_idx = abs(current_left) / 32;
+            if (l_idx > 7) l_idx = 7;
+            int l_step = accel_table[l_idx];
+
+            if (current_left < target_left) {
+                current_left += l_step;
+                if (current_left > target_left) current_left = target_left;
+            } else if (current_left > target_left) {
+                current_left -= l_step;
+                if (current_left < target_left) current_left = target_left;
+            }
+
+            // Right
+            int r_idx = abs(current_right) / 32;
+            if (r_idx > 7) r_idx = 7;
+            int r_step = accel_table[r_idx];
+
+            if (current_right < target_right) {
+                current_right += r_step;
+                if (current_right > target_right) current_right = target_right;
+            } else if (current_right > target_right) {
+                current_right -= r_step;
+                if (current_right < target_right) current_right = target_right;
+            }
+
+            // 3. Map & Apply to Hardware (Only if changed)
+            // Note: Preserving the "Swap/Inverted" logic via map_range
+            
+            // 3. Map & Apply to Hardware (Only if changed)
+            if (current_left != last_applied_l || current_right != last_applied_r) {
+                // L_Pin <= Right_Val.  Min->Max
+                int l_us = map_range(current_right, INPUT_MIN, INPUT_MAX, SERVO_MIN_US, SERVO_MAX_US);
+                
+                // R_Pin <= Left_Val.   Max->Min
+                int r_us = map_range(current_left, INPUT_MIN, INPUT_MAX, SERVO_MAX_US, SERVO_MIN_US);
+
+                ledc_set_duty(PWM_MODE, LEFT_CHANNEL, us_to_duty(l_us));
+                ledc_update_duty(PWM_MODE, LEFT_CHANNEL);
+
+                ledc_set_duty(PWM_MODE, RIGHT_CHANNEL, us_to_duty(r_us));
+                ledc_update_duty(PWM_MODE, RIGHT_CHANNEL);
+                
+                last_applied_l = current_left;
+                last_applied_r = current_right;
+                
+                // [DEBUG] Log removed to prevent freezing
+                // ESP_LOGW(TAG, "MOTOR: Target=%d,%d Current=%d,%d PWM_US=%d,%d", target_left, target_right, current_left, current_right, l_us, r_us);
+            }
+            
+             // [DEBUG] Heartbeat every 2 seconds
+            if (++debug_tick > 100) { // 10ms * 100 = 1s
+                 debug_tick = 0;
+                 ESP_LOGI(TAG, "HB: Task=%d CmdT=%lld Tgt=%d,%d Cur=%d,%d", is_running, last_cmd_time, target_left, target_right, current_left, current_right);
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(100)); // Check every 100ms
+        
+        vTaskDelay(pdMS_TO_TICKS(LOOP_DELAY_MS));
     }
 }
 
+// Just updates the TARGET. The Task handles the rest.
 void app_motor_set_pwm(int left_val, int right_val)
 {
-    // Update timestamp on every command (prevent timeout)
+    // Update timestamp
     app_motor_update_timestamp();
 
-    // 1. Clamp Input
+    // Clamp
     if (left_val > INPUT_MAX) left_val = INPUT_MAX;
     if (left_val < INPUT_MIN) left_val = INPUT_MIN;
     if (right_val > INPUT_MAX) right_val = INPUT_MAX;
     if (right_val < INPUT_MIN) right_val = INPUT_MIN;
 
-    // 2. Map Inputs to Pulse Widths
-    // [User Specified Restoration]
-    // Previous logic had "Swap" (Right->Left, Left->Right) and "Inverted" one side.
+    // Set Target atoms
+    target_left = left_val;
+    target_right = right_val;
     
-    // Original:
-    // int l_us = map_range(right_val, -255, 255, SERVO_MAX_US, SERVO_MIN_US); // Right val -> Left Pin, Inverted
-    // int r_us = map_range(left_val, -255, 255, SERVO_MIN_US, SERVO_MAX_US);  // Left val -> Right Pin, Normal
+    target_left = left_val;
+    target_left = left_val;
+    target_right = right_val;
     
-    int l_us = map_range(right_val, INPUT_MIN, INPUT_MAX, SERVO_MAX_US, SERVO_MIN_US);
-    int r_us = map_range(left_val, INPUT_MIN, INPUT_MAX, SERVO_MIN_US, SERVO_MAX_US);
+    // [DEBUG] Prove function entry
+    // ESP_LOGI(TAG, "PWM_SET: L=%d R=%d", left_val, right_val);
+    
+    // [DIAGNOSTIC] Blink LED on Command
+    // Helps user see if ESP32 received the WiFi packet
+    static bool toggle = false;
+    toggle = !toggle;
+    gpio_set_level(LED_PIN, toggle ? 1 : 0);
+}
 
-    // 3. Apply
-    ledc_set_duty(PWM_MODE, LEFT_CHANNEL, us_to_duty(l_us));
+// [DIAGNOSTIC] Run at startup to prove motors work
+// If this runs but WiFi control fails -> Network Issue
+// If this fails -> Hardware/Power Issue
+void app_motor_run_diagnostic(void) {
+    ESP_LOGW(TAG, "--- DIAGNOSTIC START ---");
+    ESP_LOGI(TAG, "Testing Forward...");
+    // Direct Hardware Access for Test
+    ledc_set_duty(PWM_MODE, LEFT_CHANNEL, us_to_duty(SERVO_MAX_US)); // Forward (check polarity)
     ledc_update_duty(PWM_MODE, LEFT_CHANNEL);
-
-    ledc_set_duty(PWM_MODE, RIGHT_CHANNEL, us_to_duty(r_us));
+    ledc_set_duty(PWM_MODE, RIGHT_CHANNEL, us_to_duty(SERVO_MIN_US)); // Forward (check polarity)
     ledc_update_duty(PWM_MODE, RIGHT_CHANNEL);
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    ESP_LOGI(TAG, "Testing Stop...");
+    ledc_set_duty(PWM_MODE, LEFT_CHANNEL, us_to_duty(SERVO_STOP_US));
+    ledc_update_duty(PWM_MODE, LEFT_CHANNEL);
+    ledc_set_duty(PWM_MODE, RIGHT_CHANNEL, us_to_duty(SERVO_STOP_US));
+    ledc_update_duty(PWM_MODE, RIGHT_CHANNEL);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    
+    ESP_LOGI(TAG, "Testing Backward...");
+    ledc_set_duty(PWM_MODE, LEFT_CHANNEL, us_to_duty(SERVO_MIN_US)); // Back
+    ledc_update_duty(PWM_MODE, LEFT_CHANNEL);
+    ledc_set_duty(PWM_MODE, RIGHT_CHANNEL, us_to_duty(SERVO_MAX_US)); // Back
+    ledc_update_duty(PWM_MODE, RIGHT_CHANNEL);
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // Reset to STOP
+    ledc_set_duty(PWM_MODE, LEFT_CHANNEL, us_to_duty(SERVO_STOP_US));
+    ledc_update_duty(PWM_MODE, LEFT_CHANNEL);
+    ledc_set_duty(PWM_MODE, RIGHT_CHANNEL, us_to_duty(SERVO_STOP_US));
+    ledc_update_duty(PWM_MODE, RIGHT_CHANNEL);
+    
+    ESP_LOGI(TAG, "--- DIAGNOSTIC END ---");
 }

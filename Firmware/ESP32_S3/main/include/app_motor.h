@@ -5,5 +5,6 @@
 
 void app_motor_init(void);
 void app_motor_set_pwm(int left_val, int right_val);
+void app_motor_run_diagnostic(void);
 
 #endif

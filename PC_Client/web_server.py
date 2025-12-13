@@ -481,43 +481,41 @@ def _build_cmd_from_state(controller_state: dict) -> dict:
 
     return {"left": left_pwm, "right": right_pwm}
 
+# === Control Governor ===
+last_esp_cmd_time = 0
+MIN_CMD_INTERVAL = 0.08
+
 def send_control_command(left: int, right: int):
     """
     Send motor control command to ESP32-S3.
     Endpoint: GET /motor?left=XX&right=YY
     """
+    global last_esp_cmd_time, state
+    
+    # [1. Server-Side Governor]
+    # Protect ESP32 from request floods (Connection Reset)
+    now = time.time()
+    
+    # Always allow STOP or if meaningful change?
+    # We allow STOP (0,0) to bypass rate limit for safety
+    is_stop = (left == 0 and right == 0)
+    
+    if not is_stop and (now - last_esp_cmd_time < MIN_CMD_INTERVAL):
+         # Rate limit active - Drop packet but return True to satisfy client
+         return True
+         
     target_ip = state.camera_ip or "192.168.4.1"
     url = f"http://{target_ip}/motor"
-    # [Soft Start] Logic to prevent Brownout
-    # Keyboard sends 0->130 instantly. This huge dI/dt causes voltage sag.
-    # Xbox sends 0->20->50->130 naturally.
-    # We inject an intermediate step if the jump is too large.
+    # [Soft Start] Logic DEPRECATED
+    # Now handled by ESP32 Firmware (app_motor.c)
+    # We send the final target directly to reduce network load.
     
     current_l, current_r = state.last_motor_cmd
-    diff_l = left - current_l
-    diff_r = right - current_r
-    
-    # Threshold for "Current Spike Risk"
-    # If change > 70 PWM units, we split it.
-    RAMP_THRESHOLD = 70 
-    
-    if abs(diff_l) > RAMP_THRESHOLD or abs(diff_r) > RAMP_THRESHOLD:
-        # Calculate intermediate step (halfway)
-        mid_l = current_l + int(diff_l * 0.5)
-        mid_r = current_r + int(diff_r * 0.5)
-        
-        # Send Intermediate Step
-        # print(f"[CONTROL] 📉 Soft Start: {current_l},{current_r} -> {mid_l},{mid_r}")
-        try:
-            state.control_session.get(url, params={"left": mid_l, "right": mid_r}, timeout=0.2)
-            time.sleep(0.02) # 20ms delay to let voltage stabilize
-        except:
-            pass # Ignore errors in intermediate step
-
+    # diff checks no longer needed for sending, only for debug if wanted
+            
     params = {"left": left, "right": right}
     
-    # Update State BEFORE request (optimistic) or AFTER? 
-    # Optimistic matches intent.
+    # Update State
     state.last_motor_cmd = (left, right)
 
     # [DEBUG] Print what we're about to send
@@ -525,8 +523,11 @@ def send_control_command(left: int, right: int):
     add_log(f"[CONTROL] → {target_ip}/motor L:{left} R:{right}")
 
     try:
+        # Update timestamp
+        last_esp_cmd_time = time.time()
+        
         # Send GET request with query parameters
-        resp = state.control_session.get(url, params=params, timeout=0.5)
+        resp = state.control_session.get(url, params=params, timeout=1.0)
         
         # [DEBUG] Print response details
         print(f"[CONTROL] 📡 ESP32 Response: Status={resp.status_code}, Content={resp.text[:100]}")
@@ -541,13 +542,17 @@ def send_control_command(left: int, right: int):
             
     except requests.exceptions.Timeout:
         add_log(f"[CONTROL] ⚠️ Timeout to {target_ip}")
-        print(f"[CONTROL] ⏱️ Timeout: ESP32 at {target_ip} did not respond in 0.5s")
+        print(f"[CONTROL] ⏱️ Timeout: ESP32 at {target_ip} did not respond in 1.0s")
+        # Reset Session on Timeout (Maybe dead socket)
+        state.control_session = requests.Session()
         return False
         
     except requests.exceptions.ConnectionError as e:
         add_log(f"[CONTROL] ❌ Connection Error to {target_ip}")
         print(f"[CONTROL] 🔌 Connection Error: Cannot reach ESP32 at {target_ip}")
-        print(f"[CONTROL]    Details: {e}")
+        print(f"[CONTROL]    Resetting Session...")
+        # Reset Session
+        state.control_session = requests.Session()
         return False
         
     except requests.exceptions.RequestException as e:
@@ -754,6 +759,11 @@ def xbox_controller_thread():
     last_pwm = (0, 0)
     controller_ready = controller.joystick is not None
     using_browser_stream = False
+    
+    # [Phase 2] Low Pass Filter State
+    last_raw_x = 0.0
+    last_raw_y = 0.0
+    ALPHA = 0.4 # 0.3-0.5 is good. Lower = smoother but more lag.
 
     while state.is_running:
         try:
@@ -789,12 +799,30 @@ def xbox_controller_thread():
             if not controller_ready and source == "hardware":
                 controller_ready = True
 
+            # [Phase 2] Apply Low Pass Filter (Smoothing) to Analog Inputs
+            # Only apply if source is hardware (keyboard 'virtual' analog doesn't need this)
+            if source == "hardware":
+                raw_x = controller_state.get("left_stick_x", 0)
+                raw_y = controller_state.get("left_stick_y", 0)
+                
+                # LPF: y = a*new + (1-a)*old
+                filtered_x = (raw_x * ALPHA) + (last_raw_x * (1.0 - ALPHA))
+                filtered_y = (raw_y * ALPHA) + (last_raw_y * (1.0 - ALPHA))
+                
+                last_raw_x = filtered_x
+                last_raw_y = filtered_y
+                
+                # Update state with filtered values for calculation
+                controller_state["left_stick_x"] = filtered_x
+                controller_state["left_stick_y"] = filtered_y
+
             # Calculate PWM
             pwm_dict = _build_cmd_from_state(controller_state)
             current_pwm = (pwm_dict["left"], pwm_dict["right"])
 
             # Send if changed significantly
-            if abs(current_pwm[0] - last_pwm[0]) > 2 or abs(current_pwm[1] - last_pwm[1]) > 2:
+            # Reduced threshold for smoother updates (2 -> 1)
+            if abs(current_pwm[0] - last_pwm[0]) > 1 or abs(current_pwm[1] - last_pwm[1]) > 1:
                  send_control_command(current_pwm[0], current_pwm[1])
                  last_pwm = current_pwm
             elif current_pwm == (0, 0) and last_pwm != (0, 0):
@@ -1099,6 +1127,26 @@ def api_robot_arm_control():
     except Exception as e:
         print(f"[API] Arm Error: {e}")
         return jsonify({"error": str(e)}), 500
+
+# [NEW] WebSocket Control Handler
+@socketio.on('control_command')
+def handle_control_command(json_data):
+    """
+    Handle control commands via WebSocket (Lower latency than HTTP).
+    Expected JSON: {"left": int, "right": int}
+    """
+    try:
+        left = int(json_data.get('left', 0))
+        right = int(json_data.get('right', 0))
+        
+        # [Input Priority] Mark this command as active
+        state.last_api_control_time = time.time()
+        
+        # Execute logic
+        send_control_command(left, right)
+        
+    except Exception as e:
+        print(f"[WS] 💥 Error in control_command: {e}")
 
 @app.route('/')
 def index():

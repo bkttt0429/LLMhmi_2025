@@ -121,10 +121,10 @@ function sendCmd(cmd) {
     let left = 0, right = 0;
 
     switch (cmd) {
-        case 'F': left = 130; right = 130; break;
-        case 'B': left = -130; right = -130; break;
-        case 'L': left = -100; right = 100; break;
-        case 'R': left = 100; right = -100; break;
+        case 'F': left = 200; right = 200; break;
+        case 'B': left = -200; right = -200; break;
+        case 'L': left = -180; right = 180; break;
+        case 'R': left = 180; right = -180; break;
         case 'S': left = 0; right = 0; break;
         default: return;
     }
@@ -250,8 +250,11 @@ function updateJoystickLoop() {
     const DEADZONE = 0.15;
     const applyDeadzone = (val) => Math.abs(val) < DEADZONE ? 0 : val;
 
+    // [DEBUG] Log Raw Input
+    // console.log(`RawX: ${rawX.toFixed(2)}, RawY: ${rawY.toFixed(2)}`);
+
     let steer = applyDeadzone(rawX);
-    let throttle = -applyDeadzone(rawY); // Invert Y
+    let throttle = -applyDeadzone(rawY); // [FIX] Invert Y for Standard Gamepad (Up = -1 -> +1)
 
     // Update Visual Indicator
     if (window.updateJoystickVisualizer) {

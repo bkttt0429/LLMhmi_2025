@@ -59,6 +59,10 @@ void app_main(void)
 
     // 1. Initialize Motors
     app_motor_init();
+    
+    // [DIAGNOSTIC] Run Startup Wiggle Test
+    // If motors move here -> Hardware OK
+    app_motor_run_diagnostic();
 
     // 2. Initialize Camera
     if (app_camera_init() != ESP_OK) {
