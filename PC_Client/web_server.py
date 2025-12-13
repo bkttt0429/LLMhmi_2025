@@ -822,9 +822,6 @@ def xbox_controller_thread():
     except:
         pass
 
-@app.route('/')
-def index():
-    return render_template('index.html')
 
 @app.route('/video_feed')
 def video_feed():
@@ -1103,7 +1100,26 @@ def api_robot_arm_control():
         print(f"[API] Arm Error: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/')
+def index():
+    # Force cache bust for JS files
+    ver = int(time.time()) 
+    return render_template('index.html', version=ver)
+
 if __name__ == '__main__':
+    # Add Retry Adapter
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=0.1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS"]
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    state.control_session.mount("http://", adapter)
+    
+    print("[SYSTEM] Starting PC Client Server...")
+    print(f"[SYSTEM] Please open: http://localhost:{config.WEB_PORT}")
+
     # Initialize Multiprocessing Queues
     video_cmd_queue = Queue()
     video_frame_queue = Queue(maxsize=3) # Limit buffer to reduce latency

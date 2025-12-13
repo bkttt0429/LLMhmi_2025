@@ -8,6 +8,12 @@ let wasJoystickActive = false;
 let motorEnabled = false; // Safety Lock: Default OFF to prevent mapping issues
 const CMD_INTERVAL = 50; // Throttle to 20Hz
 
+// Flood Protection & Serialization State
+let lastSentCmd = { left: 0, right: 0 };
+let lastCmdTime = 0;
+let isRequestPending = false; // Mutex: Is an HTTP request currently flying?
+let pendingCmd = null;        // Queue: Next command to send immediately after current one finishes
+
 // Export for main.js and UI
 window.lastXboxUpdate = 0;
 window.toggleMotorLock = toggleMotorLock;
@@ -130,18 +136,66 @@ function sendCmd(cmd) {
 }
 
 function emitControlCommand(left, right) {
-    // 1. WebSocket (Preferred)
+    // === FLOOD PROTECTION & SERIALIZATION ===
+    const now = Date.now();
+    const isDifferent = (left !== lastSentCmd.left || right !== lastSentCmd.right);
+
+    // 1. WebSocket Mode (No serialization needed usually, but good practice)
     if (window.socket && window.wsConnected) {
+        // WS is async but usually handles concurrency better.
+        // Still, let's deduplicate.
+        if (!isDifferent && (now - lastCmdTime < 100)) return;
+
         window.socket.emit('control_command', { left: left, right: right });
-        // log(`[WS] Sent L:${left} R:${right}`); 
-    } else {
-        // 2. HTTP Fallback
-        fetch('/api/control', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ left: left, right: right })
-        }).catch(e => { console.error("Control Error", e); });
+        lastSentCmd = { left: left, right: right };
+        lastCmdTime = now;
+        return;
     }
+
+    // 2. HTTP Fallback Mode (Critical Serialization)
+    // If a request is already in flight, queue this one (latest wins)
+    if (isRequestPending) {
+        pendingCmd = { left: left, right: right };
+        return;
+    }
+
+    // Deduplication (only if not forcing a queued command)
+    if (!isDifferent && (now - lastCmdTime < 100)) return;
+
+    // Send immediately
+    sendHttpCommand(left, right);
+}
+
+function sendHttpCommand(left, right) {
+    isRequestPending = true;
+    lastSentCmd = { left: left, right: right };
+    lastCmdTime = Date.now();
+
+    fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ left: left, right: right })
+    })
+        .then(() => {
+            // Success
+        })
+        .catch(e => {
+            console.error("Control Error", e);
+        })
+        .finally(() => {
+            isRequestPending = false;
+
+            // If there is a pending command that is DIFFERENT from what we just sent, send it now.
+            if (pendingCmd) {
+                const next = pendingCmd;
+                pendingCmd = null;
+                // Recursion? No, just call internal sender if different
+                // Check if it's materially different or just a repeat of what we just sent
+                if (next.left !== left || next.right !== right) {
+                    sendHttpCommand(next.left, next.right);
+                }
+            }
+        });
 }
 window.sendCmd = sendCmd; // Export for UI buttons
 
@@ -178,11 +232,6 @@ function updateJoystickLoop() {
     // Read Standard Axes
     const rawX = gp.axes[0];
     const rawY = gp.axes[1];
-
-    // Debugging Axes (Optional - check if Right Stick (2/3) is leaking into 0/1)
-    // if (Math.abs(rawX) > 0.1 || Math.abs(rawY) > 0.1) {
-    //    // console.log(`[GP] Axis 0: ${rawX.toFixed(2)} | Axis 1: ${rawY.toFixed(2)}`);
-    // }
 
     // Motor Safety Check
     if (!motorEnabled) {
@@ -238,8 +287,8 @@ function updateJoystickLoop() {
     const now = Date.now();
     // Send if: Active OR (Idle AND just became Idle)
     if (isStickActive || wasJoystickActive) {
+        // Check local throttle AND let emitControlCommand handle serialization
         if ((now - lastGamepadCmdTime > CMD_INTERVAL) || (wasJoystickActive && !isStickActive)) {
-
             emitControlCommand(leftPWM, rightPWM);
 
             // Visual Debug in UI
@@ -253,8 +302,6 @@ function updateJoystickLoop() {
     wasJoystickActive = isStickActive;
 
     // Handle Robot Arm Control (Right Stick) if in Robot View (or Dual Mode)
-    // We delegate this to robot_arm.js if needed or handle here?
-    // Let's call the global hook if exists
     if (window.updateRobotArmFromGamepad) {
         window.updateRobotArmFromGamepad(gp);
     }
