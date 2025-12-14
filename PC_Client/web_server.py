@@ -1,5 +1,6 @@
 import sys
 import os
+import struct
 import cv2
 import time
 import threading
@@ -349,7 +350,7 @@ class SystemState:
         self.ser = None
         self.ws_connected = False
         self.ws_client = None # [FIX] Initialize before use
-        self.arm_ip = "10.28.14.129"  # [FIX] Hardcode known IP to bypass Discovery
+        self.arm_ip = None  # [Reset] Discovery will fill this
         self.video_url = _build_stream_url(self.camera_ip)
         self.radar_dist = 0.0
         self.logs = []
@@ -1273,41 +1274,65 @@ def api_control():
 @app.route('/api/arm', methods=['POST'])
 def handle_arm_command_api():
     """
-    Handle Robot Arm Commands.
-    Format: {"base": 90, "shoulder": 45, ...}
-    Action: Forward as UDP Packet to ESP8266.
+    Handle Robot Arm Commands (v2.0 Protocol).
+    Input: JSON {"base": 90, "shoulder": 45, "elbow": 90...} (Angles)
+    Output: UDP Binary Packet -> ESP8266
+    Packet: [Header 'RM'][Cmd 0x03][Base(f)][Shoulder(f)][Elbow(f)][CRC(u16)]
     """
     try:
         data = request.json
         if not data:
-            return jsonify({"status": "error", "message": "No JSON data"}), 400
+            return jsonify({"status": "error", "message": "No JSON"}), 400
             
-        # Target IP check
         target_ip = state.arm_ip
         if not target_ip:
-             # Fallback logic? Or just fail?
-             # For now, print warning and try broadcast or fail
-             # print("[ARM] Warning: Arm IP not discovered yet.")
-             return jsonify({"status": "error", "message": "Arm Not Connected"}), 503
+            # Fallback to config IP or just broadcast?
+            # User config.h has "test" ssid, so auto-discovery might fail.
+            # Assuming 10.28.14.129 from previous logs for now.
+            # Or broadcast? 
+            # Ideally state.arm_ip is set by discovery.
+            pass
 
-        # Construct JSON for ESP8266
-        msg = json.dumps(data, sort_keys=True) # Sort keys for consistent comparison
+        # 1. Parse Angles
+        base = float(data.get('base', 90))
+        shoulder = float(data.get('shoulder', 90))
+        elbow = float(data.get('elbow', 90))
         
-        # [Deduplication] Prevent Flood
-        if msg == state.last_arm_cmd_json:
-             return jsonify({"status": "skipped", "reason": "duplicate"})
-             
-        # DEBUG: Print why we are sending
-        # print(f"[ARM] New: {msg} | Old: {state.last_arm_cmd_json}")
-        state.last_arm_cmd_json = msg
+        # 2. Construct Payload (3 Floats, Little Endian)
+        # CMD 0x03 = MOVE_ANGLES
+        cmd = 0x03
+        payload = struct.pack('<fff', base, shoulder, elbow)
         
-        # Send UDP
+        # 3. Construct Body for CRC
+        header = b'RM'
+        body = header + struct.pack('B', cmd) + payload
+        
+        # 4. CRC Calculation (CRC16-CCITT 0xFFFF init, 0x1021 poly)
+        crc = 0xFFFF
+        for byte in body:
+            crc ^= byte << 8
+            for _ in range(8):
+                if crc & 0x8000:
+                    crc = (crc << 1) ^ 0x1021
+                else:
+                    crc <<= 1
+                crc &= 0xFFFF
+        
+        # 5. Final Packet
+        packet = body + struct.pack('<H', crc)
+        
+        # 6. Send
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.sendto(msg.encode(), (target_ip, 4211))
-        
-        print(f"[ARM] UDP -> {target_ip}: {msg}") # Re-enable log to debug flood
-        
-        return jsonify({"status": "ok", "sent": msg})
+        if target_ip:
+            sock.sendto(packet, (target_ip, 4211))
+            print(f"[ARM] UDP v2.0 -> {target_ip}: B{base:.1f} S{shoulder:.1f} E{elbow:.1f}")
+        else:
+             # Broadcast if IP unknown?
+             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+             sock.sendto(packet, ('<broadcast>', 4211))
+             print(f"[ARM] UDP Broadcast -> B{base} S{shoulder} E{elbow}")
+
+        return jsonify({"status": "ok", "proto": "v2.0"})
         
     except Exception as e:
         add_log(f"[ARM] Error: {e}")
