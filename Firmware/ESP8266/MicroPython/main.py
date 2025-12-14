@@ -35,6 +35,7 @@ udp.settimeout(0.0) # Non-blocking
 # Watchdog State
 last_packet = time.ticks_ms()
 WATCHDOG_TIMEOUT = 2000
+last_beacon = time.ticks_ms()
 
 print("System Ready. Listening on UDP 4211.")
 
@@ -64,12 +65,17 @@ while True:
                 last_packet = now
                 
                 # Command Dispatch
-                if cmd_id == CMD_MOVE:
+                elif cmd_id == CMD_MOVE:
                     # Unpack X, Y, Z (3 Floats)
                     x, y, z = struct.unpack('<fff', payload)
-                    # print(f"CMD MOVE: {x:.1f}, {y:.1f}, {z:.1f}")
                     robot.move_to(x, y, z)
                     
+                elif cmd_id == 0x03: # CMD_MOVE_ANGLES
+                    # Unpack B, S, E (3 Floats)
+                    b, s, e = struct.unpack('<fff', payload)
+                    print(f"CMD ANGLES: {b:.1f}, {s:.1f}, {e:.1f}")
+                    robot.move_angles(b, s, e)
+
                 elif cmd_id == CMD_CALIB:
                     # Placeholder for Calibration Parameter Updates
                     pass
@@ -87,6 +93,17 @@ while True:
             print("[Watchdog] Timeout! Stopping.")
             robot.stop()
             last_packet = now # Reset to avoid spam loop
+
+    # 4. Discovery Beacon (Every 1s)
+    # Using a simple counter or checking ticks
+    if time.ticks_diff(now, last_beacon) > 1000:
+        last_beacon = now
+        try:
+            # Broadcast to 255.255.255.255 port UDP_PORT
+            # Note: MicroPython might need active station interface for broadcast
+            udp.sendto(b'ESP8266_ARM', ('255.255.255.255', UDP_PORT))
+        except:
+            pass
 
     # 4. Maintenance
     # gc.collect() # Don't call every loop, maybe every 1s or if memory low

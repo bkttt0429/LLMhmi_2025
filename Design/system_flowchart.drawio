@@ -1,18 +1,83 @@
-<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36" version="29.2.7">
+<mxfile host="Electron" modified="2025-12-15T02:40:00.000Z" agent="5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Draw.io/21.6.8 Chrome/114.0.5735.289 Electron/25.5.0 Safari/537.36" etag="r_flow_v2" version="21.6.8" type="device">
   <diagram id="Comm-Flow" name="Communication Flow">
-    <mxGraphModel dx="1042" dy="527" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="lane_web" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Web Client (Frontend)" vertex="1">
-          <mxGeometry height="500" width="280" x="40" y="40" as="geometry" />
+        
+        <!-- Swimlane: Web Frontend -->
+        <mxCell id="lane_web" value="Web Client (Frontend)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="240" height="600" as="geometry" />
         </mxCell>
-        <mxCell id="node_js_main" parent="lane_web" style="rounded=1;whiteSpace=wrap;html=1;" value="Main Logic (JS)&#xa;Socket.IO Client" vertex="1">
-          <mxGeometry height="60" width="160" x="60" y="100" as="geometry" />
+        <mxCell id="node_js_ui" value="UI (Joystick/Keys)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_web">
+          <mxGeometry x="40" y="60" width="160" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="node_web_ui" parent="lane_web" style="rounded=1;whiteSpace=wrap;html=1;" value="UI Control&#xa;(Joystick/Keyboard)" vertex="1">
-          <mxGeometry height="60" width="160" x="60" y="200" as="geometry" />
+        <mxCell id="node_js_sio" value="Socket.IO Client" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_web">
+          <mxGeometry x="40" y="140" width="160" height="50" as="geometry" />
         </mxCell>
+        <mxCell id="edge_ui_sio" value="Events" style="endArrow=classic;html=1;entryX=0.5;entryY=0;exitX=0.5;exitY=1;" edge="1" parent="lane_web" source="node_js_ui" target="node_js_sio">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Swimlane: PC Client -->
+        <mxCell id="lane_pc" value="PC Client (Python)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="320" y="40" width="280" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="node_py_flask" value="Flask / SocketIO Server" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_pc">
+          <mxGeometry x="60" y="140" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="node_py_ai" value="AI Detector (YOLOv13n)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="lane_pc">
+          <mxGeometry x="60" y="240" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="node_py_udp" value="UDP Sender (Binary v2)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_pc">
+          <mxGeometry x="60" y="340" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_flask_ai" value="Frame Data" style="endArrow=classic;html=1;" edge="1" parent="lane_pc" source="node_py_flask" target="node_py_ai">
+           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_ai_udp" value="Control Cmd" style="endArrow=classic;html=1;" edge="1" parent="lane_pc" source="node_py_ai" target="node_py_udp">
+           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Swimlane: Firmware -->
+        <mxCell id="lane_fw" value="Hardware / Firmware" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="640" y="40" width="280" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="node_esp8266" value="ESP8266 (MicroPython)" style="rounded=1;whiteSpace=wrap;html=1;fontStyle=1" vertex="1" parent="lane_fw">
+          <mxGeometry x="60" y="320" width="160" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="node_mp_udp" value="UDP Listener (4211)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="node_esp8266">
+          <mxGeometry x="10" y="30" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="node_mp_robot" value="RobotArm (Mk1 Logic)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="node_esp8266">
+          <mxGeometry x="10" y="70" width="140" height="30" as="geometry" />
+        </mxCell>
+         <mxCell id="node_mp_couple" value="Coupling Compensation" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;" vertex="1" parent="node_esp8266">
+          <mxGeometry x="20" y="110" width="120" height="30" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="node_esp32" value="ESP32-S3 (Camera)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane_fw">
+          <mxGeometry x="60" y="60" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Cross Lane Connections -->
+        <mxCell id="edge_ws" value="WebSocket/HTTP" style="endArrow=classic;startArrow=classic;html=1;entryX=0;entryY=0.5;exitX=1;exitY=0.5;" edge="1" parent="1" source="node_js_sio" target="node_py_flask">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge_udp" value="UDP (Binary 0x03)" style="endArrow=classic;html=1;entryX=0;entryY=0.5;exitX=1;exitY=0.5;" edge="1" parent="1" source="node_py_udp" target="node_mp_udp">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge_cam" value="MJPEG Stream" style="endArrow=classic;html=1;dashed=1;entryX=1;entryY=0.5;exitX=0;exitY=0.5;" edge="1" parent="1" source="node_esp32" target="node_py_flask">
+           <mxGeometry relative="1" as="geometry">
+             <mxPoint x="400" y="90" as="targetPoint" />
+             <Array as="points">
+               <mxPoint x="400" y="90" />
+             </Array>
+           </mxGeometry>
+        </mxCell>
+
       </root>
     </mxGraphModel>
   </diagram>

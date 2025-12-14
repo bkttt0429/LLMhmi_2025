@@ -79,7 +79,7 @@ except ImportError as e:
     YOLO_AVAILABLE = False
 
 class ObjectDetector:
-    def __init__(self, model_path='./models/yolov13l.pt'):
+    def __init__(self, model_path='./models/yolov13n.pt'):
         self.model = None
         self.enabled = False
         self.frame_count = 0

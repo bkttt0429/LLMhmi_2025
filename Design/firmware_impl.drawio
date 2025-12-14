@@ -1,84 +1,86 @@
-<mxfile host="Electron" modified="2025-12-11T13:35:00.000Z" agent="5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/21.6.8 Chrome/114.0.5735.289 Electron/25.5.0 Safari/537.36" etag="Firmware_Impl" version="21.6.8" type="device">
-  <diagram id="Firmware-Impl" name="Firmware Implementation">
-    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+<mxfile host="Electron" modified="2025-12-15T02:45:00.000Z" agent="5.0" version="21.6.8" type="device">
+  <diagram id="Fw-Impl" name="Firmware Logic">
+    <mxGraphModel dx="1000" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-
-        <!-- ESP32-S3 Camera Block -->
-        <mxCell id="grp_esp32" value="ESP32-S3 (Camera)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="40" y="40" width="320" height="500" as="geometry" />
+        
+        <mxCell id="start" value="Power On (main.py)" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="320" y="40" width="120" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="node_boot_32" value="(23) Boot &amp; Init WiFi" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="grp_esp32">
-          <mxGeometry x="85" y="40" width="150" height="40" as="geometry" />
+        
+        <mxCell id="init" value="Init RobotArm &amp; WiFi" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="320" y="140" width="160" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="node_conf_cam" value="(24) Config Camera&#xa;(OV2640/5640)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="grp_esp32">
-          <mxGeometry x="85" y="100" width="150" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="node_http_serv" value="(25) Start HTTP Server&#xa;(Port 80/81)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="grp_esp32">
-          <mxGeometry x="85" y="160" width="150" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="node_loop_32" value="(26) Loop" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="grp_esp32">
-          <mxGeometry x="110" y="240" width="100" height="80" as="geometry" />
-        </mxCell>
-        <mxCell id="node_cap" value="(27) Capture Frame&#xa;(fb_get)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="grp_esp32">
-           <mxGeometry x="30" y="360" width="120" height="40" as="geometry" />
-        </mxCell>
-         <mxCell id="node_send_stream" value="(28) Send MJPEG Chunk&#xa;(httpd_resp_send)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="grp_esp32">
-           <mxGeometry x="180" y="360" width="120" height="40" as="geometry" />
+        <mxCell id="edge_1" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="start" target="init">
+           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <!-- ESP12F Controller Block -->
-        <mxCell id="grp_esp12" value="ESP12F (Motor Control)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="400" y="40" width="320" height="500" as="geometry" />
+        <mxCell id="loop" value="Loop (100Hz)" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="240" width="120" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="node_boot_12" value="(29) Boot &amp; Init WiFi" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="grp_esp12">
-          <mxGeometry x="85" y="40" width="150" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="node_init_io" value="(30) Init GPIO (PWM)&#xa;Init UDP" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="grp_esp12">
-          <mxGeometry x="85" y="100" width="150" height="40" as="geometry" />
-        </mxCell>
-         <mxCell id="node_web_12" value="(31) Start WebService" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="grp_esp12">
-          <mxGeometry x="85" y="160" width="150" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="node_loop_12" value="(32) Loop" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="grp_esp12">
-          <mxGeometry x="110" y="240" width="100" height="80" as="geometry" />
-        </mxCell>
-        <mxCell id="node_parse" value="(33) Handle Request&#xa;/cmd?kw=val" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="grp_esp12">
-          <mxGeometry x="30" y="360" width="120" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="node_pwm" value="(34) Write PWM&#xa;(analogWrite)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="grp_esp12">
-          <mxGeometry x="30" y="440" width="120" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="node_sonar" value="(35) Read Sonar&#xa;(PulseIn)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="grp_esp12">
-          <mxGeometry x="180" y="360" width="120" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="node_udp" value="(36) UDP Broadcast" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="grp_esp12">
-          <mxGeometry x="180" y="440" width="120" height="40" as="geometry" />
+        <mxCell id="edge_2" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="init" target="loop">
+           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-
-        <!-- Edges ESP32 -->
-        <mxCell id="e_32_1" edge="1" parent="grp_esp32" source="node_boot_32" target="node_conf_cam" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
-        <mxCell id="e_32_2" edge="1" parent="grp_esp32" source="node_conf_cam" target="node_http_serv" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
-        <mxCell id="e_32_3" edge="1" parent="grp_esp32" source="node_http_serv" target="node_loop_32" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
-        <mxCell id="e_32_5" edge="1" parent="grp_esp32" source="node_loop_32" target="node_cap" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
-        <mxCell id="e_32_6" edge="1" parent="grp_esp32" source="node_cap" target="node_send_stream" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
-        <mxCell id="e_32_7" edge="1" parent="grp_esp32" source="node_send_stream" target="node_loop_32" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;"> 
-          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="310" y="380"/><mxPoint x="310" y="280"/></Array></mxGeometry> 
+        <!-- UDP Branch -->
+        <mxCell id="udp_recv" value="Rx UDP Packet?" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;" vertex="1" parent="1">
+          <mxGeometry x="160" y="320" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_3" value="Check" style="endArrow=classic;html=1;exitX=0;exitY=0.5;" edge="1" parent="1" source="loop" target="udp_recv">
+           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <!-- Edges ESP12 -->
-        <mxCell id="e_12_1" edge="1" parent="grp_esp12" source="node_boot_12" target="node_init_io" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
-        <mxCell id="e_12_2" edge="1" parent="grp_esp12" source="node_init_io" target="node_web_12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
-        <mxCell id="e_12_3" edge="1" parent="grp_esp12" source="node_web_12" target="node_loop_12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
-        <mxCell id="e_12_4" edge="1" parent="grp_esp12" source="node_loop_12" target="node_parse" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" value="Client Req?"> <mxGeometry relative="1" as="geometry" /> </mxCell>
-        <mxCell id="e_12_5" edge="1" parent="grp_esp12" source="node_parse" target="node_pwm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
-        <mxCell id="e_12_6" edge="1" parent="grp_esp12" source="node_loop_12" target="node_sonar" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" value="Every 100ms"> 
-            <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="240" y="280"/></Array></mxGeometry>
+        <mxCell id="parse_cmd" value="Parse CMD ID" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="160" y="420" width="120" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="e_12_7" edge="1" parent="grp_esp12" source="node_sonar" target="node_udp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;"> <mxGeometry relative="1" as="geometry" /> </mxCell>
-    
+        <mxCell id="edge_4" value="Yes" style="endArrow=classic;html=1;" edge="1" parent="1" source="udp_recv" target="parse_cmd">
+           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cmd_01" value="CMD 01: Move XYZ" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="540" width="100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="cmd_03" value="CMD 03: Angles" style="rounded=0;whiteSpace=wrap;html=1;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="170" y="540" width="100" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge_5" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="parse_cmd" target="cmd_01">
+           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_6" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="parse_cmd" target="cmd_03">
+           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Motion Update Branch -->
+        <mxCell id="update" value="robot.update()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;" vertex="1" parent="1">
+          <mxGeometry x="480" y="320" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_7" value="Every Tick" style="endArrow=classic;html=1;exitX=1;exitY=0.5;" edge="1" parent="1" source="loop" target="update">
+           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="profiler" value="Trapezoidal Profiler&#xa;(Calculate Next Step)" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="480" y="420" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_8" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="update" target="profiler">
+           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="coupling" value="Mk1 Coupling&#xa;q3 = q3 + (q2-90)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="480" y="500" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_9" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="profiler" target="coupling">
+           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="servo" value="Set PWM Duty" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="480" y="580" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_10" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="coupling" target="servo">
+           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
       </root>
     </mxGraphModel>
   </diagram>

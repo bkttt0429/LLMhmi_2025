@@ -29,7 +29,7 @@ Copy the following configuration to your MCP settings file (e.g., `mcp_config.js
         "drawio-mcp-server"
       ],
       "env": {
-        "PORT": "3334"
+        "PORT": "3333"
       }
     },
     "sequential-thinking": {
@@ -109,3 +109,30 @@ This firmware has been optimized for the ESP32-S3 N16R8 module.
 ## 5. Hardware Safety Settings (Added 2025-12-13)
 - **Brownout Detection:** Disabled (`CONFIG_ESP_BROWNOUT_DET=n`) to prevent restarts on low voltage.
   - **WARNING**: Disabling this increases the risk of flash corruption if the voltage drops significantly while the device is writing to flash. Ensuring a stable power supply is critical.
+
+# ESP8266 MicroPython Flashing Guide (Added 2025-12-15)
+
+## Reprogramming User Code
+If you are reverting from C++ to MicroPython, or if `ampy` hangs, execute this full sequence:
+
+```powershell
+# 1. Enter Directory
+cd d:\hmidata\project\Firmware\ESP8266\MicroPython
+
+# 2. Erase Flash (Removes C++ Core)
+python -m esptool --port COM12 erase_flash
+
+# 3. Flash Python Interpreter
+python -m esptool --port COM12 --baud 460800 write_flash --flash_size=detect 0 ESP8266_GENERIC-20251209-v1.27.0.bin
+
+# 4. Verify System
+ampy --port COM12 ls
+# Output should be: /boot.py
+
+# 5. Upload Firmware v2.0
+ampy --port COM12 put config.json
+ampy --port COM12 put kinematics.py
+ampy --port COM12 put robot.py
+ampy --port COM12 put main.py
+ampy --port COM12 reset
+```

@@ -55,6 +55,16 @@ class RobotArm:
         # 1. Apply linear calibration model
         hw_angle = (q_angle * k) + b
         
+        # [Coupling Logic for Mk1]
+        # Compensates for mechanical dependency between Shoulder and Elbow.
+        # If Shoulder (q2) moves, Elbow (q3) physical angle must adjust to maintain relative geometric angle.
+        if joint_name == 'elbow' and self.config['settings'].get('coupling_mk1', False):
+            # Get current shoulder geometric angle
+            shoulder_q = self.servos['shoulder']['q_current']
+            # Formula: Elbow_Servo = Elbow_Geom + (Shoulder_Geom - 90)
+            # This is an approximation of the parallel link behavior.
+            hw_angle += (shoulder_q - 90.0)
+        
         # 2. Safety Clamp (Physical Limits)
         limits = cfg['limits']
         hw_angle = max(limits[0], min(limits[1], hw_angle))
@@ -164,6 +174,43 @@ class RobotArm:
             
             # Update 'target' state immediately? Or wait?
             # Better to update q_target as "Final Goal"
+            self.servos[name]['q_target'] = target
+            
+        self.is_moving = True
+        return True
+
+    def move_angles(self, base, shoulder, elbow):
+        """
+        L1 Layer: Direct Angle Input (Bypass IK)
+        """
+        gc.collect()
+        
+        targets = {
+            'base': base, 
+            'shoulder': shoulder, 
+            'elbow': elbow,
+            'gripper': self.servos['gripper']['q_current'] 
+        }
+        
+        # Motion Profiling (Sync)
+        max_duration = 0
+        
+        for name, target in targets.items():
+            start = self.servos[name]['q_current']
+            diff = abs(target - start)
+            dur = (diff / self.max_speed) * 1000 # ms
+            if dur > max_duration:
+                max_duration = dur
+            
+        if max_duration < 50: max_duration = 50
+        
+        print(f"[Robot] Angles Plan: T={max_duration:.0f}ms")
+            
+        # Create Generators
+        self.motion_generators = {}
+        for name, target in targets.items():
+            start = self.servos[name]['q_current']
+            self.motion_generators[name] = self._trapezoidal_generator(start, target, max_duration)
             self.servos[name]['q_target'] = target
             
         self.is_moving = True

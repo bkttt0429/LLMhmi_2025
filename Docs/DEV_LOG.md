@@ -1,36 +1,94 @@
-# Project Development Log (Unified)
+# 專案開發日誌 (統一版)
 
-**Last Updated:** 2025-12-12 01:10  
+**最後更新:** 2025-12-15 02:50
 
 ---
 
-## 🕒 [2025-12-14 18:00] Motion Control Optimization (Firmware Side)
+## 🕒 [2025-12-15 02:30] MicroPython 回歸與 Mk1 適配
 
-**Overview:**
-Moved the "Slow Start" (Acceleration Ramping) logic from the PC Client (Python) to the Firmware (ESP32) to ensure consistent physics protection (anti-brownout) regardless of network latency.
+**總覽:**
+成功將 ESP8266 韌體回退至 **MicroPython** 版本，以符合使用者偏好並簡化除錯流程。同時整合了 **EEZYbotARM Mk1** 的支援，包含特定的機械耦合補償。
 
-**Changes:**
+**變更項目:**
 
-1.  **Firmware (`app_motor.c`):**
-    *   **Optimized `accel_table`:**
-        *   Old: `{ 3, 5, 8, 12, 15, 20, 25, 30 }` (Too aggressive at start)
-        *   New: `{ 2, 3, 5, 8, 12, 18, 25, 40 }`
-        *   **Effect:** Smoother initial movement (prevents Voltage Sag/Brownout) but fully responsive at high speeds.
-    *   **Code Cleanup:** Removed redundant variable assignments in `app_motor_set_pwm`.
-    *   **Logic:** The `motor_control_task` now reliably ramps `current_pwm` towards `target_pwm` every 10ms.
+1.  **韌體 (ESP8266 MicroPython):**
+    *   **架構:** 重新編寫 `main.py`, `robot.py`, `kinematics.py` 軟體堆疊。
+    *   **Mk1 適配:** 
+        *   更新幾何參數: L1=61mm, L2=80mm。
+        *   **耦合補償:** 實作 `q3_servo = q3_geom + (q2_geom - 90)` 邏輯，以修正平行連桿機構的連動效應。
+    *   **通訊協議 v2.0:**
+        *   支援二進位 UDP 封包 (CMD 0x03 角度控制)。
+        *   發現信標 (Discovery Beacon): 每秒廣播 `ESP8266_ARM` 以利自動 IP 搜尋。
 
-2.  **PC Client (`web_server.py`):**
-    *   **Reverted `MotionProfiler`:** Removed the Python-side smooth ramping class.
-    *   **Direct Control:** `send_control_command` now sends raw target values immediately via WebSocket (or HTTP fallback).
-    *   **Benefit:** Eliminates "Double Filtering" latency. The user moves the stick, the command flies to ESP32, and ESP32 handles the smoothing.
+2.  **PC 客戶端:**
+    *   **AI 優化:** 將預設偵測模型更換為 `yolov13n.pt` (Nano) 以改善延遲。
+    *   **介面:** 更新 `index.html`，預設選項改為 Nano 模型。
 
-**Next Steps:**
-- Flash the updated firmware to ESP32.
-- Restart `web_server.py`.
+3.  **文件:**
+    *   更新 `task.md` 與 `config.json` 以反映 Mk1 設定。
+
+---
+
+## 🕒 [2025-12-14 18:00] 馬達控制優化 (韌體端)
+
+**總覽:**
+將 "緩啟動" (加速度控制) 邏輯從 PC 客戶端 (Python) 移至韌體端 (ESP32)，以確保物理保護機制 (防止電壓驟降) 不受網路延遲影響。
+
+**變更項目:**
+
+1.  **韌體 (`app_motor.c`):**
+    *   **優化加速表 (`accel_table`):**
+        *   舊版: `{ 3, 5, 8, 12, 15, 20, 25, 30 }` (啟動太過激進)
+        *   新版: `{ 2, 3, 5, 8, 12, 18, 25, 40 }`
+        *   **效果:** 初始移動更平滑 (防止電壓下沉/掉電)，但在高速時仍保持響應。
+    *   **程式碼清理:** 移除了 `app_motor_set_pwm` 中多餘的變數賦值。
+    *   **邏輯:** `motor_control_task` 現在每 10ms 可靠地將 `current_pwm` 緩升至 `target_pwm`。
+
+2.  **PC 客戶端 (`web_server.py`):**
+    *   **移除 `MotionProfiler`:** 刪除了 Python 端的平滑加速類別。
+    *   **直接控制:** `send_control_command` 現在透過 WebSocket (或 HTTP fallback) 立即發送原始目標值。
+    *   **優勢:** 消除 "雙重濾波" 造成的延遲。使用者移動搖桿，指令直飛 ESP32，由 ESP32 負責平滑處理。
+
+**後續步驟:**
+- 將更新的韌體燒錄至 ESP32。
+- 重啟 `web_server.py`。
 
 ## 🕒 [2025-12-12 01:00] Traditional Chinese Version (Latest)
 
 # 項目開發日誌 (Project Development Log)
+
+**日期:** 2025-12-15  
+**主題:** MicroPython 韌體回歸與 Mk1 機構適配  
+**作者:** Antigravity AI  
+
+---
+
+## 🕒 [2025-12-15 02:30] MicroPython 回歸與 Mk1 適配
+
+**總覽:**
+成功將 ESP8266 韌體回退至 **MicroPython** 版本，以符合使用者偏好並簡化除錯流程。同時整合了 **EEZYbotARM Mk1** 的支援，包含特定的機械耦合補償。
+
+**變更項目:**
+
+1.  **韌體 (ESP8266 MicroPython):**
+    *   **架構:** 重新編寫 `main.py`, `robot.py`, `kinematics.py` 軟體堆疊。
+    *   **Mk1 適配:** 
+        *   更新幾何參數: L1=61mm, L2=80mm。
+        *   **耦合補償:** 實作 `q3_servo = q3_geom + (q2_geom - 90)` 邏輯，以修正平行連桿機構的連動效應。
+    *   **通訊協議 v2.0:**
+        *   支援二進位 UDP 封包 (CMD 0x03 角度控制)。
+        *   發現信標 (Discovery Beacon): 每秒廣播 `ESP8266_ARM` 以利自動 IP 搜尋。
+
+2.  **PC 客戶端:**
+    *   **AI 優化:** 將預設偵測模型更換為 `yolov13n.pt` (Nano) 以改善延遲。
+    *   **介面:** 更新 `index.html`，預設選項改為 Nano 模型。
+
+3.  **文件:**
+    *   更新 `task.md` 與 `config.json` 以反映 Mk1 設定。
+
+---
+
+## 🕒 [2025-12-14 18:00] 馬達控制優化 (韌體端)
 
 **日期:** 2025-12-12  
 **主題:** ESP32-S3 韌體分析與優化計畫 (針對 N16R8 模組)  
