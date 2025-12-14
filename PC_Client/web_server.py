@@ -443,9 +443,10 @@ def _calculate_differential_drive(x: float, y: float) -> tuple[int, int]:
     Returns: (left_pwm, right_pwm) range -255 to 255
     """
     
-    # 1. Invert Y (Disabled: User reported direction was correct before/reversed now)
-    # Pygame/HTML5: Up is -1.
-    # y = -y
+    # 1. Invert Y to match convention (Up = Forward)
+    # Pygame: Up is -1, Down is +1
+    # We want: Forward is +1, Backward is -1
+    y = -y  # [FIX] Re-enabled based on user analysis
 
     # 2. Cubic Sensitivity Curve (Exponential Control)
     # Allows "Light Push" for slow speed, "Hard Push" for fast.
@@ -526,11 +527,19 @@ def send_control_command(left: int, right: int):
         # Update timestamp
         last_esp_cmd_time = time.time()
         
-        # Send GET request with query parameters
-        resp = state.control_session.get(url, params=params, timeout=1.0)
+        # Send GET request with query parameters (Force Close to prevent ESP32 ENFILE 23)
+        resp = state.control_session.get(
+            url, 
+            params=params, 
+            timeout=1.0,
+            headers={'Content-Type': 'application/json'} # Keep-Alive by default
+        )
         
         # [DEBUG] Print response details
-        print(f"[CONTROL] 📡 ESP32 Response: Status={resp.status_code}, Content={resp.text[:100]}")
+        # print(f"[CONTROL] 📡 ESP32 Response: Status={resp.status_code}, Content={resp.text[:100]}")
+        
+        # [FIX] Explicitly close the response to release socket immediately
+        resp.close()
         
         if resp.status_code == 200:
             add_log(f"[CONTROL] ✅ Success")

@@ -173,7 +173,10 @@ function sendHttpCommand(left, right) {
 
     fetch('/api/control', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'Connection': 'close' // [FIX] Help ESP32 close socket
+        },
         body: JSON.stringify({ left: left, right: right })
     })
         .then(() => {

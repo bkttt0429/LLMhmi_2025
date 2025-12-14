@@ -63,6 +63,7 @@ static esp_err_t status_handler(httpd_req_t *req){
     *p++ = 0;
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Connection", "close"); // [FIX] Close Start Short Connections
     return httpd_resp_send(req, json_response, strlen(json_response));
 }
 
@@ -138,6 +139,7 @@ static esp_err_t cmd_handler(httpd_req_t *req){
     }
 
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Connection", "close"); // [FIX] Close Start Short Connections
     return httpd_resp_send(req, NULL, 0);
 }
 
@@ -159,6 +161,7 @@ static esp_err_t motor_handler(httpd_req_t *req)
 
         // 1. Send Response FIRST (Ensure client gets OK before voltage sag)
         httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+        // httpd_resp_set_hdr(req, "Connection", "close"); // [REMOVED] Enable Keep-Alive
         httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
 
         // 2. Small delay to flush TCP buffer
@@ -167,6 +170,7 @@ static esp_err_t motor_handler(httpd_req_t *req)
         // 3. Activate Motors (This causes voltage sag)
         app_motor_set_pwm(left_val, right_val);
     } else {
+        httpd_resp_set_hdr(req, "Connection", "close"); // [FIX] Close Start Short Connections
         httpd_resp_send_404(req);
     }
     return ESP_OK;
@@ -235,13 +239,43 @@ static esp_err_t stream_handler(httpd_req_t *req){
     return res;
 }
 
+// [DEBUG] Socket Monitor Endpoint
+static esp_err_t debug_handler(httpd_req_t *req){
+    static char json_response[512];
+    char * p = json_response;
+    *p++ = '{';
+    
+    // We can't access internals directly, so we infer max supported
+    p += sprintf(p, "\"max_open_sockets\":%d,", 15);
+    p += sprintf(p, "\"heap_free\":%lu,", (unsigned long)esp_get_free_heap_size()); // [FIX] Cast to ulong
+    if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0) {
+        p += sprintf(p, "\"psram_free\":%lu", (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM)); // [FIX] Cast to ulong
+    } else {
+        p += sprintf(p, "\"psram_free\":0");
+    }
+    
+    *p++ = '}';
+    *p++ = 0;
+    
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Connection", "close");
+    return httpd_resp_send(req, json_response, strlen(json_response));
+}
+
 void app_httpd_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_open_sockets = 7;
+    config.max_open_sockets = 12; // [FIX] Increase socket pool (was 7)
     config.lru_purge_enable = true;
     config.stack_size = 8192;
     config.backlog_conn = 5;
+
+    // [FIX] Aggressive Keep-Alive Pruning
+    config.keep_alive_enable = true;
+    config.keep_alive_idle = 5;      // Close after 5s idle
+    config.keep_alive_interval = 5; 
+    config.keep_alive_count = 3;
 
     // Adaptive Memory Allocation: Use PSRAM only if available
     if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0) {
@@ -294,6 +328,10 @@ void app_httpd_start(void)
         httpd_register_uri_handler(camera_httpd, &cmd_uri);
         httpd_register_uri_handler(camera_httpd, &status_uri);
         httpd_register_uri_handler(camera_httpd, &motor_uri);
+        
+        httpd_uri_t debug_uri = { .uri = "/debug", .method = HTTP_GET, .handler = debug_handler, .user_ctx = NULL };
+        httpd_register_uri_handler(camera_httpd, &debug_uri);
+        
         ESP_LOGI(TAG, "✅ Main HTTP server started");
     } else {
         ESP_LOGE(TAG, "❌ Failed to start main HTTP server"); 
