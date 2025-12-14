@@ -164,11 +164,13 @@ static esp_err_t motor_handler(httpd_req_t *req)
         // httpd_resp_set_hdr(req, "Connection", "close"); // [REMOVED] Enable Keep-Alive
         httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
 
-        // 2. Small delay to flush TCP buffer
-        vTaskDelay(pdMS_TO_TICKS(10));
+        // 2. Small delay to flush TCP buffer (Removed for Keep-Alive performance)
+        // vTaskDelay(pdMS_TO_TICKS(10));
 
         // 3. Activate Motors (This causes voltage sag)
+        ESP_LOGI(TAG, "CMD Start: L=%d R=%d", left_val, right_val);
         app_motor_set_pwm(left_val, right_val);
+        ESP_LOGI(TAG, "CMD End");
     } else {
         httpd_resp_set_hdr(req, "Connection", "close"); // [FIX] Close Start Short Connections
         httpd_resp_send_404(req);

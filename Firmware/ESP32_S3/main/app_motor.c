@@ -14,7 +14,7 @@
 #include "driver/gpio.h"
 #include "camera_pins.h" // For LED_PIN
 
-#define PWM_TIMER         LEDC_TIMER_1
+#define PWM_TIMER         LEDC_TIMER_2
 #define PWM_MODE          LEDC_LOW_SPEED_MODE
 #define PWM_DUTY_RES      LEDC_TIMER_14_BIT // 16384 steps
 #define PWM_FREQUENCY     50 

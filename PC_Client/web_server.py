@@ -284,31 +284,57 @@ class SystemState:
         self.last_api_control_time = 0.0  # [Input Priority] Track last API/Keyboard command
         self.last_motor_cmd = (0, 0)      # [Soft Start] Track last sent PWM values
         
-        # 建立一個綁定到 Camera Net Interface 的 session 用於發送 HTTP 控制指令到 ESP32
-        self.control_session = requests.Session()
+        self.consecutive_failures = 0
+        self.last_failure_time = 0.0
+        self.BACKOFF_DURATION = 2.0  # 2 seconds cooldown after failures
+
+        # Initial Control Session Creation
+        self.control_session = self._create_control_session()
+
+    def _create_control_session(self):
+        """
+        Factory to create a correctly configured requests.Session.
+        Preserves Source IP Binding logic for Dual-NIC setups.
+        Now REFRESHES network info to handle IP changes after reconnect.
+        """
+        session = requests.Session()
         
+        # [FIX] Refresh Network Info to get latest IP
+        self.net_info = get_network_info()
+        self.camera_net_ip = self.net_info["camera_net"]["ip"] if self.net_info["camera_net"] else None
+        
+        # [FIX] Better Binding Logic for Station Mode (e.g. 10.x.x.x)
+        # If camera_net_ip (192.168.4.x) is not found, try to find which interface can reach the current camera_ip
+        bind_ip = self.camera_net_ip
+        if not bind_ip and self.camera_ip:
+            bind_ip = find_reachable_interface(self.camera_ip)
+
         # Define Retry Strategy (Fast retry for control latency)
         retry_strategy = Retry(
             total=3,                # Retry 3 times
             backoff_factor=0,       # No delay between retries (immediate)
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["GET"],
-            raise_on_status=False   # Don't raise exception on status codes, let us handle it
+            raise_on_status=False
         )
 
-        if self.camera_net_ip:
+        if bind_ip:
             try:
-                # SourceAddressAdapter inherits from HTTPAdapter, so it accepts max_retries
-                adapter = SourceAddressAdapter(self.camera_net_ip, max_retries=retry_strategy)
-                self.control_session.mount('http://', adapter)
-                print(f"[INIT] Control Session bound to {self.camera_net_ip} with Retry(3)")
+                # Bind to the specific local Interface IP
+                adapter = SourceAddressAdapter(bind_ip, max_retries=retry_strategy)
+                session.mount('http://', adapter)
+                print(f"[SESSION] Created Control Session bound to {bind_ip}")
             except Exception as e:
-                print(f"[INIT] Failed to bind Control Session: {e}")
+                print(f"[SESSION] Failed to bind Source IP {bind_ip}: {e}. Fallback to default.")
+                adapter = HTTPAdapter(max_retries=retry_strategy)
+                session.mount('http://', adapter)
         else:
-            # Default adapter with retries
+            # Default adapter (System Routing)
+            print(f"[SESSION] Created Control Session (Default Routing) - Could not find interface for {self.camera_ip}")
             adapter = HTTPAdapter(max_retries=retry_strategy)
-            self.control_session.mount('http://', adapter)
-            print("[INIT] Control Session created (Default Routing) with Retry(3)")
+            session.mount('http://', adapter)
+            
+        return session
 
     def print_network_summary(self):
         print("="*60)
@@ -505,6 +531,19 @@ def send_control_command(left: int, right: int):
          # Rate limit active - Drop packet but return True to satisfy client
          return True
          
+    # [Circuit Breaker]
+    # If too many failures occurred recently, skip this request to prevent UI freeze
+    if state.consecutive_failures >= 3:
+        if now - state.last_failure_time < state.BACKOFF_DURATION:
+            if state.consecutive_failures == 3: # Log once per lockout
+                # print("[CONTROL] 🛡️ Circuit Breaker Active - Skipping command")
+                pass
+            return False
+        else:
+            # Cooldown over, try again (reset counters later if successful)
+            # print("[CONTROL] 🛡️ Circuit Breaker Reset - Retrying connection")
+            pass
+
     target_ip = state.camera_ip or "192.168.4.1"
     url = f"http://{target_ip}/motor"
     # [Soft Start] Logic DEPRECATED
@@ -520,14 +559,14 @@ def send_control_command(left: int, right: int):
     state.last_motor_cmd = (left, right)
 
     # [DEBUG] Print what we're about to send
-    print(f"[CONTROL] 🚗 Sending to ESP32: {url} with params={params}")
+    # print(f"[CONTROL] 🚗 Sending to ESP32: {url} with params={params}")
     add_log(f"[CONTROL] → {target_ip}/motor L:{left} R:{right}")
 
     try:
         # Update timestamp
         last_esp_cmd_time = time.time()
         
-        # Send GET request with query parameters (Force Close to prevent ESP32 ENFILE 23)
+        # Send GET request
         resp = state.control_session.get(
             url, 
             params=params, 
@@ -535,38 +574,56 @@ def send_control_command(left: int, right: int):
             headers={'Content-Type': 'application/json'} # Keep-Alive by default
         )
         
-        # [DEBUG] Print response details
-        # print(f"[CONTROL] 📡 ESP32 Response: Status={resp.status_code}, Content={resp.text[:100]}")
-        
         # [FIX] Explicitly close the response to release socket immediately
+        # Note: requests.Session helps re-use the socket, resp.close() releases it back to pool
         resp.close()
         
         if resp.status_code == 200:
-            add_log(f"[CONTROL] ✅ Success")
+            # Circuit Breaker Success Reset
+            if state.consecutive_failures > 0:
+                print("[CONTROL] ✅ Connection Recovered")
+                state.consecutive_failures = 0
+            
+            # add_log(f"[CONTROL] ✅ Success")
             return True
         else:
             add_log(f"[CONTROL] ⚠️ Failed: HTTP {resp.status_code}")
             print(f"[CONTROL] ❌ ESP32 rejected command with status {resp.status_code}")
+            
+            # Count failure
+            state.consecutive_failures += 1
+            state.last_failure_time = time.time()
             return False
             
     except requests.exceptions.Timeout:
+        state.consecutive_failures += 1
+        state.last_failure_time = time.time()
+        
         add_log(f"[CONTROL] ⚠️ Timeout to {target_ip}")
         print(f"[CONTROL] ⏱️ Timeout: ESP32 at {target_ip} did not respond in 1.0s")
-        # Reset Session on Timeout (Maybe dead socket)
-        state.control_session = requests.Session()
+        
+        # Clean Re-initialization using Factory
+        # Old: state.control_session = requests.Session()
+        state.control_session.close() # Clean up old sockets
+        state.control_session = state._create_control_session()
         return False
         
     except requests.exceptions.ConnectionError as e:
+        state.consecutive_failures += 1
+        state.last_failure_time = time.time()
+        
         add_log(f"[CONTROL] ❌ Connection Error to {target_ip}")
         print(f"[CONTROL] 🔌 Connection Error: Cannot reach ESP32 at {target_ip}")
-        print(f"[CONTROL]    Resetting Session...")
-        # Reset Session
-        state.control_session = requests.Session()
+        
+        # Clean Re-initialization using Factory
+        state.control_session.close()
+        state.control_session = state._create_control_session()
         return False
         
     except requests.exceptions.RequestException as e:
+        state.consecutive_failures += 1
+        state.last_failure_time = time.time()
         add_log(f"[CONTROL] ❌ Error: {e}")
-        print(f"[CONTROL] 💥 Request Exception: {e}")
         return False
 
 def video_manager_thread():
