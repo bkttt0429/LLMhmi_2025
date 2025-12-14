@@ -25,6 +25,7 @@ window.onload = () => {
     if (window.initSpeedLimiter) window.initSpeedLimiter();
     if (window.initVideoRetry) window.initVideoRetry();
     if (window.initRobot3D) window.initRobot3D();
+    if (window.initMotorLock) window.initMotorLock();
 };
 
 window.onresize = () => {

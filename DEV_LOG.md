@@ -4,6 +4,30 @@
 
 ---
 
+## 🕒 [2025-12-14 18:00] Motion Control Optimization (Firmware Side)
+
+**Overview:**
+Moved the "Slow Start" (Acceleration Ramping) logic from the PC Client (Python) to the Firmware (ESP32) to ensure consistent physics protection (anti-brownout) regardless of network latency.
+
+**Changes:**
+
+1.  **Firmware (`app_motor.c`):**
+    *   **Optimized `accel_table`:**
+        *   Old: `{ 3, 5, 8, 12, 15, 20, 25, 30 }` (Too aggressive at start)
+        *   New: `{ 2, 3, 5, 8, 12, 18, 25, 40 }`
+        *   **Effect:** Smoother initial movement (prevents Voltage Sag/Brownout) but fully responsive at high speeds.
+    *   **Code Cleanup:** Removed redundant variable assignments in `app_motor_set_pwm`.
+    *   **Logic:** The `motor_control_task` now reliably ramps `current_pwm` towards `target_pwm` every 10ms.
+
+2.  **PC Client (`web_server.py`):**
+    *   **Reverted `MotionProfiler`:** Removed the Python-side smooth ramping class.
+    *   **Direct Control:** `send_control_command` now sends raw target values immediately via WebSocket (or HTTP fallback).
+    *   **Benefit:** Eliminates "Double Filtering" latency. The user moves the stick, the command flies to ESP32, and ESP32 handles the smoothing.
+
+**Next Steps:**
+- Flash the updated firmware to ESP32.
+- Restart `web_server.py`.
+
 ## 🕒 [2025-12-12 01:00] Traditional Chinese Version (Latest)
 
 # 項目開發日誌 (Project Development Log)

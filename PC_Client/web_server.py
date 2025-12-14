@@ -189,6 +189,13 @@ def _apply_camera_ip(ip, stream_url=None, prefix=""):
         _persist_bridge_host(ip)
         # add_log(f"{prefix}Bridge host updated to {ip}") # Reduced noise
 
+    # [WS] Update WebSocket Target if IP changed
+    if state.ws_client and state.ws_client.target_ip != ip:
+        print(f"[WS] IP Changed to {ip}, restarting client...")
+        state._init_ws_client(ip)
+    elif not state.ws_client and ip:
+        state._init_ws_client(ip)
+
     # Notify Video Process immediately if updated
     if updated and video_cmd_queue:
         config_update = {
@@ -219,6 +226,78 @@ def _persist_bridge_host(host: str):
         BRIDGE_CACHE_FILE.write_text(host, encoding="utf-8")
     except Exception:
         pass
+
+import websocket
+import threading
+import json
+import time # Added for time.sleep
+
+# ⭐ WebSocket Client for Low Latency Control
+class AsyncControlClient:
+    def __init__(self, target_ip):
+        self.target_ip = target_ip
+        self.ws_url = f"ws://{target_ip}/ws/control"
+        self.ws = None
+        self.connected = False
+        self.lock = threading.Lock()
+        self.running = True
+        
+        # Start background worker
+        self.thread = threading.Thread(target=self._worker, daemon=True)
+        self.thread.start()
+
+    def _worker(self):
+        print(f"[WS] Worker started for {self.ws_url}")
+        while self.running:
+            try:
+                # 1. Connect
+                self.ws = websocket.WebSocket()
+                self.ws.connect(self.ws_url, timeout=1.0)
+                
+                with self.lock:
+                    self.connected = True
+                print(f"[WS] ✅ Connected to {self.target_ip}")
+                
+                # 2. Keep Connection Alive (Receive Loop)
+                while self.running:
+                    try:
+                        # Simple Ping-Pong or just wait for close
+                        # ESP might send stats later
+                        result = self.ws.recv() 
+                    except (websocket.WebSocketException, ConnectionError):
+                        print("[WS] ⚠️ Connection Lost")
+                        break
+                        
+            except Exception as e:
+                # print(f"[WS] Connection Failed: {e}") # Reduce noise
+                time.sleep(2) # Retry delay
+            finally:
+                with self.lock:
+                    self.connected = False
+                if self.ws:
+                    try: self.ws.close()
+                    except: pass
+                # Reconnect delay
+                time.sleep(1)
+
+    def send(self, left, right):
+        if not self.connected:
+            return False
+        
+        try:
+            payload = json.dumps({"l": left, "r": right})
+            with self.lock:
+                self.ws.send(payload)
+            return True
+        except Exception as e:
+            print(f"[WS] Send Error: {e}")
+            return False
+
+    def close(self):
+        self.running = False
+        if self.ws: self.ws.close()
+
+
 
 # === 全域狀態 ===
 class SystemState:
@@ -269,6 +348,8 @@ class SystemState:
         self.preferred_port = None
         self.ser = None
         self.ws_connected = False
+        self.ws_client = None # [FIX] Initialize before use
+        self.arm_ip = "10.28.14.129"  # [FIX] Hardcode known IP to bypass Discovery
         self.video_url = _build_stream_url(self.camera_ip)
         self.radar_dist = 0.0
         self.logs = []
@@ -283,6 +364,7 @@ class SystemState:
         self.stream_connected = False
         self.last_api_control_time = 0.0  # [Input Priority] Track last API/Keyboard command
         self.last_motor_cmd = (0, 0)      # [Soft Start] Track last sent PWM values
+        self.last_arm_cmd_json = ""       # [Deduplication] Track last sent Arm JSON
         
         self.consecutive_failures = 0
         self.last_failure_time = 0.0
@@ -290,6 +372,19 @@ class SystemState:
 
         # Initial Control Session Creation
         self.control_session = self._create_control_session()
+        
+        # [WS] Initialize WebSocket Client immediately if IP known
+        if self.camera_ip:
+            self._init_ws_client(self.camera_ip)
+
+    def _init_ws_client(self, ip):
+        if self.ws_client:
+            self.ws_client.close()
+        try:
+            print(f"[INIT] Starting WebSocket Client to {ip}...")
+            self.ws_client = AsyncControlClient(ip)
+        except Exception as e:
+            print(f"[INIT] WS Start Failed: {e}")
 
     def _create_control_session(self):
         """
@@ -515,10 +610,11 @@ MIN_CMD_INTERVAL = 0.08
 def send_control_command(left: int, right: int):
     """
     Send motor control command to ESP32-S3.
-    Endpoint: GET /motor?left=XX&right=YY
+    Endpoint: GET /motor?left=XX&right=YY (HTTP Fallback)
+    Endpoint: WS /ws/control (Primary)
     """
     global last_esp_cmd_time, state
-    
+
     # [1. Server-Side Governor]
     # Protect ESP32 from request floods (Connection Reset)
     now = time.time()
@@ -528,69 +624,50 @@ def send_control_command(left: int, right: int):
     is_stop = (left == 0 and right == 0)
     
     if not is_stop and (now - last_esp_cmd_time < MIN_CMD_INTERVAL):
-         # Rate limit active - Drop packet but return True to satisfy client
-         return True
+         return True # Rate limit active
          
     # [Circuit Breaker]
-    # If too many failures occurred recently, skip this request to prevent UI freeze
     if state.consecutive_failures >= 3:
         if now - state.last_failure_time < state.BACKOFF_DURATION:
-            if state.consecutive_failures == 3: # Log once per lockout
-                # print("[CONTROL] 🛡️ Circuit Breaker Active - Skipping command")
-                pass
+            if state.consecutive_failures == 3: 
+                pass 
             return False
-        else:
-            # Cooldown over, try again (reset counters later if successful)
-            # print("[CONTROL] 🛡️ Circuit Breaker Reset - Retrying connection")
-            pass
 
     target_ip = state.camera_ip or "192.168.4.1"
     url = f"http://{target_ip}/motor"
-    # [Soft Start] Logic DEPRECATED
-    # Now handled by ESP32 Firmware (app_motor.c)
-    # We send the final target directly to reduce network load.
-    
-    current_l, current_r = state.last_motor_cmd
-    # diff checks no longer needed for sending, only for debug if wanted
-            
     params = {"left": left, "right": right}
     
     # Update State
     state.last_motor_cmd = (left, right)
 
-    # [DEBUG] Print what we're about to send
-    # print(f"[CONTROL] 🚗 Sending to ESP32: {url} with params={params}")
-    add_log(f"[CONTROL] → {target_ip}/motor L:{left} R:{right}")
+    # ⭐ WebSocket First Strategy
+    if state.ws_client and state.ws_client.connected:
+        if state.ws_client.send(left, right):
+            last_esp_cmd_time = time.time()
+            return True
+        else:
+             print("[CONTROL] WS Send Failed, falling back to HTTP")
+    
+    # HTTP Fallback
+    # add_log(f"[CONTROL] (HTTP) → {target_ip}/motor L:{left} R:{right}")
 
     try:
-        # Update timestamp
         last_esp_cmd_time = time.time()
-        
-        # Send GET request
         resp = state.control_session.get(
             url, 
             params=params, 
             timeout=1.0,
-            headers={'Content-Type': 'application/json'} # Keep-Alive by default
+            headers={'Content-Type': 'application/json'}
         )
-        
-        # [FIX] Explicitly close the response to release socket immediately
-        # Note: requests.Session helps re-use the socket, resp.close() releases it back to pool
         resp.close()
         
         if resp.status_code == 200:
-            # Circuit Breaker Success Reset
             if state.consecutive_failures > 0:
                 print("[CONTROL] ✅ Connection Recovered")
                 state.consecutive_failures = 0
-            
-            # add_log(f"[CONTROL] ✅ Success")
             return True
         else:
             add_log(f"[CONTROL] ⚠️ Failed: HTTP {resp.status_code}")
-            print(f"[CONTROL] ❌ ESP32 rejected command with status {resp.status_code}")
-            
-            # Count failure
             state.consecutive_failures += 1
             state.last_failure_time = time.time()
             return False
@@ -598,24 +675,15 @@ def send_control_command(left: int, right: int):
     except requests.exceptions.Timeout:
         state.consecutive_failures += 1
         state.last_failure_time = time.time()
-        
         add_log(f"[CONTROL] ⚠️ Timeout to {target_ip}")
-        print(f"[CONTROL] ⏱️ Timeout: ESP32 at {target_ip} did not respond in 1.0s")
-        
-        # Clean Re-initialization using Factory
-        # Old: state.control_session = requests.Session()
-        state.control_session.close() # Clean up old sockets
+        state.control_session.close()
         state.control_session = state._create_control_session()
         return False
         
     except requests.exceptions.ConnectionError as e:
         state.consecutive_failures += 1
         state.last_failure_time = time.time()
-        
         add_log(f"[CONTROL] ❌ Connection Error to {target_ip}")
-        print(f"[CONTROL] 🔌 Connection Error: Cannot reach ESP32 at {target_ip}")
-        
-        # Clean Re-initialization using Factory
         state.control_session.close()
         state.control_session = state._create_control_session()
         return False
@@ -623,7 +691,6 @@ def send_control_command(left: int, right: int):
     except requests.exceptions.RequestException as e:
         state.consecutive_failures += 1
         state.last_failure_time = time.time()
-        add_log(f"[CONTROL] ❌ Error: {e}")
         return False
 
 def video_manager_thread():
@@ -742,7 +809,8 @@ def status_push_thread():
         try:
             status_data = {
                 "ip": state.current_ip,
-                "car_ip": state.car_ip,
+                # Map Arm IP to 'car_ip' for UI display (since UI expects car_ip for Control status)
+                "car_ip": state.arm_ip or state.car_ip, 
                 "camera_ip": state.camera_ip,
                 "video_url": state.video_url,
                 "dist": state.radar_dist,
@@ -758,31 +826,34 @@ def status_push_thread():
 
 def discovery_listener_thread():
     """Listens for UDP Broadcasts from ESP32 to auto-configure IP"""
-    add_log(f"Discovery Listener Started on Port {config.CAMERA_DISCOVERY_PORT}...")
+    PORTS = [config.CAMERA_DISCOVERY_PORT, config.ARM_DISCOVERY_PORT]
+    add_log(f"Discovery Listener Started on Ports {PORTS}...")
 
     sockets = []
 
-    # 1. Bind to 0.0.0.0
-    try:
-        sock_all = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock_all.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock_all.bind(("0.0.0.0", config.CAMERA_DISCOVERY_PORT))
-        sock_all.setblocking(False)
-        sockets.append(sock_all)
-    except Exception as e:
-        add_log(f"[DISCOVERY] Bind 0.0.0.0 failed: {e}")
-
-    # 2. Bind to Internet Net IP if available (fix for Windows specific interface binding issues)
-    if state.internet_net_ip:
+    # 1. Bind to 0.0.0.0 for EACH Port
+    for port in PORTS:
         try:
-            sock_specific = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock_specific.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock_specific.bind((state.internet_net_ip, config.CAMERA_DISCOVERY_PORT))
-            sock_specific.setblocking(False)
-            sockets.append(sock_specific)
-            add_log(f"[DISCOVERY] Also listening on {state.internet_net_ip}")
+            sock_all = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock_all.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock_all.bind(("0.0.0.0", port))
+            sock_all.setblocking(False)
+            sockets.append(sock_all)
         except Exception as e:
-            add_log(f"[DISCOVERY] Bind {state.internet_net_ip} failed: {e}")
+            add_log(f"[DISCOVERY] Bind 0.0.0.0:{port} failed: {e}")
+
+    # 2. Bind to Internet Net IP to fix Windows Dual-NIC issues
+    if state.internet_net_ip:
+        for port in PORTS:
+            try:
+                sock_specific = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock_specific.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock_specific.bind((state.internet_net_ip, port))
+                sock_specific.setblocking(False)
+                sockets.append(sock_specific)
+                add_log(f"[DISCOVERY] Binding {state.internet_net_ip}:{port}")
+            except Exception as e:
+                pass
 
     if not sockets:
         add_log("[DISCOVERY] No sockets created. Discovery disabled.")
@@ -796,15 +867,43 @@ def discovery_listener_thread():
                 try:
                     data, addr = s.recvfrom(1024)
                     msg = data.decode('utf-8', errors='ignore')
+                    
+                    # [NEW] Support Simple Beacon from MicroPython
+                    if "ESP8266_ARM" in msg:
+                        remote_ip = addr[0]
+                        if state.arm_ip != remote_ip:
+                            print(f"[DISCOVERY] 🦾 Robot Arm Found at {remote_ip} (Beacon)")
+                            state.arm_ip = remote_ip
+                        continue
+
                     # Expecting JSON: {"device": "esp32-s3-car", "ip": "192.168.x.x"}
                     if "{" in msg:
                         try:
                             info = json.loads(msg)
-                            if info.get("device") == "esp32-s3-car" and info.get("ip"):
-                                new_ip = info["ip"]
-                                if new_ip != state.camera_ip:
-                                    # add_log(f"[DISCOVERY] Found Device at {new_ip}") # Moved to _apply_camera_ip
-                                    _apply_camera_ip(new_ip, prefix="[AUTO] ")
+                            if "ip" in info:
+                                # Check if this is the Camera or Arm
+                                # Currently we assume Camera sends 'ip' but Arm also sends 'ip'
+                                # Arm distinguishes itself via 'device' key
+                                
+                                remote_ip = info["ip"]
+                                
+                                if "device" in info and info["device"] == "esp8266-arm":
+                                    # Found the Robot Arm
+                                    if state.arm_ip != remote_ip:
+                                        print(f"[DISCOVERY] 🦾 Robot Arm Found at {remote_ip}")
+                                        state.arm_ip = remote_ip
+                                else:
+                                    # Assume it's the Camera (Legacy behavior)
+                                    if state.camera_ip != remote_ip:
+                                        print(f"[DISCOVERY] 🎥 ESP32 Camera Found at {remote_ip}")
+                                        state.camera_ip = remote_ip
+                                        
+                                        # Trigger WebSocket Reconnection
+                                        if state.ws_client:
+                                            state.ws_client.last_connect_attempt = 0 
+                                            
+                            # Helper for Telemetry (Optional)
+                            # if "dist" in data: ...
                         except json.JSONDecodeError:
                             pass
                 except socket.error:
@@ -913,10 +1012,12 @@ def xbox_controller_thread():
     
     try:
         pygame.quit()
+
     except:
         pass
 
 
+    
 @app.route('/video_feed')
 def video_feed():
     return Response(generate_frames(), 
@@ -991,13 +1092,22 @@ def handle_arm_command(data):
             return
 
         # Create Command String: ARM:B90,S45,E90\n
+        # Legacy Serial Format
         cmd = f"ARM:B{int(base)},S{int(shoulder)},E{int(elbow)}\n"
         
-        # Send via Serial
+        # 1. Try UDP First (New Way)
+        if state.arm_ip:
+            try:
+                msg = json.dumps({"base": int(base), "shoulder": int(shoulder), "elbow": int(elbow)})
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.sendto(msg.encode(), (state.arm_ip, 4211))
+            except Exception as e:
+                print(f"[WS] Arm UDP Fail: {e}")
+
+        # 2. Key Serial Fallback (Old Way)
         if state.ser and state.ser.is_open:
             state.ser.write(cmd.encode('utf-8'))
         else:
-            # print(f"[SIMULATION] Serial Arm: {cmd.strip()}")
             pass
 
     except Exception as e:
@@ -1160,6 +1270,49 @@ def api_control():
         print(f"[API] 💥 Exception: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/arm', methods=['POST'])
+def handle_arm_command_api():
+    """
+    Handle Robot Arm Commands.
+    Format: {"base": 90, "shoulder": 45, ...}
+    Action: Forward as UDP Packet to ESP8266.
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"status": "error", "message": "No JSON data"}), 400
+            
+        # Target IP check
+        target_ip = state.arm_ip
+        if not target_ip:
+             # Fallback logic? Or just fail?
+             # For now, print warning and try broadcast or fail
+             # print("[ARM] Warning: Arm IP not discovered yet.")
+             return jsonify({"status": "error", "message": "Arm Not Connected"}), 503
+
+        # Construct JSON for ESP8266
+        msg = json.dumps(data, sort_keys=True) # Sort keys for consistent comparison
+        
+        # [Deduplication] Prevent Flood
+        if msg == state.last_arm_cmd_json:
+             return jsonify({"status": "skipped", "reason": "duplicate"})
+             
+        # DEBUG: Print why we are sending
+        # print(f"[ARM] New: {msg} | Old: {state.last_arm_cmd_json}")
+        state.last_arm_cmd_json = msg
+        
+        # Send UDP
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(msg.encode(), (target_ip, 4211))
+        
+        print(f"[ARM] UDP -> {target_ip}: {msg}") # Re-enable log to debug flood
+        
+        return jsonify({"status": "ok", "sent": msg})
+        
+    except Exception as e:
+        add_log(f"[ARM] Error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route('/api/robot_arm_control', methods=['POST'])
 def api_robot_arm_control():
     """
@@ -1262,10 +1415,14 @@ if __name__ == '__main__':
     threading.Thread(target=udp_sensor_thread, daemon=True).start()
     threading.Thread(target=xbox_controller_thread, daemon=True).start()
     
+    
     # Only start video threads if video process is running
     if p:
         threading.Thread(target=video_manager_thread, daemon=True).start()
         threading.Thread(target=frame_receiver_thread, daemon=True).start()
+    
+    # ⭐ Start Motion Control Thread (REVERTED - Moved to Firmware)
+    # threading.Thread(target=motion_control_thread, daemon=True).start()
     
     threading.Thread(target=status_push_thread, daemon=True).start()
     threading.Thread(target=discovery_listener_thread, daemon=True).start()

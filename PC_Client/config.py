@@ -3,16 +3,17 @@ import os
 # ========= 系統參數 =========
 # ESP32-S3 Integrated Mode
 DEFAULT_STREAM_PORT = 81  # ESP32 視頻流運行在 port 81
-CAMERA_DISCOVERY_PORT = 4213 # UDP Broadcast Port for Discovery
+CAMERA_DISCOVERY_PORT = 4213 # UDP Broadcast Port for Discovery (ESP32)
+ARM_DISCOVERY_PORT = 4211    # UDP Broadcast Port for Discovery (ESP8266)
 
 # ========= 🚗 車子控制 & 串流設定 (Integrated ESP32-S3) =========
 # 整合後，車子控制和影像串流使用同一個 IP
-DEFAULT_CAR_IP = "10.243.115.133"  # 更新為實際 ESP32 IP
-DEFAULT_STREAM_IP = "10.243.115.133"  # 更新為實際 ESP32 IP
-
-# 多個串流來源（按優先順序）
-DEFAULT_STREAM_HOSTS = [
-    "10.243.115.133",
+DEFAULT_CAR_IP = "10.28.14.133"  # Updated to User's actual IP
+DEFAULT_STREAM_IP = "10.28.14.133"  # Updated to User's actual IP
+# 其他備用 IP (AP Mode)
+FALLBACK_IPS = [
+    "192.168.4.1",
+    "10.28.14.133",
 ]
 
 # Arduino CLI 路徑 (燒錄用)

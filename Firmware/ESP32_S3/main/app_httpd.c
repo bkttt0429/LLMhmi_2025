@@ -143,6 +143,63 @@ static esp_err_t cmd_handler(httpd_req_t *req){
     return httpd_resp_send(req, NULL, 0);
 }
 
+// ⭐ WebSocket Control Handler (Low Latency)
+static esp_err_t ctrl_ws_handler(httpd_req_t *req)
+{
+    if (req->method == HTTP_GET) {
+        // IDF handles the handshake automatically when is_websocket=true
+        ESP_LOGI(TAG, "WS Handshake");
+        return ESP_OK;
+    }
+
+    httpd_ws_frame_t ws_pkt;
+    memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
+    ws_pkt.type = HTTPD_WS_TYPE_TEXT;
+    
+    // 1. Get Frame Length
+    esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "WS Frame Len Error %d", ret);
+        return ret;
+    }
+    
+    // 2. Allocate Buffer
+    if (ws_pkt.len) {
+        uint8_t *buf = calloc(1, ws_pkt.len + 1);
+        if (!buf) {
+            ESP_LOGE(TAG, "WS Open - No Memory");
+            return ESP_ERR_NO_MEM;
+        }
+        ws_pkt.payload = buf;
+        
+        // 3. Get Payload
+        ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
+        if (ret == ESP_OK) {
+            // 4. Parse JSON (Manual parsing for speed/independence)
+            // Expected: {"l":200,"r":200}
+            // Logic: Find "l" and "r" keys and parse subsequent integers
+            char *pL = strstr((char*)buf, "\"l\"");
+            char *pR = strstr((char*)buf, "\"r\"");
+            
+            if (pL && pR) {
+                // Skip key and look for number
+                // Basic implementation: trust that user sends valid JSON
+                // Advance past "l" and finding digits
+                while(*pL && !(*pL=='-' || (*pL>='0' && *pL<='9'))) pL++;
+                while(*pR && !(*pR=='-' || (*pR>='0' && *pR<='9'))) pR++;
+                
+                int left_val = atoi(pL);
+                int right_val = atoi(pR);
+                
+                // ESP_LOGI(TAG, "WS CMD: L=%d R=%d", left_val, right_val); // Comment out for extreme speed
+                app_motor_set_pwm(left_val, right_val);
+            }
+        }
+        free(buf);
+    }
+    return ret;
+}
+
 // ⭐ Motor Handler (Renamed from /control)
 static esp_err_t motor_handler(httpd_req_t *req)
 {
@@ -268,7 +325,7 @@ static esp_err_t debug_handler(httpd_req_t *req){
 void app_httpd_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_open_sockets = 12; // [FIX] Increase socket pool (was 7)
+    config.max_open_sockets = 4; // [FIX] Maximize within LWIP limit (Max 7, 3 Internal, 4 Usable)
     config.lru_purge_enable = true;
     config.stack_size = 8192;
     config.backlog_conn = 5;
@@ -317,6 +374,15 @@ void app_httpd_start(void)
         .user_ctx  = NULL
     };
 
+    // ⭐ WebSocket URI Registration
+    httpd_uri_t ws_control = {
+        .uri        = "/ws/control",
+        .method     = HTTP_GET,
+        .handler    = ctrl_ws_handler,
+        .user_ctx   = NULL,
+        .is_websocket = true
+    };
+
     httpd_uri_t stream_uri = {
         .uri       = "/stream",
         .method    = HTTP_GET,
@@ -330,6 +396,7 @@ void app_httpd_start(void)
         httpd_register_uri_handler(camera_httpd, &cmd_uri);
         httpd_register_uri_handler(camera_httpd, &status_uri);
         httpd_register_uri_handler(camera_httpd, &motor_uri);
+        httpd_register_uri_handler(camera_httpd, &ws_control); // ⭐ Register WS
         
         httpd_uri_t debug_uri = { .uri = "/debug", .method = HTTP_GET, .handler = debug_handler, .user_ctx = NULL };
         httpd_register_uri_handler(camera_httpd, &debug_uri);

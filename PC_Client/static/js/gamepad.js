@@ -5,7 +5,7 @@ let keyPressed = {};
 let speedLimitPercent = 100;
 let lastGamepadCmdTime = 0;
 let wasJoystickActive = false;
-let motorEnabled = false; // Safety Lock: Default OFF to prevent mapping issues
+let motorEnabled = true; // Safety Lock: Default ON (User Request)
 const CMD_INTERVAL = 50; // Throttle to 20Hz
 
 // Flood Protection & Serialization State
@@ -41,6 +41,16 @@ function toggleMotorLock() {
         emitControlCommand(0, 0);
     }
 }
+
+function initMotorLock() {
+    const btn = document.getElementById('btn-motor-lock');
+    if (motorEnabled && btn) {
+        btn.classList.add('text-green-400', 'border-green-500');
+        btn.classList.remove('text-red-400', 'border-red-500');
+        btn.innerHTML = 'MOTORS: <span class="animate-pulse">ON</span>';
+    }
+}
+window.initMotorLock = initMotorLock;
 
 function setupKeyboardControls() {
     document.addEventListener('keydown', (e) => {
@@ -242,10 +252,7 @@ function updateJoystickLoop() {
         if (window.updateJoystickVisualizer) window.updateJoystickVisualizer(gp);
         updateButtonIndicators(gp);
 
-        // Handle Arm (Right Stick) even if motors locked
-        if (window.updateRobotArmFromGamepad) {
-            window.updateRobotArmFromGamepad(gp);
-        }
+        // [FIX] block arm control when locked to prevent ghost drift
         return;
     }
 
@@ -282,6 +289,12 @@ function updateJoystickLoop() {
 
     updatePWMDisplay(leftPWM, rightPWM);
 
+
+    // Handle Robot Arm Control (Right Stick) - Must run before Chassis Optimization
+    if (window.updateRobotArmFromGamepad) {
+        window.updateRobotArmFromGamepad(gp);
+    }
+
     // Sending Logic (Throttled)
     const isStickActive = (leftPWM !== 0 || rightPWM !== 0);
 
@@ -308,9 +321,7 @@ function updateJoystickLoop() {
     wasJoystickActive = isStickActive;
 
     // Handle Robot Arm Control (Right Stick) if in Robot View (or Dual Mode)
-    if (window.updateRobotArmFromGamepad) {
-        window.updateRobotArmFromGamepad(gp);
-    }
+
 }
 window.updateJoystickLoop = updateJoystickLoop;
 

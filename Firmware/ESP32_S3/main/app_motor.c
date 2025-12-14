@@ -35,10 +35,10 @@
 #define LOOP_DELAY_MS     10    // 100Hz Control Loop
 
 // Acceleration Table: Non-linear Ramping (Ease-In)
-// Defines step size based on current speed bucket (0-255 divided into 8 ranges)
-// 0: Start very gentle (Anti-Brownout)
-// 7: Full response at high speed
-static const int accel_table[8] = { 3, 5, 8, 12, 15, 20, 25, 30 };
+// Defines step size per 10ms loop based on current speed bucket (0-255 divided into 8 ranges)
+// 0: Start very gentle (2 units/10ms = 200 units/s) -> Approx 1.2s to full speed if linear
+// 7: Full response at high speed (40 units/10ms = Instant)
+static const int accel_table[8] = { 2, 3, 5, 8, 12, 18, 25, 40 };
 
 static const char *TAG = "app_motor";
 
@@ -104,7 +104,7 @@ void app_motor_init(void)
     ledc_channel_config(&ledc_channel_right);
 
     // [Control Task] Handles Ramping + Safety
-    xTaskCreate(motor_control_task, "motor_ctrl", 2048, NULL, 5, NULL);
+    xTaskCreate(motor_control_task, "motor_ctrl", 4096, NULL, 5, NULL);
 }
 
 void app_motor_update_timestamp(void) {
@@ -133,15 +133,11 @@ void motor_control_task(void *arg) {
                      target_left = 0;
                      target_right = 0;
                 }
-                // We keep is_running = true until we actually stop? 
-                // Or just let it ramp down.
-                // If we want to squelch logs, check if current is 0.
+                // Check if we have fully stopped
                 if (current_left == 0 && current_right == 0) {
                     is_running = false; 
                 }
             }
-
-
 
             // 2. Ramping Logic (Acceleration Table)
             // Determine step size based on current speed
@@ -173,9 +169,6 @@ void motor_control_task(void *arg) {
             }
 
             // 3. Map & Apply to Hardware (Only if changed)
-            // Note: Preserving the "Swap/Inverted" logic via map_range
-            
-            // 3. Map & Apply to Hardware (Only if changed)
             if (current_left != last_applied_l || current_right != last_applied_r) {
                 // L_Pin <= Right_Val.  Min->Max
                 int l_us = map_range(current_right, INPUT_MIN, INPUT_MAX, SERVO_MIN_US, SERVO_MAX_US);
@@ -191,15 +184,6 @@ void motor_control_task(void *arg) {
                 
                 last_applied_l = current_left;
                 last_applied_r = current_right;
-                
-                // [DEBUG] Log removed to prevent freezing
-                // ESP_LOGW(TAG, "MOTOR: Target=%d,%d Current=%d,%d PWM_US=%d,%d", target_left, target_right, current_left, current_right, l_us, r_us);
-            }
-            
-             // [DEBUG] Heartbeat every 2 seconds
-            if (++debug_tick > 100) { // 10ms * 100 = 1s
-                 debug_tick = 0;
-                 ESP_LOGI(TAG, "HB: Task=%d CmdT=%lld Tgt=%d,%d Cur=%d,%d", is_running, last_cmd_time, target_left, target_right, current_left, current_right);
             }
         }
         
@@ -220,18 +204,11 @@ void app_motor_set_pwm(int left_val, int right_val)
     if (right_val < INPUT_MIN) right_val = INPUT_MIN;
 
     // Set Target atoms
+    // No more double assignment bugs
     target_left = left_val;
     target_right = right_val;
     
-    target_left = left_val;
-    target_left = left_val;
-    target_right = right_val;
-    
-    // [DEBUG] Prove function entry
-    // ESP_LOGI(TAG, "PWM_SET: L=%d R=%d", left_val, right_val);
-    
-    // [DIAGNOSTIC] Blink LED on Command
-    // Helps user see if ESP32 received the WiFi packet
+    // [DIAGNOSTIC] LED Toggle
     static bool toggle = false;
     toggle = !toggle;
     gpio_set_level(LED_PIN, toggle ? 1 : 0);

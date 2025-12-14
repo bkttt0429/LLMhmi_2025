@@ -118,6 +118,15 @@
                     class="relative w-full max-w-[320px] aspect-square rounded border border-green-900 bg-[#1a1a1a] overflow-hidden mx-auto min-w-[250px] min-h-[250px]">
                     <!-- Three.js canvas will be appended here -->
                 </div>
+
+                <!-- [NEW] Base Motor Torque Control -->
+                <div class="mt-2 flex items-center gap-2 px-2">
+                    <span class="text-[10px] text-gray-400 font-bold">BASE TQ:</span>
+                    <input type="range" min="0" max="90" value="45"
+                        class="flex-1 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer" id="base-torque-slider"
+                        title="Base Motor Torque (0-90 Offset)">
+                    <span id="base-torque-val" class="text-[10px] text-green-400 w-6 text-right">45</span>
+                </div>
             </div>
 
             <!-- Quadrant 4: CONTROL + MANUAL (Right-Bottom) -->
