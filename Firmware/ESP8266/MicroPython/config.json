@@ -1,0 +1,73 @@
+{
+    "geometry": {
+        "l1": 100.0,
+        "l2": 100.0
+    },
+    "servos": {
+        "base": {
+            "pin": 5,
+            "pwm_range": [
+                500,
+                2500
+            ],
+            "limits": [
+                -90,
+                90
+            ],
+            "calib": {
+                "k": 1.0,
+                "b": 90.0
+            }
+        },
+        "shoulder": {
+            "pin": 4,
+            "pwm_range": [
+                500,
+                2500
+            ],
+            "limits": [
+                -90,
+                90
+            ],
+            "calib": {
+                "k": 1.0,
+                "b": 90.0
+            }
+        },
+        "elbow": {
+            "pin": 0,
+            "pwm_range": [
+                500,
+                2500
+            ],
+            "limits": [
+                -90,
+                90
+            ],
+            "calib": {
+                "k": 1.0,
+                "b": 90.0
+            }
+        },
+        "gripper": {
+            "pin": 2,
+            "pwm_range": [
+                500,
+                2500
+            ],
+            "limits": [
+                0,
+                100
+            ],
+            "calib": {
+                "k": 1.0,
+                "b": 0.0
+            }
+        }
+    },
+    "settings": {
+        "pwm_freq": 50,
+        "max_speed": 120.0,
+        "watchdog_ms": 2000
+    }
+}
