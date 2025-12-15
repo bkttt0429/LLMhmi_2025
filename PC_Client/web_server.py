@@ -492,9 +492,20 @@ class XboxController:
         if joystick_count == 0:
             self.joystick = None
             return False
-        self.joystick = pygame.joystick.Joystick(0)
-        self.joystick.init()
-        return True
+            
+        # [FIX] Auto-Scan for the first valid joystick instead of hardcoding ID 0
+        for i in range(joystick_count):
+            try:
+                js = pygame.joystick.Joystick(i)
+                js.init()
+                print(f"[XBOX] Found Joystick {i}: {js.get_name()}")
+                # Optional: Filter by name if needed, e.g., if "Xbox" in js.get_name()
+                self.joystick = js
+                return True
+            except Exception as e:
+                print(f"[XBOX] Failed to init Joystick {i}: {e}")
+                
+        return False
 
     def ensure_connected(self):
         if self.joystick and self.joystick.get_init():
@@ -982,18 +993,77 @@ def xbox_controller_thread():
                 controller_state["left_stick_x"] = filtered_x
                 controller_state["left_stick_y"] = filtered_y
 
-            # Calculate PWM
+            # Calculate PWM for Chassis (Left Stick)
             pwm_dict = _build_cmd_from_state(controller_state)
             current_pwm = (pwm_dict["left"], pwm_dict["right"])
 
-            # Send if changed significantly
-            # Reduced threshold for smoother updates (2 -> 1)
+            # Send Chassis Cmd if changed significantly
             if abs(current_pwm[0] - last_pwm[0]) > 1 or abs(current_pwm[1] - last_pwm[1]) > 1:
                  send_control_command(current_pwm[0], current_pwm[1])
                  last_pwm = current_pwm
             elif current_pwm == (0, 0) and last_pwm != (0, 0):
                  send_control_command(0, 0)
                  last_pwm = (0, 0)
+
+            # === Robot Arm Control (Rate Control) ===
+            # Right Stick X -> Base
+            # Right Stick Y -> Shoulder
+            # D-Pad Y (or Triggers) -> Elbow
+            # Button A -> Gripper Toggle
+            
+            # 1. Get Inputs
+            rs_x = controller_state.get("right_stick_x", 0)
+            rs_y = controller_state.get("right_stick_y", 0)
+            dpad_y = controller_state.get("dpad_y", 0)
+            btn_a = controller_state.get("button_a", 0)
+
+            # Deadzone
+            if abs(rs_x) < 0.15: rs_x = 0
+            if abs(rs_y) < 0.15: rs_y = 0
+            
+            # Rate of Change (Degrees per loop) -> Loop is ~20Hz (0.05s)
+            # Max Speed: 60 deg/sec -> 3 deg/loop
+            ARM_SPEED = 2.0 
+
+            # Update Angles
+            # Note: In Pygame, Right is +1, Down is +1 usually.
+            # Base: Right(+x) -> Increase Angle
+            # Shoulder: Up(-y) -> Increase Angle (Lift)
+            # Elbow: Dpad Up(+1) -> Increase Angle (Open/Up)
+            
+            # Initialize static vars for arm state if not exists
+            if not hasattr(state, 'arm_angles'):
+                state.arm_angles = {'b': 90.0, 's': 90.0, 'e': 90.0, 'g': 50.0}
+                state.last_arm_send = 0
+                state.gripper_pressed = False
+
+            # Rate Integration
+            state.arm_angles['b'] += rs_x * ARM_SPEED
+            state.arm_angles['s'] -= rs_y * ARM_SPEED # Invert Y
+            state.arm_angles['e'] += dpad_y * ARM_SPEED * 2 # Faster Dpad
+            
+            # Clamp (0-180)
+            state.arm_angles['b'] = max(0, min(180, state.arm_angles['b']))
+            state.arm_angles['s'] = max(0, min(180, state.arm_angles['s']))
+            state.arm_angles['e'] = max(0, min(180, state.arm_angles['e']))
+
+            # Gripper Toggle (Latch)
+            if btn_a and not state.gripper_pressed:
+                state.gripper_pressed = True
+                state.arm_angles['g'] = 100.0 if state.arm_angles['g'] < 80 else 10.0 # Toggle Open/Close
+            elif not btn_a:
+                state.gripper_pressed = False
+
+            # Send Packet (Throttled to 10Hz to save bandwidth, or if changed)
+            now = time.time()
+            if now - state.last_arm_send > 0.1: # 10Hz
+                send_robot_packet(0x03, '<ffff', (
+                    state.arm_angles['b'], 
+                    state.arm_angles['s'], 
+                    state.arm_angles['e'], 
+                    state.arm_angles['g']
+                ))
+                state.last_arm_send = now
 
             # Emit to UI
             try:
