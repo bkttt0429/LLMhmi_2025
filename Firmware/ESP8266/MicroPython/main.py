@@ -53,13 +53,18 @@ while True:
         # Packet Validation (Min Size: 2+1+12+2 = 17 bytes)
         if len(data) >= 17 and data[0:2] == HEADER:
             
+            # Dynamic Parsing based on Packet Length
+            pkt_len = len(data)
+            payload_len = pkt_len - 5 # Header(2) + Cmd(1) + CRC(2)
+            
             # Extract Components
             cmd_id = data[2]
-            payload = data[3:15] # 12 Bytes
-            rx_crc = struct.unpack('<H', data[15:17])[0]
+            payload = data[3 : 3+payload_len]
+            rx_crc = struct.unpack('<H', data[pkt_len-2 : pkt_len])[0]
             
             # Verify CRC (Calc over Header+Cmd+Payload)
-            calc_crc = calculate_crc(data[0:15])
+            # Calculate over all bytes EXCEPT the last 2 (CRC)
+            calc_crc = calculate_crc(data[0 : pkt_len-2])
             
             if calc_crc == rx_crc:
                 last_packet = now
