@@ -339,7 +339,8 @@ function onWindowResize() {
 }
 
 // ==================== PHYSICS ENGINE (Base Servo) ====================
-// Handles Acceleration (Ramp) and Reversal Dead-time
+// [DISABLED] Physics engine removed in favor of direct Rate Control in gamepad.js
+/*
 const basePhysics = {
     current: 90,       // Current PWM (90 = Stop)
     target: 90,        // Target PWM based on input (from Gamepad)
@@ -411,8 +412,11 @@ function updateBasePhysics() {
     // Export to Global for sendArmData
     window.baseCommandOverride = Math.round(basePhysics.current);
 }
+*/
 
 // ==================== GAMEPAD LOGIC ====================
+// [DISABLED] Moved to gamepad.js (RobotArmController)
+/*
 // ⭐ Updated for Continuous Rotation and Fixed Speed
 window.updateRobotArmFromGamepad = (gp) => {
     if (!gp) return;
@@ -467,6 +471,7 @@ window.updateRobotArmFromGamepad = (gp) => {
     window.targetShoulderAngle = Math.max(-1.57, Math.min(1.57, window.targetShoulderAngle));
     window.targetElbowAngle = Math.max(-1.57, Math.min(1.57, window.targetElbowAngle));
 };
+*/
 
 function setHighlight(obj, active, color) {
     if (!obj) return;
@@ -483,6 +488,8 @@ function setHighlight(obj, active, color) {
 }
 
 // ==================== NETWORK LOGIC ====================
+// [DISABLED] Network logic moved to gamepad.js (WebSocket)
+/*
 // Helper: Radians to Servo Degrees (0-180)
 function toServo(rad) {
     // 0 rad = 90 deg. -1.57 = 0 deg. 1.57 = 180 deg.
@@ -534,12 +541,13 @@ function sendArmData() {
 
 // Start Network Loop
 setInterval(sendArmData, SEND_INTERVAL);
+*/
 
 // Exports
 window.initRobot3D = initRobot3D;
 window.resetRobotArm = () => {
     window.targetBaseAngle = 0; window.targetShoulderAngle = 0; window.targetElbowAngle = 0;
-    window.baseCommandOverride = 90;
-    basePhysics.current = 90;
-    basePhysics.target = 90;
+    // window.baseCommandOverride = 90;
+    // basePhysics.current = 90;
+    // basePhysics.target = 90;
 };

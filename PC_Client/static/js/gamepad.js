@@ -299,16 +299,31 @@ class RobotArmController {
         // Only send if changed? Or periodic?
         // Periodic is safer for UDP stream
         this.send();
+        // Update Visualization Globals (Sync with robot_arm.js 3D model)
+        // Convert Degrees (0-180) to Radians (-PI/2 to +PI/2) for 3D Model
+        if (typeof window.targetBaseAngle !== 'undefined') {
+            window.targetBaseAngle = (this.angles.base - 90) * (Math.PI / 180);
+            window.targetShoulderAngle = (this.angles.shoulder - 90) * (Math.PI / 180);
+            window.targetElbowAngle = (this.angles.elbow - 90) * (Math.PI / 180);
+        }
+
+        // Send Command via WebSocket
+        if (now - this.lastSent > this.sendInterval) {
+            if (window.socket && window.wsConnected) {
+                const payload = {
+                    base: Math.round(this.angles.base),
+                    shoulder: Math.round(this.angles.shoulder),
+                    elbow: Math.round(this.angles.elbow),
+                    gripper: Math.round(this.angles.gripper)
+                };
+                window.socket.emit('arm_command', payload);
+                this.lastSent = now;
+            }
+        }
     }
 
     send() {
         if (window.socket && window.wsConnected) {
-            window.socket.emit('arm_command', {
-                base: Math.round(this.angles.base),
-                shoulder: Math.round(this.angles.shoulder),
-                elbow: Math.round(this.angles.elbow),
-                gripper: Math.round(this.angles.gripper)
-            });
             // Update UI
             const display = document.getElementById('arm-status');
             if (display) display.innerText = `B:${this.angles.base.toFixed(0)} S:${this.angles.shoulder.toFixed(0)} E:${this.angles.elbow.toFixed(0)}`;
