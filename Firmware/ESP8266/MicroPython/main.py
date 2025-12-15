@@ -65,7 +65,7 @@ while True:
                 last_packet = now
                 
                 # Command Dispatch
-                elif cmd_id == CMD_MOVE:
+                if cmd_id == CMD_MOVE:
                     # Unpack X, Y, Z (3 Floats)
                     x, y, z = struct.unpack('<fff', payload)
                     robot.move_to(x, y, z)

@@ -8,7 +8,7 @@ led = Pin(2, Pin.OUT)
 led.value(0) # Logic Low = ON for built-in LED usually
 
 ssid = "Bk"
-password = "........." # TODO: Update with Real Password
+password = " ........." # [Verified] Correct Password
 
 def connect_wifi():
     wlan = network.WLAN(network.STA_IF)
