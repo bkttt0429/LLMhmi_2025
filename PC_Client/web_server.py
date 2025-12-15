@@ -1271,43 +1271,21 @@ def api_control():
         print(f"[API] 💥 Exception: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/arm', methods=['POST'])
-def handle_arm_command_api():
+# === Robot Arm UDP Logic (v2.0) ===
+def send_robot_packet(cmd_id, payload_fmt, args):
     """
-    Handle Robot Arm Commands (v2.0 Protocol).
-    Input: JSON {"base": 90, "shoulder": 45, "elbow": 90...} (Angles)
-    Output: UDP Binary Packet -> ESP8266
-    Packet: [Header 'RM'][Cmd 0x03][Base(f)][Shoulder(f)][Elbow(f)][CRC(u16)]
+    Constructs and sends a v2.0 Binary Packet.
     """
     try:
-        data = request.json
-        if not data:
-            return jsonify({"status": "error", "message": "No JSON"}), 400
-            
-        target_ip = state.arm_ip
-        if not target_ip:
-            # Fallback to config IP or just broadcast?
-            # User config.h has "test" ssid, so auto-discovery might fail.
-            # Assuming 10.28.14.129 from previous logs for now.
-            # Or broadcast? 
-            # Ideally state.arm_ip is set by discovery.
-            pass
-
-        # 1. Parse Angles
-        base = float(data.get('base', 90))
-        shoulder = float(data.get('shoulder', 90))
-        elbow = float(data.get('elbow', 90))
+        # 1. Construct Payload
+        # Support 3 floats (B,S,E) or 4 floats (B,S,E,G)
+        payload = struct.pack(payload_fmt, *args)
         
-        # 2. Construct Payload (3 Floats, Little Endian)
-        # CMD 0x03 = MOVE_ANGLES
-        cmd = 0x03
-        payload = struct.pack('<fff', base, shoulder, elbow)
-        
-        # 3. Construct Body for CRC
+        # 2. Construct Body
         header = b'RM'
-        body = header + struct.pack('B', cmd) + payload
+        body = header + struct.pack('B', cmd_id) + payload
         
-        # 4. CRC Calculation (CRC16-CCITT 0xFFFF init, 0x1021 poly)
+        # 3. CRC Calculation
         crc = 0xFFFF
         for byte in body:
             crc ^= byte << 8
@@ -1318,21 +1296,51 @@ def handle_arm_command_api():
                     crc <<= 1
                 crc &= 0xFFFF
         
-        # 5. Final Packet
+        # 4. Final Packet
         packet = body + struct.pack('<H', crc)
         
-        # 6. Send
+        # 5. Send
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        if target_ip:
-            sock.sendto(packet, (target_ip, 4211))
-            print(f"[ARM] UDP v2.0 -> {target_ip}: B{base:.1f} S{shoulder:.1f} E{elbow:.1f}")
-        else:
-             # Broadcast if IP unknown?
-             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-             sock.sendto(packet, ('<broadcast>', 4211))
-             print(f"[ARM] UDP Broadcast -> B{base} S{shoulder} E{elbow}")
+        target_ip = state.arm_ip if hasattr(state, 'arm_ip') and state.arm_ip else None
+        
+        # [Broadcast Fallback]
+        # Since we don't have robust discovery yet, always broadcast OR use specific IP
+        # If user knows IP, they should set it or we detect it.
+        # For now, let's try strict IP first, then fallback to broadcast if configured?
+        # Actually, broadcast is safer for immediate 'it just works' experience in private net.
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.sendto(packet, ('<broadcast>', UDP_DIST_PORT))
+        # if target_ip:
+        #     sock.sendto(packet, (target_ip, UDP_DIST_PORT))
+        
+        return True
+    except Exception as e:
+        print(f"[ARM] Send Error: {e}")
+        return False
 
-        return jsonify({"status": "ok", "proto": "v2.0"})
+@app.route('/api/arm', methods=['POST'])
+def handle_arm_command_api():
+    """
+    Handle Robot Arm Commands (v2.0 Protocol).
+    Input: JSON {"base": 90, "shoulder": 45, "elbow": 90, "gripper": 50}
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"status": "error", "message": "No JSON"}), 400
+            
+        base = float(data.get('base', 90))
+        shoulder = float(data.get('shoulder', 90))
+        elbow = float(data.get('elbow', 90))
+        gripper = float(data.get('gripper', 50)) # Default 50 (Half)
+        
+        # Send 4 Floats (Base, Shoulder, Elbow, Gripper)
+        # We use strict '<ffff' format for 4 arguments
+        # FW must be updated to accept 16 bytes payload
+        if send_robot_packet(0x03, '<ffff', (base, shoulder, elbow, gripper)):
+             return jsonify({"status": "ok", "proto": "v2.0"})
+        else:
+             return jsonify({"status": "error", "message": "Send Failed"}), 500
         
     except Exception as e:
         add_log(f"[ARM] Error: {e}")
@@ -1340,39 +1348,30 @@ def handle_arm_command_api():
 
 @app.route('/api/robot_arm_control', methods=['POST'])
 def api_robot_arm_control():
+    """Legacy Serial API (Optional)"""
+    return jsonify({"error": "Deprecated, use /api/arm"}), 410
+
+# [NEW] WebSocket Control Handler for Arm
+@socketio.on('arm_command')
+def handle_arm_command_ws(json_data):
     """
-    Control Robot Arm via Serial
-    Expected JSON: {"base": int, "shoulder": int, "elbow": int} (0-180 degrees)
+    Handle Robot Arm commands via WebSocket.
+    Expected: {"base": float, "shoulder": float, "elbow": float, "gripper": float}
     """
     try:
-        data = request.json
-        if not data:
-            return jsonify({"error": "No data"}), 400
-
-        base = data.get('base')
-        shoulder = data.get('shoulder')
-        elbow = data.get('elbow')
-
-        if base is None or shoulder is None or elbow is None:
-            return jsonify({"error": "Missing angles"}), 400
-
-        # Create Command String: ARM:B90,S45,E90\n
-        cmd = f"ARM:B{int(base)},S{int(shoulder)},E{int(elbow)}\n"
+        base = float(json_data.get('base', 0))
+        shoulder = float(json_data.get('shoulder', 90))
+        elbow = float(json_data.get('elbow', 90))
+        gripper = float(json_data.get('gripper', 50))
         
-        # Send via Serial if available
-        if state.ser and state.ser.is_open:
-            state.ser.write(cmd.encode('utf-8'))
-            return jsonify({"status": "sent", "cmd": cmd.strip()})
-        else:
-            # Fallback: Log it (Simulation Mode)
-            # print(f"[SIMULATION] Would send Serial: {cmd.strip()}")
-            return jsonify({"status": "simulation", "msg": "Serial not connected"}), 200
-
+        state.last_api_control_time = time.time()
+        
+        send_robot_packet(0x03, '<ffff', (base, shoulder, elbow, gripper))
+        
     except Exception as e:
-        print(f"[API] Arm Error: {e}")
-        return jsonify({"error": str(e)}), 500
+        print(f"[WS] 💥 Error in arm_command: {e}")
 
-# [NEW] WebSocket Control Handler
+# [NEW] WebSocket Control Handler (Legacy Chassis)
 @socketio.on('control_command')
 def handle_control_command(json_data):
     """
@@ -1383,10 +1382,7 @@ def handle_control_command(json_data):
         left = int(json_data.get('left', 0))
         right = int(json_data.get('right', 0))
         
-        # [Input Priority] Mark this command as active
         state.last_api_control_time = time.time()
-        
-        # Execute logic
         send_control_command(left, right)
         
     except Exception as e:

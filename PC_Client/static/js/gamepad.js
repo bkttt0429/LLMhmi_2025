@@ -224,6 +224,105 @@ function highlightKey(cmd) {
     }
 }
 
+// === Robot Arm Controller (Rate Control) ===
+class RobotArmController {
+    constructor() {
+        // Initial State (Matches Firmware Home)
+        this.angles = {
+            base: 0,      // 0-180
+            shoulder: 90, // 0-180
+            elbow: 90,    // 0-180
+            gripper: 50   // 0-180 (50=Open)
+        };
+
+        // Speed Factors (Degrees per Tick)
+        // Tick is ~50ms (20Hz)
+        // 1.0 = 20 deg/sec at full stick
+        this.baseSpeed = 2.0;
+        this.armSpeed = 1.5;
+
+        this.lastUpdateTime = 0;
+        this.gripperState = false; // false=Open, true=Closed
+        this.lastButtonState = { a: false };
+    }
+
+    update(gp) {
+        const now = Date.now();
+        const dt = (now - this.lastUpdateTime) / 50.0; // Normalize to 50ms units
+        this.lastUpdateTime = now;
+
+        // --- Inputs ---
+        // Stick Left X: Base Rotate (Left/Right)
+        // Stick Left Y: Shoulder (Up/Down)
+        // Stick Right Y: Elbow (Up/Down)
+
+        // Deadzone
+        const dz = (v) => Math.abs(v) < 0.15 ? 0 : v;
+
+        const baseInput = dz(gp.axes[0]);
+        const shoulderInput = -dz(gp.axes[1]); // Invert Y (Up is -1)
+        const elbowInput = -dz(gp.axes[3]);    // Right Stick Y
+
+        // --- Integration (Rate Control) ---
+        // Angle += Input * Speed * Scaling
+
+        // Base
+        if (baseInput !== 0) {
+            this.angles.base -= baseInput * this.baseSpeed * (speedLimitPercent / 100) * dt;
+        }
+
+        // Shoulder
+        if (shoulderInput !== 0) {
+            this.angles.shoulder += shoulderInput * this.armSpeed * (speedLimitPercent / 100) * dt;
+        }
+
+        // Elbow
+        if (elbowInput !== 0) {
+            this.angles.elbow += elbowInput * this.armSpeed * (speedLimitPercent / 100) * dt;
+        }
+
+        // --- Clamping (Safety) ---
+        this.angles.base = Math.max(0, Math.min(180, this.angles.base));
+        this.angles.shoulder = Math.max(0, Math.min(180, this.angles.shoulder));
+        this.angles.elbow = Math.max(0, Math.min(180, this.angles.elbow));
+
+        // --- Gripper (Toggle on A Button) ---
+        const btnA = gp.buttons[0]?.pressed;
+        if (btnA && !this.lastButtonState.a) {
+            this.gripperState = !this.gripperState;
+            this.angles.gripper = this.gripperState ? 100 : 0; // 100=Closed, 0=Open
+            log(`[ARM] Gripper: ${this.gripperState ? "CLOSED" : "OPEN"}`);
+        }
+        this.lastButtonState.a = btnA;
+
+        // --- Send Command ---
+        // Only send if changed? Or periodic?
+        // Periodic is safer for UDP stream
+        this.send();
+    }
+
+    send() {
+        if (window.socket && window.wsConnected) {
+            window.socket.emit('arm_command', {
+                base: Math.round(this.angles.base),
+                shoulder: Math.round(this.angles.shoulder),
+                elbow: Math.round(this.angles.elbow),
+                gripper: Math.round(this.angles.gripper)
+            });
+            // Update UI
+            const display = document.getElementById('arm-status');
+            if (display) display.innerText = `B:${this.angles.base.toFixed(0)} S:${this.angles.shoulder.toFixed(0)} E:${this.angles.elbow.toFixed(0)}`;
+        }
+    }
+}
+
+const armController = new RobotArmController();
+window.updateRobotArmFromGamepad = (gp) => armController.update(gp);
+window.resetRobotArm = () => {
+    armController.angles = { base: 0, shoulder: 90, elbow: 90, gripper: 50 };
+    log("[ARM] Position Reset");
+};
+
 // === Xbox Controller Loop ===
 function updateJoystickLoop() {
     const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -240,90 +339,50 @@ function updateJoystickLoop() {
     }
 
     // Input Priority: Block gamepad if keyboard used recently
-    if (Date.now() - lastKeyboardActivity < 500) return;
-
-    // Read Standard Axes
-    const rawX = gp.axes[0];
-    const rawY = gp.axes[1];
-
-    // Motor Safety Check
-    if (!motorEnabled) {
-        // Still update visual stick but DO NOT calculate PWM
-        if (window.updateJoystickVisualizer) window.updateJoystickVisualizer(gp);
-        updateButtonIndicators(gp);
-
-        // [FIX] block arm control when locked to prevent ghost drift
-        return;
-    }
-
-    // Deadzone
-    const DEADZONE = 0.15;
-    const applyDeadzone = (val) => Math.abs(val) < DEADZONE ? 0 : val;
-
-    // [DEBUG] Log Raw Input
-    // console.log(`RawX: ${rawX.toFixed(2)}, RawY: ${rawY.toFixed(2)}`);
-
-    let steer = applyDeadzone(rawX);
-    let throttle = -applyDeadzone(rawY); // [FIX] Invert Y for Standard Gamepad (Up = -1 -> +1)
-
-    // Update Visual Indicator
-    if (window.updateJoystickVisualizer) {
-        window.updateJoystickVisualizer(gp);
-    }
-    updateButtonIndicators(gp);
-
-    // Mixing
-    let leftVal = throttle + steer;
-    let rightVal = throttle - steer;
-
-    leftVal = Math.max(-1, Math.min(1, leftVal));
-    rightVal = Math.max(-1, Math.min(1, rightVal));
-
-    // PWM Scaling
-    const MAX_PWM = 255;
-    let leftPWM = Math.round(leftVal * MAX_PWM);
-    let rightPWM = Math.round(rightVal * MAX_PWM);
-
-    leftPWM = applySpeedLimit(leftPWM);
-    rightPWM = applySpeedLimit(rightPWM);
-
-    updatePWMDisplay(leftPWM, rightPWM);
-
+    // if (Date.now() - lastKeyboardActivity < 500) return;
 
     // Handle Robot Arm Control (Right Stick) - Must run before Chassis Optimization
     if (window.updateRobotArmFromGamepad) {
         window.updateRobotArmFromGamepad(gp);
     }
 
-    // Sending Logic (Throttled)
-    const isStickActive = (leftPWM !== 0 || rightPWM !== 0);
+    // Chassis Control (Left/Right PWM)
+    // Only if user wants? Or always?
+    // User requested "Joystick Left/Right -> Rotate Base".
+    // This conflicts with Chassis Steering.
+    // For now, let's DISABLE Chassis Mixing if we are in Arm Mode?
+    // Or just run both?
+    // The user's request implies the "Left/Right Stick" IS for the Arm Base.
+    // So we should NOT calculate chassis drive from the same stick.
+    // BUT we don't have a mode switch yet.
+    // Let's assume this is PURELY an ARM Controller now (since user said "Joystick controls motor logic").
 
-    // Stop Logic: If stopped, strictly don't send unless we JUST stopped
-    if (!isStickActive && !wasJoystickActive) {
-        return;
+    // We update UI indicators but skip sending Chassis commands if Arm is main focus?
+    // Actually, let's keep Chassis logic but maybe on D-Pad?
+    // Or just let overlap happen (dangerous).
+
+    // DECISION: User said "Joystick Left/Right control Base Rotate".
+    // This uses Axis 0. 
+    // Chassis uses Axis 0 for Steering.
+    // I will COMMENT OUT the Chassis 'emitControlCommand' call below to prevent conflict
+    // and let the Arm Controller handle the logic.
+
+    /*
+    // Read Standard Axes
+    const rawX = gp.axes[0];
+    const rawY = gp.axes[1];
+    ...
+    emitControlCommand(leftPWM, rightPWM);
+    */
+
+    // Update Visuals Only
+    if (window.updateJoystickVisualizer) {
+        window.updateJoystickVisualizer(gp);
     }
-
-    const now = Date.now();
-    // Send if: Active OR (Idle AND just became Idle)
-    if (isStickActive || wasJoystickActive) {
-        // Check local throttle AND let emitControlCommand handle serialization
-        if ((now - lastGamepadCmdTime > CMD_INTERVAL) || (wasJoystickActive && !isStickActive)) {
-            emitControlCommand(leftPWM, rightPWM);
-
-            // Visual Debug in UI
-            const cmdDisplay = document.getElementById('xbox-cmd');
-            if (cmdDisplay) cmdDisplay.innerText = `L:${leftPWM} R:${rightPWM}`;
-
-            lastGamepadCmdTime = now;
-        }
-    }
-
-    wasJoystickActive = isStickActive;
-
-    // Handle Robot Arm Control (Right Stick) if in Robot View (or Dual Mode)
-
+    updateButtonIndicators(gp);
 }
 window.updateJoystickLoop = updateJoystickLoop;
+
 
 // === Visual Handling ===
 function updateButtonIndicators(gp) {

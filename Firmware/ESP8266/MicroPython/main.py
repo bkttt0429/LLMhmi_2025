@@ -65,16 +65,26 @@ while True:
                 last_packet = now
                 
                 # Command Dispatch
+                # Command Dispatch
                 if cmd_id == CMD_MOVE:
-                    # Unpack X, Y, Z (3 Floats)
-                    x, y, z = struct.unpack('<fff', payload)
-                    robot.move_to(x, y, z)
+                    # Unpack X, Y, Z (3 Floats) or X, Y, Z, G (4 Floats)
+                    if len(payload) == 16:
+                        x, y, z, g = struct.unpack('<ffff', payload)
+                        robot.move_to(x, y, z, g)
+                    else:
+                        x, y, z = struct.unpack('<fff', payload)
+                        robot.move_to(x, y, z)
                     
                 elif cmd_id == 0x03: # CMD_MOVE_ANGLES
-                    # Unpack B, S, E (3 Floats)
-                    b, s, e = struct.unpack('<fff', payload)
-                    print("CMD ANGLES: " + str(b) + ", " + str(s) + ", " + str(e))
-                    robot.move_angles(b, s, e)
+                    # Unpack B, S, E (3 Floats) or B, S, E, G (4 Floats)
+                    if len(payload) == 16:
+                        b, s, e, g = struct.unpack('<ffff', payload)
+                        print("CMD ANGLES: " + str(b) + ", " + str(s) + ", " + str(e) + ", " + str(g))
+                        robot.move_angles(b, s, e, g)
+                    else:
+                        b, s, e = struct.unpack('<fff', payload)
+                        print("CMD ANGLES: " + str(b) + ", " + str(s) + ", " + str(e))
+                        robot.move_angles(b, s, e)
 
                 elif cmd_id == CMD_CALIB:
                     # Placeholder for Calibration Parameter Updates
