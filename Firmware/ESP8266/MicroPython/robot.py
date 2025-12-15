@@ -129,7 +129,7 @@ class RobotArm:
         gc.collect()
         
         # 2. Inverse Kinematics
-        print(f"[Robot] MoveTo: {x}, {y}, {z}")
+        print("[Robot] MoveTo: " + str(x) + ", " + str(y) + ", " + str(z))
         result = self.ik.solve(x, y, z)
         if not result:
             print("[Robot] Metric Unreachable!")
@@ -163,7 +163,7 @@ class RobotArm:
             
         if max_duration < 50: max_duration = 50 # Floor
         
-        print(f"[Robot] Plan: T={max_duration:.0f}ms")
+        print("[Robot] Plan: T=" + str(int(max_duration)) + "ms")
             
         # 4. Create Generators
         self.motion_generators = {}
@@ -204,7 +204,7 @@ class RobotArm:
             
         if max_duration < 50: max_duration = 50
         
-        print(f"[Robot] Angles Plan: T={max_duration:.0f}ms")
+        print("[Robot] Angles Plan: T=" + str(int(max_duration)) + "ms")
             
         # Create Generators
         self.motion_generators = {}

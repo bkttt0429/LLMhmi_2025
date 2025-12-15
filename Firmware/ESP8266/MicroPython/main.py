@@ -73,7 +73,7 @@ while True:
                 elif cmd_id == 0x03: # CMD_MOVE_ANGLES
                     # Unpack B, S, E (3 Floats)
                     b, s, e = struct.unpack('<fff', payload)
-                    print(f"CMD ANGLES: {b:.1f}, {s:.1f}, {e:.1f}")
+                    print("CMD ANGLES: " + str(b) + ", " + str(s) + ", " + str(e))
                     robot.move_angles(b, s, e)
 
                 elif cmd_id == CMD_CALIB:

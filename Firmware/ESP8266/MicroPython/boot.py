@@ -1,16 +1,12 @@
+
 import network
 import time
-from machine import Pin
 
 # === WiFi Configuration ===
 SSID = "Bk"
-PASSWORD = "........."  # 確保這裡是 9 個點（或你的實際密碼）
-MAX_RETRIES = 40  # 增加重試次數
-TIMEOUT_MS = 500  # 每次重試間隔
-
-# === LED Setup ===
-led = Pin(2, Pin.OUT)
-led.value(0)  # LED ON (indicate booting)
+PASSWORD = "........." # Correct Password
+MAX_RETRIES = 40
+TIMEOUT_MS = 500
 
 def connect_wifi():
     wlan = network.WLAN(network.STA_IF)
@@ -39,11 +35,8 @@ def connect_wifi():
             # Fatal Errors
             if status == 2:  # WRONG_PASSWORD
                 print('ERROR: Wrong password!')
-                led.value(0)  # LED ON (solid error)
                 return False
             
-            # Blink LED while connecting
-            led.value(not led.value())
             time.sleep_ms(TIMEOUT_MS)
             retry += 1
             
@@ -53,11 +46,9 @@ def connect_wifi():
         print('IP: ' + cfg[0])
         print('Gateway: ' + cfg[2])
         print('=====================')
-        led.value(1)  # LED OFF (success)
         return True
     else:
         print('\nWiFi Connection Failed!')
-        led.value(0)  # LED ON (error)
         return False
 
 # Execute
