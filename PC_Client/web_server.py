@@ -353,6 +353,7 @@ class SystemState:
         self.arm_ip = None  # [Reset] Discovery will fill this
         self.video_url = _build_stream_url(self.camera_ip)
         self.radar_dist = 0.0
+        self.radar_vib = 0  # [NEW] Vibration Sensor State (0/1)
         self.logs = []
         self.is_running = True
         self.ai_enabled = False
@@ -460,6 +461,18 @@ ws_outbox: "SimpleQueue[str]" = SimpleQueue()
 browser_controller_state = {"data": None, "timestamp": 0.0}
 # ESP12F UDP Port
 UDP_DIST_PORT = 4211
+
+# === JOYSTICK MAPPING (Hardware Dependent) ===
+JOY_MAP = {
+    "LX": 0,
+    "LY": 1,
+    "RX": 2, 
+    "RY": 3,
+    "LT": 4, 
+    "RT": 5,
+    "DPAD_X": 0, 
+    "DPAD_Y": 1  
+}
 
 # Multiprocessing Queues (initialized in main)
 video_cmd_queue = None
@@ -802,12 +815,27 @@ def udp_sensor_thread():
         try:
             data, addr = sock.recvfrom(1024)
             message = data.decode(errors="ignore").strip()
-            # Try to parse float distance
             try:
+                # 1. Try simple float (Legacy)
                 dist = float(message)
                 state.radar_dist = dist
             except ValueError:
-                pass
+                # 2. Try JSON (New Format with Vibration)
+                try:
+                    sensor_data = json.loads(message)
+                    
+                    if "d" in sensor_data:
+                         state.radar_dist = float(sensor_data["d"])
+                         
+                    if "v" in sensor_data:
+                         # Store Vibration State in SystemState (need to add attrs if missing)
+                         if not hasattr(state, 'radar_vib'): state.radar_vib = 0
+                         state.radar_vib = int(sensor_data["v"])
+                         
+                    # Log significant events? Or just let UI poll.
+                    
+                except:
+                    pass
         except socket.timeout:
             continue
         except Exception as e:
@@ -826,6 +854,7 @@ def status_push_thread():
                 "camera_ip": state.camera_ip,
                 "video_url": state.video_url,
                 "dist": state.radar_dist,
+                "dist_vib": getattr(state, 'radar_vib', 0), # [NEW] Vibration
                 "logs": state.logs[-30:],
                 "stream_connected": state.stream_connected,
                 "ai_status": state.ai_enabled
@@ -892,6 +921,13 @@ def discovery_listener_thread():
                     if "{" in msg:
                         try:
                             info = json.loads(msg)
+                            
+                            # [Telemetry] Sensor Data (Prioritized)
+                            if "d" in info: 
+                                state.radar_dist = float(info["d"])
+                                print(f"📡 [SENSOR] D:{state.radar_dist:.1f} V:{info.get('v',0)}")
+                            if "v" in info: state.radar_vib = int(info.get("v", 0))
+
                             if "ip" in info:
                                 # Check if this is the Camera or Arm
                                 # Currently we assume Camera sends 'ip' but Arm also sends 'ip'
@@ -915,6 +951,12 @@ def discovery_listener_thread():
                                             state.ws_client.last_connect_attempt = 0 
                                             
                             # Helper for Telemetry (Optional)
+                            if "d" in info:
+                                 state.radar_dist = float(info["d"])
+                            if "v" in info:
+                                 if not hasattr(state, 'radar_vib'): state.radar_vib = 0
+                                 state.radar_vib = int(info["v"])
+
                             # if "dist" in data: ...
                         except json.JSONDecodeError:
                             pass
@@ -1011,25 +1053,31 @@ def xbox_controller_thread():
             # D-Pad Y (or Triggers) -> Elbow
             # Button A -> Gripper Toggle
             
-            # 1. Get Inputs
-            rs_x = controller_state.get("right_stick_x", 0)
-            rs_y = controller_state.get("right_stick_y", 0)
+            # --- DEBUG: Print Raw Axes ---
+            if time.time() % 1.0 < 0.1: # Every 1s
+                axes = []
+                if controller.joystick:
+                     axes = [controller.joystick.get_axis(i) for i in range(controller.joystick.get_numaxes())]
+                print(f"[JOY RAW] {['{:.2f}'.format(x) for x in axes]}")
+
+            # --- Apply Mapping ---
+            # Safe access
+            ax_count = controller.joystick.get_numaxes() if controller.joystick else 0
+            def get_ax(idx):
+                return controller.joystick.get_axis(idx) if idx < ax_count else 0.0
+
+            # Override controller_state with mapped values
+            rs_x = get_ax(JOY_MAP["RX"])
+            rs_y = get_ax(JOY_MAP["RY"])
+            
             dpad_y = controller_state.get("dpad_y", 0)
             btn_a = controller_state.get("button_a", 0)
 
-            # Deadzone
-            if abs(rs_x) < 0.15: rs_x = 0
-            if abs(rs_y) < 0.15: rs_y = 0
-            
             # Rate of Change (Degrees per loop) -> Loop is ~20Hz (0.05s)
             # Max Speed: 60 deg/sec -> 3 deg/loop
             ARM_SPEED = 2.0 
 
             # Update Angles
-            # Note: In Pygame, Right is +1, Down is +1 usually.
-            # Base: Right(+x) -> Increase Angle
-            # Shoulder: Up(-y) -> Increase Angle (Lift)
-            # Elbow: Dpad Up(+1) -> Increase Angle (Open/Up)
             
             # Initialize static vars for arm state if not exists
             if not hasattr(state, 'arm_angles'):
@@ -1037,22 +1085,115 @@ def xbox_controller_thread():
                 state.last_arm_send = 0
                 state.gripper_pressed = False
 
-            # Rate Integration
-            state.arm_angles['b'] += rs_x * ARM_SPEED
-            state.arm_angles['s'] -= rs_y * ARM_SPEED # Invert Y
-            state.arm_angles['e'] += dpad_y * ARM_SPEED * 2 # Faster Dpad
+            # === HYBRID CONTROL LOGIC ===
             
-            # Clamp (0-180)
-            state.arm_angles['b'] = max(0, min(180, state.arm_angles['b']))
-            state.arm_angles['s'] = max(0, min(180, state.arm_angles['s']))
-            state.arm_angles['e'] = max(0, min(180, state.arm_angles['e']))
+            # === RIGHT STICK CONTROL (Base Joint) ===
+            right_stick_x = controller_state.get("right_stick_x", 0)
+
+            # Deadzone
+            DEADZONE = 0.15
+            if abs(right_stick_x) < DEADZONE:
+                right_stick_x = 0.0
+
+            # Conservative Range (Prevent hitting physical limits)
+            BASE_CENTER = 90.0
+            BASE_RANGE = 18.0  # ±18° (Safe margin: 72-108)
+
+            # Calculate Target
+            # Right Stick: -1.0 (Left) -> +1.0 (Right)
+            # Map: 90 + (-1*18) = 72 ... 90 + (1*18) = 108
+            base_target_angle = BASE_CENTER - (right_stick_x * BASE_RANGE) # Check Direction: Usually Right(X>0) -> Angle++? Let's assume Right=+
+
+            # Correction: In diff drive, usually Right is +Rotation (CW).
+            # If user wants Left Stick Left -> Base Left
+            # Let's trust user log: "Right Stick X: +0.3 -> Base Target: 100.4"
+            # So Positive Stick = Positive Angle.
+            base_target_angle = BASE_CENTER + (right_stick_x * BASE_RANGE)
+
+            # Hard Clamp (Double Safety)
+            base_target_angle = max(72.0, min(108.0, base_target_angle))
+
+            # Debug Output
+            if abs(right_stick_x) > 0.05:
+                 print(f"[GAMEPAD] Stick:{right_stick_x:+.3f} -> Base:{base_target_angle:.1f}°")
+
+            # Update State
+            state.arm_angles['b'] = base_target_angle
+                
+            # === SHOULDER CONTROL (Right Stick Y) - DIRECT MODE ===
+            # User requested "Like Base" (Direct Position Control)
+            # Center (0) -> 90
+            # Up (-1) -> 135 (Arm Up)
+            # Down (+1) -> 45 (Arm Down)
+            
+            SHOULDER_CENTER = 90.0
+            SHOULDER_RANGE = 80.0 # ±80° (Wider Range)
+            
+            rs_y = get_ax(JOY_MAP["RY"])
+            if abs(rs_y) < DEADZONE:
+                rs_y = 0.0
+                state.arm_angles['s'] = SHOULDER_CENTER # Return to center on release
+            else:
+                 # Invert Y logic: Up is usually negative on axis, we want Angle Increase
+                 state.arm_angles['s'] = SHOULDER_CENTER - (rs_y * SHOULDER_RANGE)
+
+            # Clamp Shoulder
+            state.arm_angles['s'] = max(10.0, min(170.0, state.arm_angles['s'])) # 10-170
+
+            # Debug Output
+            if abs(rs_y) > 0.05:
+                 print(f"[GAMEPAD] Shoulder Stick:{rs_y:+.3f} -> Angle:{state.arm_angles['s']:.1f}°")
+
+            # === ELBOW CONTROL (Triggers) - DIRECT MODE ===
+            # L2 (LT) -> Down/In (-1)
+            # R2 (RT) -> Up/Out (+1)
+            # Combine: Val = RT - LT (Range -1 to 1)
+            
+            ELBOW_CENTER = 90.0
+            ELBOW_RANGE = 80.0 # ±80° (Wider Range)
+            
+            # Read Triggers (Axis 4 & 5)
+            # Note: Pygame triggers often range -1 (released) to 1 (pressed) OR 0 to 1.
+            # We'll assume standard 0.0 (released) to 1.0 (pressed).
+            # If they are -1 to 1, we need normalization. 
+            # Usually: val = (axis + 1) / 2  -> 0..1
+            
+            raw_lt = get_ax(JOY_MAP["LT"])
+            raw_rt = get_ax(JOY_MAP["RT"])
+            
+            # Normalize if needed (Primitive check: if valid range includes negative)
+            # For now, assuming standard 0..1 behavior or handling raw.
+            # If raw is -1..1: (x+1)/2. 
+            # Let's try raw_rt > 0 check.
+            
+            lt_val = raw_lt if raw_lt > -0.9 else 0.0 # simple deadzone/check
+            rt_val = raw_rt if raw_rt > -0.9 else 0.0
+            
+            # Refined Normalization (Standard XInput triggers are separate axes 0..1 on Linux/Mac, but Z-axis on Windows?)
+            # Pygame on Windows often maps both triggers to ONE Z-axis? 
+            # Check JOY_MAP. If LT=4, RT=5, they are separate.
+            # Let's assume 0..1.
+            
+            elbow_input = rt_val - lt_val
+            
+            state.arm_angles['e'] = ELBOW_CENTER + (elbow_input * ELBOW_RANGE)
+            state.arm_angles['e'] = max(10.0, min(170.0, state.arm_angles['e']))
+
+            # Debug Output
+            if abs(elbow_input) > 0.05:
+                 print(f"[GAMEPAD] Elbow Trig:{elbow_input:+.3f} -> Angle:{state.arm_angles['e']:.1f}°")
 
             # Gripper Toggle (Latch)
             if btn_a and not state.gripper_pressed:
                 state.gripper_pressed = True
-                state.arm_angles['g'] = 100.0 if state.arm_angles['g'] < 80 else 10.0 # Toggle Open/Close
+                # Toggle: If 50 (Open) -> 100 (Closed). If >80 -> 50.
+                if state.arm_angles['g'] < 80:
+                    state.arm_angles['g'] = 100 # Close
+                else:
+                    state.arm_angles['g'] = 50  # Open
             elif not btn_a:
                 state.gripper_pressed = False
+
 
             # Send Packet (Throttled to 10Hz to save bandwidth, or if changed)
             now = time.time()
@@ -1074,9 +1215,11 @@ def xbox_controller_thread():
             except Exception:
                 pass
 
+
         except Exception as e:
             # Catch generic errors (like Pygame video system not init) and retry
-            # print(f"[XBOX] Loop Error: {e}")
+            print(f"[XBOX] Loop Error: {e}")
+            time.sleep(1.0) # Prevent tight loop crash
             time.sleep(1)
 
         time.sleep(0.05) # ~20Hz updates
@@ -1193,6 +1336,7 @@ def api_status():
         "camera_ip": state.camera_ip,
         "video_url": state.video_url,
         "dist": state.radar_dist,
+        "dist_vib": state.radar_vib,
         "logs": state.logs[-30:],
         "stream_connected": state.stream_connected,
         "ai_status": state.ai_enabled
@@ -1503,7 +1647,7 @@ if __name__ == '__main__':
         print("[INIT] Video process disabled (DISABLE_VIDEO=1)")
 
     # Threads
-    threading.Thread(target=udp_sensor_thread, daemon=True).start()
+    # threading.Thread(target=udp_sensor_thread, daemon=True).start() # Merged into discovery_listener_thread
     threading.Thread(target=xbox_controller_thread, daemon=True).start()
     
     

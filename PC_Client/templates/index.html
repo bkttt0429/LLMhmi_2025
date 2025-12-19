@@ -111,11 +111,11 @@
         <!-- Right Column (Arm + Manual) -->
         <div class="col-right">
             <!-- Quadrant 2: Arm HMI (3D Simulation) -->
-            <div class="grid-arm-hmi cyber-border flex flex-col p-2">
+            <div class="grid-arm-hmi cyber-border flex flex-col p-2 hidden">
                 <div class="absolute top-2 left-2 text-[10px] text-gray-500 tracking-widest">3D SIMULATION</div>
 
                 <div id="canvas-3d-container"
-                    class="relative w-full max-w-[320px] aspect-square rounded border border-green-900 bg-[#1a1a1a] overflow-hidden mx-auto min-w-[250px] min-h-[250px]">
+                    class="relative w-full max-w-[320px] aspect-square rounded border border-green-900 bg-[#1a1a1a] overflow-hidden mx-auto min-w-[250px] min-h-[250px] hidden">
                     <!-- Three.js canvas will be appended here -->
                 </div>
 
@@ -132,6 +132,12 @@
             <!-- Quadrant 4: CONTROL + MANUAL (Right-Bottom) -->
             <div class="grid-manual cyber-border flex flex-col gap-2 p-3">
                 <div class="label-corner">CONTROL</div>
+
+                <!-- Radar / Vibration Display [NEW] -->
+                <div class="flex justify-between items-center bg-black/40 border border-green-900/50 p-2 rounded mb-1">
+                    <span class="text-[10px] text-gray-400">SONAR/VIB</span>
+                    <span id="dist-val" class="text-green-400 font-mono font-bold text-xs">--.-- CM</span>
+                </div>
 
                 <!-- Speed Limiter (Horizontal Layout) -->
                 <div class="control-row">

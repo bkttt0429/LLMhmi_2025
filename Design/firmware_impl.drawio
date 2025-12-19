@@ -1,86 +1,54 @@
-<mxfile host="Electron" modified="2025-12-15T02:45:00.000Z" agent="5.0" version="21.6.8" type="device">
-  <diagram id="Fw-Impl" name="Firmware Logic">
-    <mxGraphModel dx="1000" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36" version="29.2.7">
+  <diagram name="第 1 页" id="GAs_WTghYMDTeNIyuMff">
+    <mxGraphModel dx="1097" dy="555" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        
-        <mxCell id="start" value="Power On (main.py)" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="320" y="40" width="120" height="60" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-11" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1" value="(29) Boot &amp; Init WiFi" vertex="1">
+          <mxGeometry height="50" width="140" x="160" y="40" as="geometry" />
         </mxCell>
-        
-        <mxCell id="init" value="Init RobotArm &amp; WiFi" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="320" y="140" width="160" height="60" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-12" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="(30) Init GPIO (PWM)&#xa;Init UDP" vertex="1">
+          <mxGeometry height="50" width="140" x="160" y="120" as="geometry" />
         </mxCell>
-        <mxCell id="edge_1" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="start" target="init">
-           <mxGeometry relative="1" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-13" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="(31) Start WebService&#xa;(Async Entry)" vertex="1">
+          <mxGeometry height="50" width="140" x="160" y="200" as="geometry" />
         </mxCell>
-
-        <mxCell id="loop" value="Loop (100Hz)" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="340" y="240" width="120" height="80" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-14" parent="1" style="rounded=0;whiteSpace=wrap;html=1;;rhombus;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="(32) Loop" vertex="1">
+          <mxGeometry height="80" width="80" x="190" y="280" as="geometry" />
         </mxCell>
-        <mxCell id="edge_2" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="init" target="loop">
-           <mxGeometry relative="1" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-15" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" value="(33) Handle Request&#xa;/cmd?kw=val" vertex="1">
+          <mxGeometry height="50" width="140" x="40" y="380" as="geometry" />
         </mxCell>
-
-        <!-- UDP Branch -->
-        <mxCell id="udp_recv" value="Rx UDP Packet?" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;" vertex="1" parent="1">
-          <mxGeometry x="160" y="320" width="120" height="60" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-16" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="(34) Write PWM&#xa;(analogWrite)" vertex="1">
+          <mxGeometry height="50" width="140" x="40" y="460" as="geometry" />
         </mxCell>
-        <mxCell id="edge_3" value="Check" style="endArrow=classic;html=1;exitX=0;exitY=0.5;" edge="1" parent="1" source="loop" target="udp_recv">
-           <mxGeometry relative="1" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-17" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="(35) Read Sonar&#xa;(PulseIn)" vertex="1">
+          <mxGeometry height="50" width="140" x="280" y="380" as="geometry" />
         </mxCell>
-
-        <mxCell id="parse_cmd" value="Parse CMD ID" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="160" y="420" width="120" height="80" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-18" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="(36) UDP Broadcast" vertex="1">
+          <mxGeometry height="50" width="140" x="280" y="460" as="geometry" />
         </mxCell>
-        <mxCell id="edge_4" value="Yes" style="endArrow=classic;html=1;" edge="1" parent="1" source="udp_recv" target="parse_cmd">
-           <mxGeometry relative="1" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-19" edge="1" parent="1" source="IOW3KgOyZm-RGkOTP1-V-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="IOW3KgOyZm-RGkOTP1-V-12" value="">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
-
-        <mxCell id="cmd_01" value="CMD 01: Move XYZ" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="40" y="540" width="100" height="40" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-20" edge="1" parent="1" source="IOW3KgOyZm-RGkOTP1-V-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="IOW3KgOyZm-RGkOTP1-V-13" value="">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="cmd_03" value="CMD 03: Angles" style="rounded=0;whiteSpace=wrap;html=1;fontStyle=1" vertex="1" parent="1">
-          <mxGeometry x="170" y="540" width="100" height="40" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-21" edge="1" parent="1" source="IOW3KgOyZm-RGkOTP1-V-13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="IOW3KgOyZm-RGkOTP1-V-14" value="">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        
-        <mxCell id="edge_5" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="parse_cmd" target="cmd_01">
-           <mxGeometry relative="1" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-22" edge="1" parent="1" source="IOW3KgOyZm-RGkOTP1-V-14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="IOW3KgOyZm-RGkOTP1-V-15" value="Client Req?">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="edge_6" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="parse_cmd" target="cmd_03">
-           <mxGeometry relative="1" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-23" edge="1" parent="1" source="IOW3KgOyZm-RGkOTP1-V-14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="IOW3KgOyZm-RGkOTP1-V-17" value="Every 100ms">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
-
-        <!-- Motion Update Branch -->
-        <mxCell id="update" value="robot.update()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;" vertex="1" parent="1">
-          <mxGeometry x="480" y="320" width="120" height="60" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-24" edge="1" parent="1" source="IOW3KgOyZm-RGkOTP1-V-15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="IOW3KgOyZm-RGkOTP1-V-16" value="">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="edge_7" value="Every Tick" style="endArrow=classic;html=1;exitX=1;exitY=0.5;" edge="1" parent="1" source="loop" target="update">
-           <mxGeometry relative="1" as="geometry" />
+        <mxCell id="IOW3KgOyZm-RGkOTP1-V-25" edge="1" parent="1" source="IOW3KgOyZm-RGkOTP1-V-17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="IOW3KgOyZm-RGkOTP1-V-18" value="">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
-
-        <mxCell id="profiler" value="Trapezoidal Profiler&#xa;(Calculate Next Step)" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="480" y="420" width="140" height="50" as="geometry" />
-        </mxCell>
-        <mxCell id="edge_8" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="update" target="profiler">
-           <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <mxCell id="coupling" value="Mk1 Coupling&#xa;q3 = q3 + (q2-90)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1" vertex="1" parent="1">
-          <mxGeometry x="480" y="500" width="140" height="50" as="geometry" />
-        </mxCell>
-        <mxCell id="edge_9" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="profiler" target="coupling">
-           <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        
-        <mxCell id="servo" value="Set PWM Duty" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="480" y="580" width="140" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="edge_10" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="coupling" target="servo">
-           <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
       </root>
     </mxGraphModel>
   </diagram>

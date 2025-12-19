@@ -126,13 +126,13 @@ python -m esptool --port COM12 erase_flash
 python -m esptool --port COM12 --baud 460800 write_flash --flash_size=detect 0 ESP8266_GENERIC-20251209-v1.27.0.bin
 
 # 4. Verify System
-ampy --port COM12 ls
+ampy --port COM9 ls
 # Output should be: /boot.py
 
 # 5. Upload Firmware v2.0
-ampy --port COM12 put config.json
-ampy --port COM12 put kinematics.py
-ampy --port COM12 put robot.py
-ampy --port COM12 put main.py
-ampy --port COM12 reset
+ampy --port COM9 put config.json
+ampy --port COM9 put kinematics.py
+ampy --port COM9 put robot.py
+ampy --port COM9 put main.py
+ampy --port COM9 reset
 ```

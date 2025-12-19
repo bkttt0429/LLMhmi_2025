@@ -105,9 +105,17 @@ function updateUI(data) {
     }
 
     // Update Distance
+    // Update Distance
     const distVal = document.getElementById('dist-val');
     if (distVal && data.dist !== undefined) {
-        distVal.innerText = data.dist.toFixed(2) + " CM";
+        let text = data.dist.toFixed(2) + " CM";
+        if (data.dist_vib === 1) {
+            text += " ⚠️ SHAKE!";
+            distVal.className = "text-red-500 font-bold animate-pulse";
+        } else {
+            distVal.className = "text-green-400";
+        }
+        distVal.innerText = text;
     }
 
     // Logs
